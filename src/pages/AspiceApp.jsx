@@ -805,6 +805,11 @@ function xmlCover(project, wps, date) {
 }
 
 // ── 전체 문서 XML 조립 ────────────────────────────────────────────────────────
+function xmlTOC() {
+  return `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>목차 (Table of Contents)</w:t></w:r></w:p>
+<w:p><w:r><w:t>&#x203B; Word에서 "참조 &gt; 목차 &gt; 자동 목차"를 선택하여 목차를 생성하실 수 있습니다.</w:t></w:r></w:p>`;
+}
+
 function buildDocumentXml(project, wps) {
   const date = new Date().toLocaleDateString("ko-KR");
   const sysMap = {};
