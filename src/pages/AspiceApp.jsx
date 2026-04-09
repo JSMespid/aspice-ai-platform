@@ -180,120 +180,222 @@ async function apiCall(path, method = "GET", body = null) {
   return res.json();
 }
 
-// ── 다운로드 유틸 (Word .docx) ──────────────────────────────────────────────
-// docxjs CDN을 통해 브라우저에서 직접 .docx 생성
-async function loadDocx() {
-  // 이미 로드된 경우
-  const candidates = [window.docx, window.Docx, window.DOCX];
-  for (const c of candidates) {
-    if (c && c.Document && c.Packer) return c;
-  }
-  // CDN에서 로드
-  await new Promise((resolve, reject) => {
-    const s = document.createElement("script");
-    // jsdelivr CDN (UMD 번들, window.docx 에 노출)
-    s.src = "https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.js";
-    s.onload = resolve;
-    s.onerror = () => {
-      // fallback: unpkg
-      const s2 = document.createElement("script");
-      s2.src = "https://unpkg.com/docx@8.5.0/build/index.js";
-      s2.onload = resolve;
-      s2.onerror = reject;
-      document.head.appendChild(s2);
-    };
-    document.head.appendChild(s);
-  });
-  // 로드 후 다시 탐색
-  for (const c of [window.docx, window.Docx, window.DOCX]) {
-    if (c && c.Document && c.Packer) return c;
-  }
-  // UMD가 전역에 없는 경우 — 직접 require 시도
-  if (typeof require !== "undefined") {
-    try { return require("docx"); } catch {}
-  }
-  throw new Error("docx 라이브러리 로드 실패. 네트워크 연결을 확인하세요.");
+// ── Word (.docx) 다운로드 ────────────────────────────────────────────────────
+// 외부 라이브러리 없이 브라우저 내장 API로 .docx(ZIP+XML) 직접 생성
+
+function escXml(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
-async function downloadWordSingle(wpContent, project, proc) {
-  const docxLib = await loadDocx();
-  const Document = docxLib.Document;
-  const Packer = docxLib.Packer;
-  const Paragraph = docxLib.Paragraph;
-  const TextRun = docxLib.TextRun;
-  const Table = docxLib.Table;
-  const TableRow = docxLib.TableRow;
-  const TableCell = docxLib.TableCell;
-  const HeadingLevel = docxLib.HeadingLevel;
-  const AlignmentType = docxLib.AlignmentType;
-  const BorderStyle = docxLib.BorderStyle;
-  const WidthType = docxLib.WidthType;
-  const ShadingType = docxLib.ShadingType;
-
-  const BLUE = "1E3A6E";
-  const LIGHT_BLUE = "D6E4F0";
-  const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
-  const borders = { top: border, bottom: border, left: border, right: border };
-  const cellMargins = { top: 80, bottom: 80, left: 120, right: 120 };
-
-  const makeHeading1 = (text) => new Paragraph({
-    heading: HeadingLevel.HEADING_1,
-    children: [new TextRun({ text, bold: true, size: 32, color: BLUE, font: "Arial" })],
-    spacing: { before: 320, after: 160 },
-  });
-
-  const makeHeading2 = (text) => new Paragraph({
-    heading: HeadingLevel.HEADING_2,
-    children: [new TextRun({ text, bold: true, size: 26, color: "2C5F8A", font: "Arial" })],
-    spacing: { before: 240, after: 120 },
-  });
-
-  const makeText = (text) => new Paragraph({
-    children: [new TextRun({ text: String(text || ""), size: 22, font: "Arial" })],
-    spacing: { after: 80 },
-  });
-
-  const makeInfoRow = (label, value) => new TableRow({
-    children: [
-      new TableCell({
-        borders, cellMargins: cellMargins, width: { size: 2000, type: WidthType.DXA },
-        shading: { fill: LIGHT_BLUE, type: ShadingType.CLEAR },
-        children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, size: 20, font: "Arial" })] })],
-      }),
-      new TableCell({
-        borders, cellMargins: cellMargins, width: { size: 7360, type: WidthType.DXA },
-        children: [new Paragraph({ children: [new TextRun({ text: String(value || ""), size: 20, font: "Arial" })] })],
-      }),
-    ],
-  });
-
-  const makeItemTable = (items, fields) => {
-    if (!items?.length) return [makeText("(데이터 없음)")];
-    const tables = [];
-    items.forEach((item, idx) => {
-      tables.push(new Paragraph({
-        children: [new TextRun({ text: `${idx + 1}. ${item.id || ""} ${item.title || item.name || ""}`, bold: true, size: 22, font: "Arial" })],
-        spacing: { before: 160, after: 80 },
-      }));
-      const rows = fields
-        .filter(f => item[f] !== undefined)
-        .map(f => {
-          const val = Array.isArray(item[f]) ? item[f].join(", ") : typeof item[f] === "object" ? JSON.stringify(item[f]) : String(item[f]);
-          return makeInfoRow(f, val);
+function makeDocxXml(sections) {
+  // sections: [{heading: 1|2|null, text: string, isTableHeader: bool}]
+  const body = sections.map(s => {
+    if (s.type === "h1") {
+      return `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${escXml(s.text)}</w:t></w:r></w:p>`;
+    }
+    if (s.type === "h2") {
+      return `<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>${escXml(s.text)}</w:t></w:r></w:p>`;
+    }
+    if (s.type === "table") {
+      const rows = s.rows.map(row => {
+        const cells = row.map((cell, ci) => {
+          const isHeader = s.headerRow && row === s.rows[0];
+          const fill = (isHeader || ci === 0) ? "1E3A6E" : "FFFFFF";
+          const color = (isHeader || ci === 0) ? "FFFFFF" : "000000";
+          const bold = (isHeader || ci === 0) ? "<w:b/>" : "";
+          const wVal = ci === 0 ? 2200 : 7160;
+          return `<w:tc><w:tcPr><w:tcW w:w="${wVal}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr><w:p><w:r><w:rPr>${bold}<w:color w:val="${color}"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr><w:t xml:space="preserve">${escXml(cell)}</w:t></w:r></w:p></w:tc>`;
         });
-      if (rows.length) {
-        tables.push(new Table({
-          width: { size: 9360, type: WidthType.DXA },
-          columnWidths: [2000, 7360],
-          rows,
-        }));
-      }
-      tables.push(new Paragraph({ children: [new TextRun("")], spacing: { after: 120 } }));
-    });
-    return tables;
-  };
+        return `<w:tr>${cells.join("")}</w:tr>`;
+      });
+      return `<w:tbl><w:tblPr><w:tblW w:w="9360" w:type="dxa"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:left w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:right w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/></w:tblBorders><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar></w:tblPr>${rows.join("")}</w:tbl><w:p/>`;
+    }
+    if (s.type === "pagebreak") {
+      return `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;
+    }
+    // normal paragraph
+    return `<w:p><w:r><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t xml:space="preserve">${escXml(s.text || "")}</w:t></w:r></w:p>`;
+  }).join("\n");
 
-  const sections_map = {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:o="urn:schemas-microsoft-com:office:office"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+  xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"
+  xmlns:v="urn:schemas-microsoft-com:vml"
+  xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing"
+  xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+  xmlns:w10="urn:schemas-microsoft-com:office:word"
+  xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+  xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"
+  xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"
+  xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk"
+  xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml"
+  xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+  mc:Ignorable="w14 wp14">
+<w:body>
+${body}
+<w:sectPr>
+  <w:pgSz w:w="11906" w:h="16838"/>
+  <w:pgMar w:top="1080" w:right="1080" w:bottom="1080" w:left="1080" w:header="720" w:footer="720" w:gutter="0"/>
+</w:sectPr>
+</w:body>
+</w:document>`;
+}
+
+function makeStylesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+          xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"
+          mc:Ignorable="w14"
+          xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
+  <w:docDefaults>
+    <w:rPrDefault><w:rPr>
+      <w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>
+      <w:sz w:val="22"/><w:szCs w:val="22"/>
+    </w:rPr></w:rPrDefault>
+  </w:docDefaults>
+  <w:style w:type="paragraph" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:spacing w:before="320" w:after="160"/><w:outlineLvl w:val="0"/></w:pPr>
+    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="36"/><w:szCs w:val="36"/><w:color w:val="1E3A6E"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading2">
+    <w:name w:val="heading 2"/>
+    <w:basedOn w:val="Normal"/>
+    <w:pPr><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="1"/></w:pPr>
+    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/><w:color w:val="2C5F8A"/></w:rPr>
+  </w:style>
+</w:styles>`;
+}
+
+// JSZip 없이 ZIP 생성 — fflate (브라우저 내장 가능한 초경량 라이브러리)
+// 실제로는 간단한 uncompressed ZIP 직접 생성
+function makeZip(files) {
+  // files: [{name, data: Uint8Array|string}]
+  const enc = new TextEncoder();
+  const parts = [];
+  const centralDir = [];
+  let offset = 0;
+
+  for (const file of files) {
+    const data = typeof file.data === "string" ? enc.encode(file.data) : file.data;
+    const nameBytes = enc.encode(file.name);
+    // Local file header
+    const header = new Uint8Array(30 + nameBytes.length);
+    const view = new DataView(header.buffer);
+    view.setUint32(0, 0x04034b50, true);  // signature
+    view.setUint16(4, 20, true);           // version needed
+    view.setUint16(6, 0, true);            // flags
+    view.setUint16(8, 0, true);            // compression: stored
+    view.setUint16(10, 0, true);           // mod time
+    view.setUint16(12, 0, true);           // mod date
+    // CRC32
+    const crc = crc32(data);
+    view.setUint32(14, crc, true);
+    view.setUint32(18, data.length, true); // compressed size
+    view.setUint32(22, data.length, true); // uncompressed size
+    view.setUint16(26, nameBytes.length, true);
+    view.setUint16(28, 0, true);           // extra field length
+    header.set(nameBytes, 30);
+    parts.push(header, data);
+
+    // Central directory entry
+    const cd = new Uint8Array(46 + nameBytes.length);
+    const cdView = new DataView(cd.buffer);
+    cdView.setUint32(0, 0x02014b50, true); // signature
+    cdView.setUint16(4, 20, true);
+    cdView.setUint16(6, 20, true);
+    cdView.setUint16(8, 0, true);
+    cdView.setUint16(10, 0, true);
+    cdView.setUint16(12, 0, true);
+    cdView.setUint16(14, 0, true);
+    cdView.setUint32(16, crc, true);
+    cdView.setUint32(20, data.length, true);
+    cdView.setUint32(24, data.length, true);
+    cdView.setUint16(28, nameBytes.length, true);
+    cdView.setUint16(30, 0, true);
+    cdView.setUint16(32, 0, true);
+    cdView.setUint16(34, 0, true);
+    cdView.setUint16(36, 0, true);
+    cdView.setUint32(38, 0, true);
+    cdView.setUint32(42, offset, true);
+    cd.set(nameBytes, 46);
+    centralDir.push(cd);
+
+    offset += header.length + data.length;
+  }
+
+  const cdBytes = concat(centralDir);
+  const eocd = new Uint8Array(22);
+  const eocdView = new DataView(eocd.buffer);
+  eocdView.setUint32(0, 0x06054b50, true);
+  eocdView.setUint16(4, 0, true);
+  eocdView.setUint16(6, 0, true);
+  eocdView.setUint16(8, files.length, true);
+  eocdView.setUint16(10, files.length, true);
+  eocdView.setUint32(12, cdBytes.length, true);
+  eocdView.setUint32(16, offset, true);
+  eocdView.setUint16(20, 0, true);
+
+  return concat([...parts, cdBytes, eocd]);
+}
+
+function concat(arrays) {
+  const totalLength = arrays.reduce((sum, a) => sum + a.length, 0);
+  const result = new Uint8Array(totalLength);
+  let pos = 0;
+  for (const a of arrays) { result.set(a, pos); pos += a.length; }
+  return result;
+}
+
+function crc32(data) {
+  let crc = 0xFFFFFFFF;
+  const table = crc32.table || (crc32.table = (() => {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[i] = c;
+    }
+    return t;
+  })());
+  for (let i = 0; i < data.length; i++) crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+function buildDocxSections(wpContent, project, proc) {
+  const processId = wpContent.process || proc.id;
+  const sections = [];
+
+  // 표지
+  sections.push({ type: "h1", text: wpContent.title || proc.label });
+  sections.push({ type: "table", headerRow: false, rows: [
+    ["프로젝트", project.name],
+    ["도메인", project.domain],
+    ["프로세스", processId],
+    ["생성일", new Date().toLocaleDateString("ko-KR")],
+  ]});
+  sections.push({ type: "normal", text: "" });
+
+  // Summary
+  if (wpContent.summary && Object.keys(wpContent.summary).length) {
+    sections.push({ type: "h2", text: "Summary" });
+    sections.push({ type: "table", headerRow: false, rows: Object.entries(wpContent.summary).map(([k, v]) => [k.replace(/_/g, " "), String(v)]) });
+    sections.push({ type: "normal", text: "" });
+  }
+
+  const sectMap = {
     "SYS.1": [
       { key: "needs", label: "Needs", fields: ["id", "description", "source"] },
       { key: "requirements", label: "Stakeholder Requirements", fields: ["id", "title", "description", "priority", "acceptance_criteria", "stability"] },
@@ -305,200 +407,91 @@ async function downloadWordSingle(wpContent, project, proc) {
       { key: "traceability", label: "Traceability", fields: ["from", "to", "type"] },
     ],
     "SYS.3": [
-      { key: "system_elements", label: "System Elements", fields: ["id", "name", "type", "description", "allocated_requirements", "interfaces"] },
-      { key: "interfaces", label: "Interfaces", fields: ["id", "name", "source", "target", "type", "protocol", "specification"] },
+      { key: "system_elements", label: "System Elements", fields: ["id", "name", "type", "description", "allocated_requirements"] },
+      { key: "interfaces", label: "Interfaces", fields: ["id", "name", "source", "target", "type", "protocol"] },
       { key: "allocation_matrix", label: "Allocation Matrix", fields: ["req_id", "element_id", "rationale"] },
     ],
     "SYS.4": [
-      { key: "test_cases", label: "Integration Test Cases", fields: ["id", "title", "objective", "primary_target", "integrated_elements", "related_sys_req", "precondition", "test_steps", "expected_result", "pass_criteria"] },
+      { key: "test_cases", label: "Integration Test Cases", fields: ["id", "title", "objective", "integrated_elements", "test_steps", "expected_result", "pass_criteria"] },
     ],
     "SYS.5": [
-      { key: "test_cases", label: "Qualification Test Cases", fields: ["id", "title", "objective", "system_requirements", "reference_stk_req", "verification_criteria", "test_environment", "test_steps", "expected_result", "pass_criteria", "test_type"] },
+      { key: "test_cases", label: "Qualification Test Cases", fields: ["id", "title", "objective", "system_requirements", "verification_criteria", "test_environment", "test_steps", "pass_criteria", "test_type"] },
     ],
   };
 
-  const processId = wpContent.process || proc.id;
-  const children = [
-    // 커버 헤더
-    new Paragraph({
-      children: [new TextRun({ text: "ASPICE 4.0 산출물", size: 20, color: "666666", font: "Arial" })],
-      spacing: { after: 80 },
-    }),
-    makeHeading1(wpContent.title || proc.label),
-    new Paragraph({
-      border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: "1E3A6E", space: 1 } },
-      spacing: { after: 200 },
-    }),
-    // 메타 정보 테이블
-    new Table({
-      width: { size: 9360, type: WidthType.DXA },
-      columnWidths: [2000, 7360],
-      rows: [
-        makeInfoRow("프로젝트", project.name),
-        makeInfoRow("도메인", project.domain),
-        makeInfoRow("프로세스", `${processId}`),
-        makeInfoRow("생성일", new Date().toLocaleDateString("ko-KR")),
-      ],
-    }),
-    new Paragraph({ children: [new TextRun("")], spacing: { after: 320 } }),
-  ];
-
-  // Summary
-  if (wpContent.summary) {
-    children.push(makeHeading2("Summary"));
-    const sumRows = Object.entries(wpContent.summary).map(([k, v]) => makeInfoRow(k.replace(/_/g, " "), String(v)));
-    children.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: [2000, 7360], rows: sumRows }));
-    children.push(new Paragraph({ children: [new TextRun("")], spacing: { after: 240 } }));
+  for (const sec of (sectMap[processId] || [])) {
+    sections.push({ type: "h2", text: sec.label });
+    const items = wpContent[sec.key];
+    if (!items?.length) { sections.push({ type: "normal", text: "(데이터 없음)" }); continue; }
+    items.forEach((item, idx) => {
+      sections.push({ type: "normal", text: `${idx + 1}. ${item.id || ""} ${item.title || item.name || ""}` });
+      const rows = sec.fields
+        .filter(f => item[f] !== undefined && item[f] !== null && item[f] !== "")
+        .map(f => {
+          const val = Array.isArray(item[f]) ? item[f].join(", ") : typeof item[f] === "object" ? JSON.stringify(item[f]) : String(item[f]);
+          return [f, val];
+        });
+      if (rows.length) sections.push({ type: "table", headerRow: false, rows });
+      sections.push({ type: "normal", text: "" });
+    });
   }
+  return sections;
+}
 
-  // 각 섹션
-  const secs = sections_map[processId] || [];
-  for (const sec of secs) {
-    children.push(makeHeading2(sec.label));
-    children.push(...makeItemTable(wpContent[sec.key], sec.fields));
-  }
+function createDocxBlob(sections) {
+  const docXml = makeDocxXml(sections);
+  const stylesXml = makeStylesXml();
+  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`;
+  const appRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`;
+  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>`;
 
-  const doc = new Document({
-    styles: {
-      default: { document: { run: { font: "Arial", size: 22 } } },
-      paragraphStyles: [
-        { id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true,
-          run: { size: 32, bold: true, font: "Arial" },
-          paragraph: { spacing: { before: 240, after: 160 }, outlineLevel: 0 } },
-        { id: "Heading2", name: "Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true,
-          run: { size: 26, bold: true, font: "Arial" },
-          paragraph: { spacing: { before: 200, after: 120 }, outlineLevel: 1 } },
-      ],
-    },
-    sections: [{
-      properties: {
-        page: {
-          size: { width: 11906, height: 16838 },
-          margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 },
-        },
-      },
-      children,
-    }],
-  });
+  const zipData = makeZip([
+    { name: "[Content_Types].xml", data: contentTypes },
+    { name: "_rels/.rels", data: appRels },
+    { name: "word/document.xml", data: docXml },
+    { name: "word/styles.xml", data: stylesXml },
+    { name: "word/_rels/document.xml.rels", data: relsXml },
+  ]);
 
-  const buffer = await Packer.toBuffer(doc);
-  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  return new Blob([zipData], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+}
+
+function triggerDownload(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
-  a.download = `${project.name}_${processId}.docx`;
-  a.click();
-  URL.revokeObjectURL(url);
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function downloadWordSingle(wpContent, project, proc) {
+  const sections = buildDocxSections(wpContent, project, proc);
+  const blob = createDocxBlob(sections);
+  const processId = wpContent.process || proc.id;
+  triggerDownload(blob, `${project.name}_${processId}.docx`);
 }
 
 async function downloadWordAll(workProducts, project) {
-  const docxLib = await loadDocx();
-  const Document = docxLib.Document;
-  const Packer = docxLib.Packer;
-  const Paragraph = docxLib.Paragraph;
-  const TextRun = docxLib.TextRun;
-  const Table = docxLib.Table;
-  const TableRow = docxLib.TableRow;
-  const TableCell = docxLib.TableCell;
-  const HeadingLevel = docxLib.HeadingLevel;
-  const BorderStyle = docxLib.BorderStyle;
-  const WidthType = docxLib.WidthType;
-  const ShadingType = docxLib.ShadingType;
-  const PageBreak = docxLib.PageBreak;
-
-  const BLUE = "1E3A6E";
-  const LIGHT_BLUE = "D6E4F0";
-  const border = { style: BorderStyle.SINGLE, size: 1, color: "CCCCCC" };
-  const borders = { top: border, bottom: border, left: border, right: border };
-  const cellMargins = { top: 80, bottom: 80, left: 120, right: 120 };
-
-  const makeH1 = (text) => new Paragraph({
-    heading: HeadingLevel.HEADING_1,
-    children: [new TextRun({ text, bold: true, size: 32, color: BLUE, font: "Arial" })],
-    spacing: { before: 320, after: 160 },
-  });
-  const makeH2 = (text) => new Paragraph({
-    heading: HeadingLevel.HEADING_2,
-    children: [new TextRun({ text, bold: true, size: 26, color: "2C5F8A", font: "Arial" })],
-    spacing: { before: 240, after: 120 },
-  });
-  const makeInfoRow = (label, value) => new TableRow({
-    children: [
-      new TableCell({ borders, margins: cellMargins, width: { size: 2000, type: WidthType.DXA }, shading: { fill: LIGHT_BLUE, type: ShadingType.CLEAR }, children: [new Paragraph({ children: [new TextRun({ text: label, bold: true, size: 20, font: "Arial" })] })] }),
-      new TableCell({ borders, margins: cellMargins, width: { size: 7360, type: WidthType.DXA }, children: [new Paragraph({ children: [new TextRun({ text: String(value || ""), size: 20, font: "Arial" })] })] }),
-    ],
-  });
-  const makeItemTable = (items, fields) => {
-    if (!items?.length) return [new Paragraph({ children: [new TextRun({ text: "(데이터 없음)", size: 20, font: "Arial", color: "999999" })], spacing: { after: 80 } })];
-    const out = [];
-    items.forEach((item, idx) => {
-      out.push(new Paragraph({ children: [new TextRun({ text: `${idx + 1}. ${item.id || ""} ${item.title || item.name || ""}`, bold: true, size: 22, font: "Arial" })], spacing: { before: 160, after: 80 } }));
-      const rows = fields.filter(f => item[f] !== undefined).map(f => {
-        const val = Array.isArray(item[f]) ? item[f].join(", ") : typeof item[f] === "object" ? JSON.stringify(item[f]) : String(item[f]);
-        return makeInfoRow(f, val);
-      });
-      if (rows.length) out.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: [2000, 7360], rows }));
-      out.push(new Paragraph({ children: [new TextRun("")], spacing: { after: 120 } }));
-    });
-    return out;
-  };
-
-  const sections_map = {
-    "SYS.1": [{ key: "needs", label: "Needs", fields: ["id", "description", "source"] }, { key: "requirements", label: "Stakeholder Requirements", fields: ["id", "title", "description", "priority", "acceptance_criteria", "stability"] }, { key: "traceability", label: "Traceability", fields: ["need_id", "req_id", "relation"] }],
-    "SYS.2": [{ key: "requirements", label: "System Requirements", fields: ["id", "title", "type", "description", "source_stk_req", "priority"] }, { key: "verification_criteria", label: "Verification Criteria", fields: ["id", "req_id", "method", "acceptance_criteria", "test_level"] }],
-    "SYS.3": [{ key: "system_elements", label: "System Elements", fields: ["id", "name", "type", "description", "allocated_requirements"] }, { key: "interfaces", label: "Interfaces", fields: ["id", "name", "source", "target", "type", "protocol"] }, { key: "allocation_matrix", label: "Allocation Matrix", fields: ["req_id", "element_id", "rationale"] }],
-    "SYS.4": [{ key: "test_cases", label: "Integration Test Cases", fields: ["id", "title", "objective", "integrated_elements", "test_steps", "expected_result", "pass_criteria"] }],
-    "SYS.5": [{ key: "test_cases", label: "Qualification Test Cases", fields: ["id", "title", "objective", "system_requirements", "verification_criteria", "test_environment", "test_steps", "pass_criteria", "test_type"] }],
-  };
-
-  const children = [
-    new Paragraph({ children: [new TextRun({ text: "ASPICE 4.0 산출물 패키지", size: 20, color: "666666", font: "Arial" })], spacing: { after: 80 } }),
-    makeH1(`${project.name} — ASPICE 산출물 전체`),
-    new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: BLUE, space: 1 } }, spacing: { after: 200 } }),
-    new Table({
-      width: { size: 9360, type: WidthType.DXA }, columnWidths: [2000, 7360],
-      rows: [makeInfoRow("프로젝트", project.name), makeInfoRow("도메인", project.domain), makeInfoRow("산출물 수", `${workProducts.length}개`), makeInfoRow("생성일", new Date().toLocaleDateString("ko-KR"))],
-    }),
-    new Paragraph({ children: [new TextRun("")], spacing: { after: 320 } }),
-  ];
-
+  const allSections = [];
   workProducts.forEach((wp, i) => {
     const proc = PROCESSES.find(p => p.id === wp.process_id);
     const wpc = wp.content || {};
-    const processId = wpc.process || proc?.id;
-    if (i > 0) children.push(new Paragraph({ children: [new PageBreak()] }));
-    children.push(makeH1(`${processId} — ${wpc.title || proc?.label}`));
-    children.push(new Paragraph({ border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: BLUE, space: 1 } }, spacing: { after: 160 } }));
-    if (wpc.summary) {
-      children.push(makeH2("Summary"));
-      children.push(new Table({ width: { size: 9360, type: WidthType.DXA }, columnWidths: [2000, 7360], rows: Object.entries(wpc.summary).map(([k, v]) => makeInfoRow(k.replace(/_/g, " "), String(v))) }));
-      children.push(new Paragraph({ children: [new TextRun("")], spacing: { after: 200 } }));
-    }
-    for (const sec of (sections_map[processId] || [])) {
-      children.push(makeH2(sec.label));
-      children.push(...makeItemTable(wpc[sec.key], sec.fields));
-    }
+    if (i > 0) allSections.push({ type: "pagebreak" });
+    allSections.push(...buildDocxSections(wpc, project, proc || { id: wp.process_id, label: wp.process_id }));
   });
-
-  const doc = new Document({
-    styles: {
-      default: { document: { run: { font: "Arial", size: 22 } } },
-      paragraphStyles: [
-        { id: "Heading1", name: "Heading 1", basedOn: "Normal", next: "Normal", quickFormat: true, run: { size: 32, bold: true, font: "Arial" }, paragraph: { spacing: { before: 240, after: 160 }, outlineLevel: 0 } },
-        { id: "Heading2", name: "Heading 2", basedOn: "Normal", next: "Normal", quickFormat: true, run: { size: 26, bold: true, font: "Arial" }, paragraph: { spacing: { before: 200, after: 120 }, outlineLevel: 1 } },
-      ],
-    },
-    sections: [{ properties: { page: { size: { width: 11906, height: 16838 }, margin: { top: 1080, right: 1080, bottom: 1080, left: 1080 } } }, children }],
-  });
-
-  const buffer = await Packer.toBuffer(doc);
-  const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `${project.name}_ASPICE_전체산출물.docx`;
-  a.click();
-  URL.revokeObjectURL(url);
+  const blob = createDocxBlob(allSections);
+  triggerDownload(blob, `${project.name}_ASPICE_전체산출물.docx`);
 }
 
 // ── 메인 앱 ───────────────────────────────────────────────────────────────────
