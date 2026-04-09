@@ -18,6 +18,16 @@ const PROCESSES = [
 const STATUS_FLOW = ["초안", "검토중", "승인됨", "거부됨"];
 
 // ── API 호출 헬퍼 ─────────────────────────────────────────────────────────────
+function safeParseJSON(raw) {
+  const text = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+  try { return JSON.parse(text); } catch {}
+  const lastClose = Math.max(text.lastIndexOf("}"), text.lastIndexOf("]"));
+  if (lastClose > 0) {
+    try { return JSON.parse(text.slice(0, lastClose + 1)); } catch {}
+  }
+  throw new Error("JSON 파싱 실패 — 다시 시도해 주세요.");
+}
+
 async function callClaude(systemMsg, userMsg, maxTokens = 8000) {
   const res = await fetch("/api/chat", {
     method: "POST",
@@ -30,21 +40,24 @@ async function callClaude(systemMsg, userMsg, maxTokens = 8000) {
     }),
   });
   const data = await res.json();
-  if (data.error) throw new Error(data.error.message || "API 오류");
+  if (data.error) throw new Error(data.error.message || String(data.error));
   const text = data.content?.map(b => b.text || "").join("") || "";
-  const cleaned = text.replace(/```json|```/g, "").trim();
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    // 잘린 JSON 복구 시도
-    const lastBrace = Math.max(cleaned.lastIndexOf("}"), cleaned.lastIndexOf("]"));
-    if (lastBrace === -1) throw new Error("JSON 파싱 실패: 응답이 너무 짧습니다. 다시 시도해 주세요.");
-    try {
-      return JSON.parse(cleaned.slice(0, lastBrace + 1));
-    } catch {
-      throw new Error("JSON 파싱 실패: 재시도해 주세요. (응답이 중간에 잘렸습니다)");
-    }
-  }
+  if (!text) throw new Error("API 응답이 비어있습니다.");
+  return safeParseJSON(text);
+}
+
+// ── Gemini QA 호출 ────────────────────────────────────────────────────────────
+async function callGeminiQA(workProduct) {
+  const prompt = `당신은 ASPICE 4.0 QA 전문가입니다. 아래 산출물을 검증하고 반드시 JSON만 응답하세요. 마크다운 없이 JSON만 출력하세요.\n\n산출물:\n${JSON.stringify(workProduct, null, 2)}\n\n다음 JSON 구조로만 응답하세요:\n{"overall_score":85,"completeness":{"score":90,"issues":[]},"consistency":{"score":80,"issues":[]},"traceability":{"score":85,"issues":[]},"issues":[{"id":"QA-001","severity":"Critical|Major|Minor|Info","category":"Completeness|Consistency|Traceability|Verifiability|Structure","description":"string","location":"string","recommendation":"string"}],"summary":{"total_issues":0,"critical":0,"major":0,"minor":0,"info":0},"recommendation":"승인 권장|수정 후 재검토|반려"}`;
+
+  const res = await fetch("/api/gemini", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return safeParseJSON(data.text || "");
 }
 
 // ── 산출물 생성 함수 ──────────────────────────────────────────────────────────
@@ -54,7 +67,7 @@ async function generateWorkProduct(processId, context, projectInfo) {
   const prompts = {
     "SYS.1": {
       system: SYS_BASE,
-      user: `Needs는 최대 5개, Requirements는 최대 7개로 제한하세요. 응답은 반드시 완전한 JSON이어야 합니다.
+      user: `Needs는 최대 5개, Requirements는 최대 6개로 제한하세요. 완전한 JSON만 출력하세요.
 프로젝트: ${projectInfo.name}, 도메인: ${projectInfo.domain}
 컨텍스트: ${context}
 
@@ -72,7 +85,7 @@ async function generateWorkProduct(processId, context, projectInfo) {
     },
     "SYS.2": {
       system: SYS_BASE,
-      user: `Requirements는 최대 8개, Verification Criteria는 최대 8개로 제한하세요. 응답은 반드시 완전한 JSON이어야 합니다.
+      user: `Requirements 최대 7개, VC 최대 7개로 제한하세요. 완전한 JSON만 출력하세요.
 프로젝트: ${projectInfo.name}, 도메인: ${projectInfo.domain}
 이해관계자 요구사항 컨텍스트: ${context}
 
@@ -92,7 +105,7 @@ async function generateWorkProduct(processId, context, projectInfo) {
     },
     "SYS.3": {
       system: SYS_BASE,
-      user: `System Elements는 최대 6개, Interfaces는 최대 6개로 제한하세요. 응답은 반드시 완전한 JSON이어야 합니다.
+      user: `Elements 최대 5개, Interfaces 최대 5개로 제한하세요. 완전한 JSON만 출력하세요.
 프로젝트: ${projectInfo.name}, 도메인: ${projectInfo.domain}
 시스템 요구사항 컨텍스트: ${context}
 
@@ -113,7 +126,7 @@ async function generateWorkProduct(processId, context, projectInfo) {
     },
     "SYS.4": {
       system: SYS_BASE,
-      user: `Test Cases는 최대 6개로 제한하세요. 응답은 반드시 완전한 JSON이어야 합니다.
+      user: `Test Cases 최대 5개로 제한하세요. 완전한 JSON만 출력하세요.
 프로젝트: ${projectInfo.name}, 도메인: ${projectInfo.domain}
 아키텍처 컨텍스트: ${context}
 
@@ -143,7 +156,7 @@ async function generateWorkProduct(processId, context, projectInfo) {
     },
     "SYS.5": {
       system: SYS_BASE,
-      user: `Test Cases는 최대 6개로 제한하세요. 응답은 반드시 완전한 JSON이어야 합니다.
+      user: `Test Cases 최대 5개로 제한하세요. 완전한 JSON만 출력하세요.
 프로젝트: ${projectInfo.name}, 도메인: ${projectInfo.domain}
 시스템 요구사항 및 검증 기준 컨텍스트: ${context}
 
@@ -176,27 +189,9 @@ async function generateWorkProduct(processId, context, projectInfo) {
   return await callClaude(p.system, p.user);
 }
 
-// ── QA 검증 함수 ──────────────────────────────────────────────────────────────
+// ── QA 검증 함수 (Gemini) ────────────────────────────────────────────────────
 async function runQACheck(workProduct) {
-  const result = await callClaude(
-    `당신은 ASPICE 4.0 QA 전문가입니다. 산출물의 품질을 검증하고 반드시 JSON만 응답하세요.`,
-    `다음 산출물을 검증하고 이슈를 식별하세요:
-${JSON.stringify(workProduct, null, 2)}
-
-다음 JSON 구조로 응답하세요:
-{
-  "overall_score": 85,
-  "completeness": {"score":90,"issues":[]},
-  "consistency": {"score":80,"issues":[]},
-  "traceability": {"score":85,"issues":[]},
-  "issues": [
-    {"id":"QA-001","severity":"Critical|Major|Minor|Info","category":"Completeness|Consistency|Traceability|Verifiability|Structure","description":"string","location":"string","recommendation":"string"}
-  ],
-  "summary": {"total_issues":0,"critical":0,"major":0,"minor":0,"info":0},
-  "recommendation": "승인 권장|수정 후 재검토|반려"
-}`
-  );
-  return result;
+  return await callGeminiQA(workProduct);
 }
 
 // ── 추적성 분석 함수 ─────────────────────────────────────────────────────────
@@ -796,7 +791,7 @@ function ReviewPage({ wps, onUpdate, nav }) {
     <div style={{ maxWidth: 1000, margin: "0 auto" }}>
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>HITL 검토 (Human-in-the-Loop)</h1>
-        <p style={{ color: T.muted, fontSize: 13 }}>AI가 생성한 산출물을 QA 검증 후 승인/거부합니다. 3단계: 제시 → QA검증 → 확정</p>
+        <p style={{ color: T.muted, fontSize: 13 }}>AI가 생성한 산출물을 QA 검증 후 승인/거부합니다. 3단계: 제시 → QA검증 → 확정 <span style={{color:T.teal,fontWeight:700}}>· QA 검증 엔진: Gemini 2.0 Flash</span></p>
       </div>
 
       <div className="grid2" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
