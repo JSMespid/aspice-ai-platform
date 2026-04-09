@@ -180,291 +180,671 @@ async function apiCall(path, method = "GET", body = null) {
   return res.json();
 }
 
-// ── Word (.docx) 다운로드 ────────────────────────────────────────────────────
-// 외부 라이브러리 없이 브라우저 내장 API로 .docx(ZIP+XML) 직접 생성
+// ── Word (.docx) 다운로드 — 누적 포함, 승인 게이팅 ──────────────────────────
 
-function escXml(str) {
+// ── XML 헬퍼 ────────────────────────────────────────────────────────────────
+function ex(str) {
   return String(str || "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-function makeDocxXml(sections) {
-  // sections: [{heading: 1|2|null, text: string, isTableHeader: bool}]
-  const body = sections.map(s => {
-    if (s.type === "h1") {
-      return `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${escXml(s.text)}</w:t></w:r></w:p>`;
-    }
-    if (s.type === "h2") {
-      return `<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>${escXml(s.text)}</w:t></w:r></w:p>`;
-    }
-    if (s.type === "table") {
-      const rows = s.rows.map(row => {
-        const cells = row.map((cell, ci) => {
-          const isHeader = s.headerRow && row === s.rows[0];
-          const fill = (isHeader || ci === 0) ? "1E3A6E" : "FFFFFF";
-          const color = (isHeader || ci === 0) ? "FFFFFF" : "000000";
-          const bold = (isHeader || ci === 0) ? "<w:b/>" : "";
-          const wVal = ci === 0 ? 2200 : 7160;
-          return `<w:tc><w:tcPr><w:tcW w:w="${wVal}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/><w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar></w:tcPr><w:p><w:r><w:rPr>${bold}<w:color w:val="${color}"/><w:sz w:val="18"/><w:szCs w:val="18"/></w:rPr><w:t xml:space="preserve">${escXml(cell)}</w:t></w:r></w:p></w:tc>`;
-        });
-        return `<w:tr>${cells.join("")}</w:tr>`;
-      });
-      return `<w:tbl><w:tblPr><w:tblW w:w="9360" w:type="dxa"/><w:tblBorders><w:top w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:left w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:right w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:insideH w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:insideV w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/></w:tblBorders><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar></w:tblPr>${rows.join("")}</w:tbl><w:p/>`;
-    }
-    if (s.type === "pagebreak") {
-      return `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;
-    }
-    // normal paragraph
-    return `<w:p><w:r><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t xml:space="preserve">${escXml(s.text || "")}</w:t></w:r></w:p>`;
-  }).join("\n");
-
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"
-  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-  xmlns:o="urn:schemas-microsoft-com:office:office"
-  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-  xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math"
-  xmlns:v="urn:schemas-microsoft-com:vml"
-  xmlns:wp14="http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing"
-  xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-  xmlns:w10="urn:schemas-microsoft-com:office:word"
-  xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-  xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"
-  xmlns:wpg="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"
-  xmlns:wpi="http://schemas.microsoft.com/office/word/2010/wordprocessingInk"
-  xmlns:wne="http://schemas.microsoft.com/office/word/2006/wordml"
-  xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
-  mc:Ignorable="w14 wp14">
-<w:body>
-${body}
-<w:sectPr>
-  <w:pgSz w:w="11906" w:h="16838"/>
-  <w:pgMar w:top="1080" w:right="1080" w:bottom="1080" w:left="1080" w:header="720" w:footer="720" w:gutter="0"/>
-</w:sectPr>
-</w:body>
-</w:document>`;
-}
-
-function makeStylesXml() {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-          xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"
-          mc:Ignorable="w14"
-          xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">
-  <w:docDefaults>
-    <w:rPrDefault><w:rPr>
-      <w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>
-      <w:sz w:val="22"/><w:szCs w:val="22"/>
-    </w:rPr></w:rPrDefault>
-  </w:docDefaults>
-  <w:style w:type="paragraph" w:styleId="Normal">
-    <w:name w:val="Normal"/>
-    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
-  </w:style>
-  <w:style w:type="paragraph" w:styleId="Heading1">
-    <w:name w:val="heading 1"/>
-    <w:basedOn w:val="Normal"/>
-    <w:pPr><w:spacing w:before="320" w:after="160"/><w:outlineLvl w:val="0"/></w:pPr>
-    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="36"/><w:szCs w:val="36"/><w:color w:val="1E3A6E"/></w:rPr>
-  </w:style>
-  <w:style w:type="paragraph" w:styleId="Heading2">
-    <w:name w:val="heading 2"/>
-    <w:basedOn w:val="Normal"/>
-    <w:pPr><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="1"/></w:pPr>
-    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/><w:color w:val="2C5F8A"/></w:rPr>
-  </w:style>
-</w:styles>`;
-}
-
-// JSZip 없이 ZIP 생성 — fflate (브라우저 내장 가능한 초경량 라이브러리)
-// 실제로는 간단한 uncompressed ZIP 직접 생성
-function makeZip(files) {
-  // files: [{name, data: Uint8Array|string}]
-  const enc = new TextEncoder();
-  const parts = [];
-  const centralDir = [];
-  let offset = 0;
-
-  for (const file of files) {
-    const data = typeof file.data === "string" ? enc.encode(file.data) : file.data;
-    const nameBytes = enc.encode(file.name);
-    // Local file header
-    const header = new Uint8Array(30 + nameBytes.length);
-    const view = new DataView(header.buffer);
-    view.setUint32(0, 0x04034b50, true);  // signature
-    view.setUint16(4, 20, true);           // version needed
-    view.setUint16(6, 0, true);            // flags
-    view.setUint16(8, 0, true);            // compression: stored
-    view.setUint16(10, 0, true);           // mod time
-    view.setUint16(12, 0, true);           // mod date
-    // CRC32
-    const crc = crc32(data);
-    view.setUint32(14, crc, true);
-    view.setUint32(18, data.length, true); // compressed size
-    view.setUint32(22, data.length, true); // uncompressed size
-    view.setUint16(26, nameBytes.length, true);
-    view.setUint16(28, 0, true);           // extra field length
-    header.set(nameBytes, 30);
-    parts.push(header, data);
-
-    // Central directory entry
-    const cd = new Uint8Array(46 + nameBytes.length);
-    const cdView = new DataView(cd.buffer);
-    cdView.setUint32(0, 0x02014b50, true); // signature
-    cdView.setUint16(4, 20, true);
-    cdView.setUint16(6, 20, true);
-    cdView.setUint16(8, 0, true);
-    cdView.setUint16(10, 0, true);
-    cdView.setUint16(12, 0, true);
-    cdView.setUint16(14, 0, true);
-    cdView.setUint32(16, crc, true);
-    cdView.setUint32(20, data.length, true);
-    cdView.setUint32(24, data.length, true);
-    cdView.setUint16(28, nameBytes.length, true);
-    cdView.setUint16(30, 0, true);
-    cdView.setUint16(32, 0, true);
-    cdView.setUint16(34, 0, true);
-    cdView.setUint16(36, 0, true);
-    cdView.setUint32(38, 0, true);
-    cdView.setUint32(42, offset, true);
-    cd.set(nameBytes, 46);
-    centralDir.push(cd);
-
-    offset += header.length + data.length;
-  }
-
-  const cdBytes = concat(centralDir);
-  const eocd = new Uint8Array(22);
-  const eocdView = new DataView(eocd.buffer);
-  eocdView.setUint32(0, 0x06054b50, true);
-  eocdView.setUint16(4, 0, true);
-  eocdView.setUint16(6, 0, true);
-  eocdView.setUint16(8, files.length, true);
-  eocdView.setUint16(10, files.length, true);
-  eocdView.setUint32(12, cdBytes.length, true);
-  eocdView.setUint32(16, offset, true);
-  eocdView.setUint16(20, 0, true);
-
-  return concat([...parts, cdBytes, eocd]);
-}
-
-function concat(arrays) {
-  const totalLength = arrays.reduce((sum, a) => sum + a.length, 0);
-  const result = new Uint8Array(totalLength);
-  let pos = 0;
-  for (const a of arrays) { result.set(a, pos); pos += a.length; }
-  return result;
-}
-
+// ── ZIP / CRC32 ──────────────────────────────────────────────────────────────
 function crc32(data) {
   let crc = 0xFFFFFFFF;
-  const table = crc32.table || (crc32.table = (() => {
-    const t = new Uint32Array(256);
+  const t = crc32._t || (crc32._t = (() => {
+    const T = new Uint32Array(256);
     for (let i = 0; i < 256; i++) {
       let c = i;
       for (let j = 0; j < 8; j++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
-      t[i] = c;
+      T[i] = c;
     }
-    return t;
+    return T;
   })());
-  for (let i = 0; i < data.length; i++) crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
+  for (let i = 0; i < data.length; i++) crc = t[(crc ^ data[i]) & 0xFF] ^ (crc >>> 8);
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
 
-function buildDocxSections(wpContent, project, proc) {
-  const processId = wpContent.process || proc.id;
-  const sections = [];
-
-  // 표지
-  sections.push({ type: "h1", text: wpContent.title || proc.label });
-  sections.push({ type: "table", headerRow: false, rows: [
-    ["프로젝트", project.name],
-    ["도메인", project.domain],
-    ["프로세스", processId],
-    ["생성일", new Date().toLocaleDateString("ko-KR")],
-  ]});
-  sections.push({ type: "normal", text: "" });
-
-  // Summary
-  if (wpContent.summary && Object.keys(wpContent.summary).length) {
-    sections.push({ type: "h2", text: "Summary" });
-    sections.push({ type: "table", headerRow: false, rows: Object.entries(wpContent.summary).map(([k, v]) => [k.replace(/_/g, " "), String(v)]) });
-    sections.push({ type: "normal", text: "" });
-  }
-
-  const sectMap = {
-    "SYS.1": [
-      { key: "needs", label: "Needs", fields: ["id", "description", "source"] },
-      { key: "requirements", label: "Stakeholder Requirements", fields: ["id", "title", "description", "priority", "acceptance_criteria", "stability"] },
-      { key: "traceability", label: "Traceability", fields: ["need_id", "req_id", "relation"] },
-    ],
-    "SYS.2": [
-      { key: "requirements", label: "System Requirements", fields: ["id", "title", "type", "description", "source_stk_req", "priority"] },
-      { key: "verification_criteria", label: "Verification Criteria", fields: ["id", "req_id", "method", "acceptance_criteria", "test_level"] },
-      { key: "traceability", label: "Traceability", fields: ["from", "to", "type"] },
-    ],
-    "SYS.3": [
-      { key: "system_elements", label: "System Elements", fields: ["id", "name", "type", "description", "allocated_requirements"] },
-      { key: "interfaces", label: "Interfaces", fields: ["id", "name", "source", "target", "type", "protocol"] },
-      { key: "allocation_matrix", label: "Allocation Matrix", fields: ["req_id", "element_id", "rationale"] },
-    ],
-    "SYS.4": [
-      { key: "test_cases", label: "Integration Test Cases", fields: ["id", "title", "objective", "integrated_elements", "test_steps", "expected_result", "pass_criteria"] },
-    ],
-    "SYS.5": [
-      { key: "test_cases", label: "Qualification Test Cases", fields: ["id", "title", "objective", "system_requirements", "verification_criteria", "test_environment", "test_steps", "pass_criteria", "test_type"] },
-    ],
-  };
-
-  for (const sec of (sectMap[processId] || [])) {
-    sections.push({ type: "h2", text: sec.label });
-    const items = wpContent[sec.key];
-    if (!items?.length) { sections.push({ type: "normal", text: "(데이터 없음)" }); continue; }
-    items.forEach((item, idx) => {
-      sections.push({ type: "normal", text: `${idx + 1}. ${item.id || ""} ${item.title || item.name || ""}` });
-      const rows = sec.fields
-        .filter(f => item[f] !== undefined && item[f] !== null && item[f] !== "")
-        .map(f => {
-          const val = Array.isArray(item[f]) ? item[f].join(", ") : typeof item[f] === "object" ? JSON.stringify(item[f]) : String(item[f]);
-          return [f, val];
-        });
-      if (rows.length) sections.push({ type: "table", headerRow: false, rows });
-      sections.push({ type: "normal", text: "" });
-    });
-  }
-  return sections;
+function concatU8(arrays) {
+  const len = arrays.reduce((s, a) => s + a.length, 0);
+  const out = new Uint8Array(len); let pos = 0;
+  for (const a of arrays) { out.set(a, pos); pos += a.length; }
+  return out;
 }
 
-function createDocxBlob(sections) {
-  const docXml = makeDocxXml(sections);
-  const stylesXml = makeStylesXml();
-  const relsXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+function makeZip(files) {
+  const enc = new TextEncoder();
+  const parts = [], cds = [];
+  let offset = 0;
+  for (const f of files) {
+    const data = typeof f.data === "string" ? enc.encode(f.data) : f.data;
+    const name = enc.encode(f.name);
+    const crc = crc32(data);
+    const lh = new Uint8Array(30 + name.length);
+    const lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true);
+    lv.setUint32(14, crc, true); lv.setUint32(18, data.length, true);
+    lv.setUint32(22, data.length, true); lv.setUint16(26, name.length, true);
+    lh.set(name, 30);
+    parts.push(lh, data);
+    const cd = new Uint8Array(46 + name.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, data.length, true);
+    cv.setUint32(24, data.length, true); cv.setUint16(28, name.length, true);
+    cv.setUint32(42, offset, true); cd.set(name, 46);
+    cds.push(cd);
+    offset += lh.length + data.length;
+  }
+  const cdBytes = concatU8(cds);
+  const eocd = new Uint8Array(22); const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(8, files.length, true);
+  ev.setUint16(10, files.length, true); ev.setUint32(12, cdBytes.length, true);
+  ev.setUint32(16, offset, true);
+  return concatU8([...parts, cdBytes, eocd]);
+}
+
+// ── DOCX XML 빌더 ────────────────────────────────────────────────────────────
+function xmlStyles() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+          xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+          xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"
+          mc:Ignorable="w14">
+<w:docDefaults><w:rPrDefault><w:rPr>
+  <w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/>
+  <w:sz w:val="22"/><w:szCs w:val="22"/>
+</w:rPr></w:rPrDefault></w:docDefaults>
+<w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+  <w:name w:val="Normal"/>
+  <w:pPr><w:spacing w:after="80"/></w:pPr>
+  <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
+</w:style>
+<w:style w:type="paragraph" w:styleId="Heading1">
+  <w:name w:val="heading 1"/><w:basedOn w:val="Normal"/>
+  <w:pPr><w:spacing w:before="400" w:after="160"/><w:outlineLvl w:val="0"/></w:pPr>
+  <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="36"/><w:szCs w:val="36"/><w:color w:val="1E3A6E"/></w:rPr>
+</w:style>
+<w:style w:type="paragraph" w:styleId="Heading2">
+  <w:name w:val="heading 2"/><w:basedOn w:val="Normal"/>
+  <w:pPr><w:spacing w:before="300" w:after="120"/><w:outlineLvl w:val="1"/></w:pPr>
+  <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="28"/><w:szCs w:val="28"/><w:color w:val="2C5F8A"/></w:rPr>
+</w:style>
+<w:style w:type="paragraph" w:styleId="Heading3">
+  <w:name w:val="heading 3"/><w:basedOn w:val="Normal"/>
+  <w:pPr><w:spacing w:before="200" w:after="80"/><w:outlineLvl w:val="2"/></w:pPr>
+  <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="24"/><w:szCs w:val="24"/><w:color w:val="1A4A7A"/></w:rPr>
+</w:style>
+<w:style w:type="paragraph" w:styleId="TOCHeading">
+  <w:name w:val="TOC Heading"/><w:basedOn w:val="Normal"/>
+  <w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr>
+  <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:sz w:val="32"/><w:color w:val="1E3A6E"/></w:rPr>
+</w:style>
+<w:style w:type="paragraph" w:styleId="TOC1">
+  <w:name w:val="toc 1"/><w:basedOn w:val="Normal"/>
+  <w:pPr><w:spacing w:after="60"/><w:ind w:left="0"/></w:pPr>
+  <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
+</w:style>
+<w:style w:type="paragraph" w:styleId="TOC2">
+  <w:name w:val="toc 2"/><w:basedOn w:val="Normal"/>
+  <w:pPr><w:spacing w:after="60"/><w:ind w:left="360"/></w:pPr>
+  <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr>
+</w:style>
+</w:styles>`;
+}
+
+function xmlNumbering() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:abstractNum w:abstractNumId="1">
+  <w:lvl w:ilvl="0">
+    <w:start w:val="1"/><w:numFmt w:val="bullet"/>
+    <w:lvlText w:val="&#x2022;"/>
+    <w:lvlJc w:val="left"/>
+    <w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr>
+    <w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
+  </w:lvl>
+</w:abstractNum>
+<w:num w:numId="1"><w:abstractNumId w:val="1"/></w:num>
+</w:numbering>`;
+}
+
+function xmlRels() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>
 </Relationships>`;
-  const appRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+}
+
+function xmlAppRels() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`;
-  const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+}
+
+function xmlContentTypes() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+  <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
 </Types>`;
+}
 
+// ── 단락/표 XML 헬퍼 ─────────────────────────────────────────────────────────
+function pBreak() {
+  return `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`;
+}
+
+function pEmpty(spacing = 120) {
+  return `<w:p><w:pPr><w:spacing w:after="${spacing}"/></w:pPr></w:p>`;
+}
+
+function pH1(text) {
+  return `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${ex(text)}</w:t></w:r></w:p>`;
+}
+
+function pH2(text) {
+  return `<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>${ex(text)}</w:t></w:r></w:p>`;
+}
+
+function pH3(text) {
+  return `<w:p><w:pPr><w:pStyle w:val="Heading3"/></w:pPr><w:r><w:t xml:space="preserve">${ex(text)}</w:t></w:r></w:p>`;
+}
+
+function pNormal(text, bold = false, color = "", size = 22) {
+  const b = bold ? "<w:b/>" : "";
+  const col = color ? `<w:color w:val="${color}"/>` : "";
+  const sz = `<w:sz w:val="${size}"/><w:szCs w:val="${size}"/>`;
+  return `<w:p><w:r><w:rPr>${b}${col}${sz}<w:rFonts w:ascii="Arial" w:hAnsi="Arial"/></w:rPr><w:t xml:space="preserve">${ex(text)}</w:t></w:r></w:p>`;
+}
+
+function pBullet(text) {
+  return `<w:p><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:spacing w:after="60"/></w:pPr><w:r><w:rPr><w:sz w:val="20"/><w:szCs w:val="20"/><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/></w:rPr><w:t xml:space="preserve">${ex(text)}</w:t></w:r></w:p>`;
+}
+
+function pHRule() {
+  return `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="1E3A6E"/></w:pBdr><w:spacing w:after="160"/></w:pPr></w:p>`;
+}
+
+// 2열 상세 표 (왼쪽=라벨 남색, 오른쪽=값)
+function tbl2col(rows, colW1 = 2400, colW2 = 6960) {
+  const bdr = `<w:top w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:left w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:right w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>`;
+  const marg = `<w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tcMar>`;
+
+  const rowsXml = rows.map(([label, value]) => {
+    // 값이 배열이거나 줄바꿈 포함 시 여러 단락으로 분리
+    const vals = String(value || "").split(/\n|\\n/).filter(Boolean);
+    const valParas = vals.map((v, i) =>
+      `<w:p><w:pPr><w:spacing w:after="${i < vals.length - 1 ? "60" : "0"}"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t xml:space="preserve">${ex(v)}</w:t></w:r></w:p>`
+    ).join("") || `<w:p><w:r><w:t></w:t></w:r></w:p>`;
+
+    return `<w:tr>
+      <w:tc>
+        <w:tcPr><w:tcW w:w="${colW1}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1E3A6E"/><w:tblCellBdr>${bdr}</w:tblCellBdr>${marg}</w:tcPr>
+        <w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="19"/><w:szCs w:val="19"/></w:rPr><w:t xml:space="preserve">${ex(label)}</w:t></w:r></w:p>
+      </w:tc>
+      <w:tc>
+        <w:tcPr><w:tcW w:w="${colW2}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F8FAFC"/><w:tblCellBdr>${bdr}</w:tblCellBdr>${marg}</w:tcPr>
+        ${valParas}
+      </w:tc>
+    </w:tr>`;
+  }).join("");
+
+  return `<w:tbl>
+    <w:tblPr>
+      <w:tblW w:w="${colW1 + colW2}" w:type="dxa"/>
+      <w:tblBorders>${bdr.replace(/>/g, ` w:insideH="single" w:insideHColor="CCCCCC"/>`).split("/></w:tblCellBdr>")[0]}</w:tblBorders>
+      <w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar>
+    </w:tblPr>
+    <w:tblGrid><w:gridCol w:w="${colW1}"/><w:gridCol w:w="${colW2}"/></w:tblGrid>
+    ${rowsXml}
+  </w:tbl>${pEmpty(160)}`;
+}
+
+// 일반 표 (헤더행 포함)
+function tblGeneral(headers, rows) {
+  const bdr = `<w:top w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:left w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:right w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>`;
+  const totalW = 9360;
+  const colW = Math.floor(totalW / headers.length);
+  const marg = `<w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar>`;
+
+  const hRow = `<w:tr>${headers.map(h =>
+    `<w:tc><w:tcPr><w:tcW w:w="${colW}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1E3A6E"/>${marg}</w:tcPr><w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="19"/></w:rPr><w:t xml:space="preserve">${ex(h)}</w:t></w:r></w:p></w:tc>`
+  ).join("")}</w:tr>`;
+
+  const dRows = rows.map((row, ri) => {
+    const fill = ri % 2 === 0 ? "FFFFFF" : "F0F4F8";
+    return `<w:tr>${row.map(cell =>
+      `<w:tc><w:tcPr><w:tcW w:w="${colW}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>${marg}</w:tcPr><w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">${ex(String(cell || ""))}</w:t></w:r></w:p></w:tc>`
+    ).join("")}</w:tr>`;
+  }).join("");
+
+  return `<w:tbl>
+    <w:tblPr><w:tblW w:w="${totalW}" w:type="dxa"/><w:tblStyle w:val="Normal"/></w:tblPr>
+    <w:tblGrid>${headers.map(() => `<w:gridCol w:w="${colW}"/>`).join("")}</w:tblGrid>
+    ${hRow}${dRows}
+  </w:tbl>${pEmpty(160)}`;
+}
+
+// 목차 (TOC 필드)
+function xmlTOC() {
+  return `<w:p><w:pPr><w:pStyle w:val="TOCHeading"/></w:pPr><w:r><w:t>목차 (Table of Contents)</w:t></w:r></w:p>
+<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>
+  <w:fldSimple w:instr=" TOC \\o &quot;1-3&quot; \\h \\z \\u ">
+    <w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr><w:t>목차를 업데이트하려면 이 필드를 우클릭 → 필드 업데이트를 선택하세요.</w:t></w:r>
+  </w:fldSimple>
+</w:p>`;
+}
+
+// ── SYS별 XML 생성 ────────────────────────────────────────────────────────────
+function xmlSYS1(c, chapNum) {
+  if (!c) return "";
+  const parts = [];
+  parts.push(pH1(`${chapNum}. SYS.1 — Stakeholder Requirements Definition`));
+  parts.push(pNormal("프로세스 목적: 고객 및 이해관계자의 Needs를 Stakeholder Requirements로 변환", false, "555555", 20));
+  parts.push(pHRule());
+
+  // 1.1 Needs
+  parts.push(pH2(`${chapNum}.1 Stakeholder Needs (입력)`));
+  (c.needs || []).forEach(n => {
+    parts.push(pBullet(`${n.id}: ${n.description}${n.source ? "  [출처: " + n.source + "]" : ""}`));
+  });
+  parts.push(pEmpty());
+
+  // 1.2 Requirements
+  parts.push(pH2(`${chapNum}.2 Stakeholder Requirements (출력)`));
+  (c.requirements || []).forEach(req => {
+    parts.push(pH3(`${req.id}: ${req.title || ""}`));
+    const rows = [
+      ["ID", req.id],
+      ["Title", req.title],
+      ["Description", req.description],
+      ["Source Needs", Array.isArray(req.source_needs) ? req.source_needs.join(", ") : req.source_needs],
+      ["Priority", req.priority],
+      ["Acceptance Criteria", req.acceptance_criteria],
+      ["Stability", req.stability],
+    ].filter(([, v]) => v !== undefined && v !== null && v !== "");
+    parts.push(tbl2col(rows));
+  });
+
+  // 1.3 Traceability
+  if (c.traceability?.length) {
+    parts.push(pH2(`${chapNum}.3 Traceability`));
+    parts.push(tblGeneral(
+      ["Need ID", "Requirement ID", "Relation"],
+      c.traceability.map(t => [t.need_id, t.req_id, t.relation])
+    ));
+  }
+
+  // Summary
+  if (c.summary) {
+    parts.push(pH2("Summary"));
+    parts.push(tbl2col(Object.entries(c.summary).map(([k, v]) => [k.replace(/_/g, " "), String(v)])));
+  }
+  return parts.join("\n");
+}
+
+function xmlSYS2(c, chapNum) {
+  if (!c) return "";
+  const parts = [];
+  parts.push(pH1(`${chapNum}. SYS.2 — System Requirements Analysis`));
+  parts.push(pNormal("프로세스 목적: Stakeholder Requirements를 System Requirements로 정제 및 검증 기준 정의", false, "555555", 20));
+  parts.push(pHRule());
+
+  const functional = (c.requirements || []).filter(r => r.type === "Functional" || r.type?.includes("unctional") || r.id?.includes("F-"));
+  const nonfunctional = (c.requirements || []).filter(r => !functional.includes(r));
+
+  const renderReqs = (reqs, label, subNum) => {
+    if (!reqs.length) return;
+    parts.push(pH2(`${chapNum}.${subNum} ${label}`));
+    reqs.forEach(req => {
+      parts.push(pH3(`${req.id}: ${req.title || ""}`));
+      const rows = [
+        ["ID", req.id], ["Title", req.title], ["Description", req.description],
+        ["Source (STK-REQ)", Array.isArray(req.source_stk_req) ? req.source_stk_req.join(", ") : req.source_stk_req],
+        ["Type", req.type], ["Priority", req.priority],
+        ["Verification Method", req.method || "Test"],
+        ["Allocated To", Array.isArray(req.allocated_to) ? req.allocated_to.join(", ") : req.allocated_to],
+        ["Relation Type", req.relation_type],
+      ].filter(([, v]) => v !== undefined && v !== null && v !== "");
+      parts.push(tbl2col(rows));
+    });
+  };
+
+  renderReqs(functional, "System Requirements (Functional)", 1);
+  renderReqs(nonfunctional, "System Requirements (Non-functional)", 2);
+
+  // Verification Criteria
+  if (c.verification_criteria?.length) {
+    parts.push(pH2(`${chapNum}.3 Verification Criteria`));
+    c.verification_criteria.forEach(vc => {
+      parts.push(pH3(`${vc.id}: [${vc.req_id}]`));
+      const rows = [
+        ["VC ID", vc.id], ["Requirement ID", vc.req_id],
+        ["Verification Method", vc.method], ["Acceptance Criteria", vc.acceptance_criteria],
+        ["Test Level", vc.test_level],
+      ].filter(([, v]) => v !== undefined && v !== null && v !== "");
+      parts.push(tbl2col(rows));
+    });
+  }
+
+  // Traceability
+  if (c.traceability?.length) {
+    parts.push(pH2(`${chapNum}.4 Traceability`));
+    parts.push(tblGeneral(["From", "To", "Type"], c.traceability.map(t => [t.from, t.to, t.type])));
+  }
+
+  if (c.summary) {
+    parts.push(pH2("Summary"));
+    parts.push(tbl2col(Object.entries(c.summary).map(([k, v]) => [k.replace(/_/g, " "), String(v)])));
+  }
+  return parts.join("\n");
+}
+
+function xmlSYS3(c, chapNum) {
+  if (!c) return "";
+  const parts = [];
+  parts.push(pH1(`${chapNum}. SYS.3 — System Architectural Design`));
+  parts.push(pNormal("프로세스 목적: System Requirements를 System Elements에 할당하고 Architecture 정의", false, "555555", 20));
+  parts.push(pHRule());
+
+  if (c.system_elements?.length) {
+    parts.push(pH2(`${chapNum}.1 System Elements`));
+    c.system_elements.forEach(se => {
+      parts.push(pH3(`${se.id}: ${se.name || ""}`));
+      const rows = [
+        ["ID", se.id], ["Name", se.name], ["Type", se.type],
+        ["Description", se.description],
+        ["Allocated Requirements", Array.isArray(se.allocated_requirements) ? se.allocated_requirements.join(", ") : se.allocated_requirements],
+        ["Interfaces", Array.isArray(se.interfaces) ? se.interfaces.join(", ") : se.interfaces],
+      ].filter(([, v]) => v !== undefined && v !== null && v !== "");
+      parts.push(tbl2col(rows));
+    });
+  }
+
+  if (c.interfaces?.length) {
+    parts.push(pH2(`${chapNum}.2 Interfaces`));
+    c.interfaces.forEach(iface => {
+      parts.push(pH3(`${iface.id}: ${iface.name || ""}`));
+      const rows = [
+        ["ID", iface.id], ["Name", iface.name],
+        ["Source", iface.source], ["Target", iface.target],
+        ["Type", iface.type], ["Protocol", iface.protocol],
+        ["Specification", iface.specification],
+      ].filter(([, v]) => v !== undefined && v !== null && v !== "");
+      parts.push(tbl2col(rows));
+    });
+  }
+
+  if (c.allocation_matrix?.length) {
+    parts.push(pH2(`${chapNum}.3 Allocation Matrix`));
+    parts.push(tblGeneral(
+      ["Requirement ID", "Element ID", "Rationale"],
+      c.allocation_matrix.map(a => [a.req_id, a.element_id, a.rationale])
+    ));
+  }
+
+  if (c.integration_strategy) {
+    parts.push(pH2(`${chapNum}.4 Integration Strategy`));
+    const is_ = c.integration_strategy;
+    parts.push(tbl2col([
+      ["Approach", is_.approach],
+      ["Phases", Array.isArray(is_.phases) ? is_.phases.join("\n") : is_.phases],
+    ].filter(([, v]) => v)));
+  }
+
+  if (c.summary) {
+    parts.push(pH2("Summary"));
+    parts.push(tbl2col(Object.entries(c.summary).map(([k, v]) => [k.replace(/_/g, " "), String(v)])));
+  }
+  return parts.join("\n");
+}
+
+function xmlSYS4(c, chapNum) {
+  if (!c) return "";
+  const parts = [];
+  parts.push(pH1(`${chapNum}. SYS.4 — System Integration Test`));
+  parts.push(pNormal("프로세스 목적: System Elements를 통합하고 Interface 및 상호작용 검증", false, "555555", 20));
+  parts.push(pHRule());
+
+  if (c.integration_strategy) {
+    parts.push(pH2(`${chapNum}.1 Integration Strategy`));
+    const is_ = c.integration_strategy;
+    const rows = [["Approach", is_.approach]];
+    if (is_.phases?.length) {
+      is_.phases.forEach((ph, i) => {
+        const label = `Phase ${i + 1}`;
+        const val = typeof ph === "object"
+          ? `${ph.phase || ""}: ${ph.description || ""} | Elements: ${(ph.elements || []).join(", ")} | Interface: ${ph.interface_verified || ""}`
+          : String(ph);
+        rows.push([label, val]);
+      });
+    }
+    parts.push(tbl2col(rows.filter(([, v]) => v)));
+    parts.push(pEmpty());
+  }
+
+  if (c.test_cases?.length) {
+    parts.push(pH2(`${chapNum}.2 Integration Test Cases`));
+    c.test_cases.forEach(tc => {
+      parts.push(pH3(`${tc.id}: ${tc.title || ""}`));
+      const target = typeof tc.primary_target === "object"
+        ? `${tc.primary_target?.interface_id || ""}: ${tc.primary_target?.description || ""}`
+        : String(tc.primary_target || "");
+      const steps = Array.isArray(tc.test_steps) ? tc.test_steps.join("\n") : String(tc.test_steps || "");
+      const rows = [
+        ["Test Case ID", tc.id], ["Title", tc.title], ["Objective", tc.objective],
+        ["Primary Target (Interface)", target],
+        ["Integrated Elements", Array.isArray(tc.integrated_elements) ? tc.integrated_elements.join(", ") : tc.integrated_elements],
+        ["Related SYS-REQ", Array.isArray(tc.related_sys_req) ? tc.related_sys_req.join(", ") : tc.related_sys_req],
+        ["Precondition", tc.precondition],
+        ["Test Steps", steps],
+        ["Expected Result", tc.expected_result],
+        ["Pass / Fail Criteria", tc.pass_criteria],
+      ].filter(([, v]) => v !== undefined && v !== null && v !== "");
+      parts.push(tbl2col(rows));
+    });
+  }
+
+  if (c.traceability?.length) {
+    parts.push(pH2(`${chapNum}.3 Traceability`));
+    parts.push(tblGeneral(
+      ["Test ID", "Primary Interface", "Elements", "Indirect SYS-REQ"],
+      c.traceability.map(t => [t.test_id, t.primary_interface, (t.elements || []).join(", "), t.indirect_req])
+    ));
+  }
+
+  if (c.summary) {
+    parts.push(pH2("Summary"));
+    parts.push(tbl2col(Object.entries(c.summary).map(([k, v]) => [k.replace(/_/g, " "), String(v)])));
+  }
+  return parts.join("\n");
+}
+
+function xmlSYS5(c, chapNum) {
+  if (!c) return "";
+  const parts = [];
+  parts.push(pH1(`${chapNum}. SYS.5 — System Qualification Test`));
+  parts.push(pNormal("프로세스 목적: 시스템이 System Requirements를 만족하는지 최종 검증", false, "555555", 20));
+  parts.push(pHRule());
+
+  if (c.test_cases?.length) {
+    parts.push(pH2(`${chapNum}.1 Qualification Test Cases`));
+    c.test_cases.forEach(tc => {
+      parts.push(pH3(`${tc.id}: ${tc.title || ""}`));
+      const steps = Array.isArray(tc.test_steps) ? tc.test_steps.join("\n") : String(tc.test_steps || "");
+      const rows = [
+        ["Test Case ID", tc.id], ["Title", tc.title], ["Objective", tc.objective],
+        ["System Requirements (Primary)", Array.isArray(tc.system_requirements) ? tc.system_requirements.join(", ") : tc.system_requirements],
+        ["Reference STK-REQ", Array.isArray(tc.reference_stk_req) ? tc.reference_stk_req.join(", ") : tc.reference_stk_req],
+        ["Verification Criteria", Array.isArray(tc.verification_criteria) ? tc.verification_criteria.join(", ") : tc.verification_criteria],
+        ["Test Environment", tc.test_environment],
+        ["Test Type", tc.test_type],
+        ["Test Steps", steps],
+        ["Expected Result", tc.expected_result],
+        ["Pass / Fail Criteria", tc.pass_criteria],
+      ].filter(([, v]) => v !== undefined && v !== null && v !== "");
+      parts.push(tbl2col(rows));
+    });
+  }
+
+  if (c.traceability?.length) {
+    parts.push(pH2(`${chapNum}.2 Traceability`));
+    parts.push(tblGeneral(
+      ["Test ID", "Primary SYS-REQ", "VC", "Reference STK-REQ"],
+      c.traceability.map(t => [t.test_id, t.primary_req, t.vc, t.reference_stk])
+    ));
+  }
+
+  if (c.coverage_analysis) {
+    parts.push(pH2(`${chapNum}.3 Coverage Analysis`));
+    parts.push(tbl2col(Object.entries(c.coverage_analysis).map(([k, v]) => [k.replace(/_/g, " "), String(v)])));
+  }
+
+  if (c.summary) {
+    parts.push(pH2("Summary"));
+    parts.push(tbl2col(Object.entries(c.summary).map(([k, v]) => [k.replace(/_/g, " "), String(v)])));
+  }
+  return parts.join("\n");
+}
+
+function xmlTraceability(wps) {
+  const parts = [];
+  parts.push(pH1("추적성 가이드라인 (Traceability Guidelines)"));
+  parts.push(pHRule());
+  parts.push(pH2("ASPICE V-Model 추적성 관계"));
+  parts.push(tblGeneral(
+    ["Development Phase", "Work Product", "Verification Phase", "Test Work Product"],
+    [
+      ["SYS.1", "Stakeholder Requirements", "Acceptance Test", "Acceptance Test Cases"],
+      ["SYS.2", "System Requirements", "SYS.5 Qualification Test", "System Test Cases ✅"],
+      ["SYS.3", "System Architecture", "SYS.4 Integration Test", "Integration Test Cases ✅"],
+    ]
+  ));
+  parts.push(pH2("각 프로세스별 추적성 대상"));
+  parts.push(pNormal("SYS.4 Integration Test 추적성", true, "1E3A6E", 22));
+  parts.push(pBullet("✅ Primary (직접 검증): Interface (IF-xxx), System Element 통합"));
+  parts.push(pBullet("⚠️ Indirect (간접 검증): System Requirements (해당 Interface/Element가 구현)"));
+  parts.push(pEmpty(80));
+  parts.push(pNormal("SYS.5 Qualification Test 추적성", true, "1E3A6E", 22));
+  parts.push(pBullet("✅ Primary (직접 검증): System Requirements (SYS-REQ-F-xxx, SYS-REQ-NF-xxx)"));
+  parts.push(pBullet("📋 Reference (참조): Stakeholder Requirements (만족도 확인용)"));
+  parts.push(pBullet("💡 Note: Stakeholder Requirements는 Acceptance Test (별도 프로세스)에서 직접 검증"));
+  return parts.join("\n");
+}
+
+function xmlGlossary() {
+  const terms = [
+    ["Interface (IF)", "시스템 요소 간 연결점 (데이터, 전원, 제어 신호 등)"],
+    ["System Element (SE)", "시스템을 구성하는 HW/SW 컴포넌트"],
+    ["Integration Test", "Interface 및 Element 통합 검증 (SYS.4)"],
+    ["Qualification Test", "System Requirements 검증 (SYS.5)"],
+    ["Acceptance Test", "Stakeholder Requirements 검증 (별도 프로세스)"],
+    ["HSI", "Hardware-Software Interface"],
+    ["Direct Traceability", "직접 검증 대상 (Primary Test Target)"],
+    ["Indirect Traceability", "간접 검증 대상 (Related Requirements)"],
+    ["V-Model", "ASPICE 개발-검증 모델 (좌측: 개발, 우측: 검증)"],
+    ["HIL", "Hardware-in-the-Loop 시뮬레이터"],
+    ["HITL", "Human-in-the-Loop (인간 검토 프로세스)"],
+    ["STK-REQ", "Stakeholder Requirement (이해관계자 요구사항)"],
+    ["SYS-REQ", "System Requirement (시스템 요구사항)"],
+    ["VC", "Verification Criteria (검증 기준)"],
+  ];
+  const parts = [];
+  parts.push(pH1("부록 A. 용어 정의 (Glossary)"));
+  parts.push(tblGeneral(["용어", "정의"], terms));
+  return parts.join("\n");
+}
+
+// ── 표지 XML ─────────────────────────────────────────────────────────────────
+function xmlCover(project, wps, date) {
+  const completedIds = wps.map(w => w.process_id).join(", ") || "진행 중";
+  return [
+    pEmpty(400),
+    `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="120"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="1E3A6E"/><w:sz w:val="52"/><w:szCs w:val="52"/><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/></w:rPr><w:t>${ex(project.name)}</w:t></w:r></w:p>`,
+    `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="80"/></w:pPr><w:r><w:rPr><w:color w:val="2C5F8A"/><w:sz w:val="28"/><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/></w:rPr><w:t>ASPICE 4.0 산출물 패키지</w:t></w:r></w:p>`,
+    `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="600"/></w:pPr><w:r><w:rPr><w:color w:val="555555"/><w:sz w:val="22"/><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/></w:rPr><w:t>SYS.1 through SYS.5 Work Products</w:t></w:r></w:p>`,
+    tbl2col([
+      ["Project", project.name],
+      ["Domain", project.domain],
+      ["Included Processes", completedIds],
+      ["Date", date],
+      ["Document Set", "ASPICE SYS.1 ~ SYS.5 Package"],
+    ], 2200, 7160),
+    pBreak(),
+  ].join("\n");
+}
+
+// ── 전체 문서 XML 조립 ────────────────────────────────────────────────────────
+function buildDocumentXml(project, wps) {
+  const date = new Date().toLocaleDateString("ko-KR");
+  const sysMap = {};
+  wps.forEach(wp => { sysMap[wp.process_id] = wp.content || {}; });
+
+  const orderedIds = ["SYS.1", "SYS.2", "SYS.3", "SYS.4", "SYS.5"].filter(id => sysMap[id]);
+
+  const bodyParts = [];
+
+  // 표지
+  bodyParts.push(xmlCover(project, wps, date));
+
+  // 목차
+  bodyParts.push(xmlTOC());
+  bodyParts.push(pBreak());
+
+  // 각 SYS 장
+  const renderers = { "SYS.1": xmlSYS1, "SYS.2": xmlSYS2, "SYS.3": xmlSYS3, "SYS.4": xmlSYS4, "SYS.5": xmlSYS5 };
+  orderedIds.forEach((id, i) => {
+    if (i > 0) bodyParts.push(pBreak());
+    bodyParts.push(renderers[id](sysMap[id], i + 1));
+  });
+
+  // 추적성 가이드라인 (2개 이상 SYS가 있을 때)
+  if (orderedIds.length >= 2) {
+    bodyParts.push(pBreak());
+    bodyParts.push(xmlTraceability(wps));
+  }
+
+  // 부록
+  bodyParts.push(pBreak());
+  bodyParts.push(xmlGlossary());
+
+  const sectPr = `<w:sectPr>
+    <w:pgSz w:w="11906" w:h="16838"/>
+    <w:pgMar w:top="1080" w:right="1080" w:bottom="1080" w:left="1260" w:header="720" w:footer="720" w:gutter="0"/>
+    <w:pgNumType w:fmt="decimal" w:start="1"/>
+  </w:sectPr>`;
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas"
+  xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+  xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+  xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml"
+  mc:Ignorable="w14">
+<w:body>
+${bodyParts.join("\n")}
+${sectPr}
+</w:body>
+</w:document>`;
+}
+
+// ── DOCX Blob 생성 ────────────────────────────────────────────────────────────
+function createDocxBlob(project, wps) {
+  const docXml = buildDocumentXml(project, wps);
   const zipData = makeZip([
-    { name: "[Content_Types].xml", data: contentTypes },
-    { name: "_rels/.rels", data: appRels },
+    { name: "[Content_Types].xml", data: xmlContentTypes() },
+    { name: "_rels/.rels", data: xmlAppRels() },
     { name: "word/document.xml", data: docXml },
-    { name: "word/styles.xml", data: stylesXml },
-    { name: "word/_rels/document.xml.rels", data: relsXml },
+    { name: "word/styles.xml", data: xmlStyles() },
+    { name: "word/numbering.xml", data: xmlNumbering() },
+    { name: "word/_rels/document.xml.rels", data: xmlRels() },
   ]);
-
   return new Blob([zipData], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
 }
 
@@ -475,22 +855,29 @@ function triggerDownload(blob, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function downloadWordSingle(wpContent, project, proc) {
-  const sections = buildDocxSections(wpContent, project, proc);
-  const blob = createDocxBlob(sections);
-  const processId = wpContent.process || proc.id;
-  triggerDownload(blob, `${project.name}_${processId}.docx`);
+// ── 공개 다운로드 함수 ────────────────────────────────────────────────────────
+// 단계별: 해당 단계까지의 승인된 산출물 누적 포함
+async function downloadWordSingle(wpContent, project, proc, allWorkProducts) {
+  // 현재 단계 인덱스
+  const PROC_ORDER = ["SYS.1", "SYS.2", "SYS.3", "SYS.4", "SYS.5"];
+  const currentIdx = PROC_ORDER.indexOf(proc.id);
+  // 현재 단계까지의 산출물 (승인 여부 무관, 존재하는 것 모두 포함)
+  const wpsUpToCurrent = (allWorkProducts || []).filter(wp => {
+    const idx = PROC_ORDER.indexOf(wp.process_id);
+    return idx >= 0 && idx <= currentIdx;
+  });
+  // 최소한 현재 산출물은 포함
+  const hasCurrentInAll = wpsUpToCurrent.some(w => w.process_id === proc.id);
+  const targetWPs = hasCurrentInAll
+    ? wpsUpToCurrent
+    : [...wpsUpToCurrent, { process_id: proc.id, content: wpContent, status: "초안" }];
+  const blob = createDocxBlob(project, targetWPs);
+  triggerDownload(blob, `${project.name}_${proc.id}_누적.docx`);
 }
 
+// 전체: 모든 완성된 산출물 포함
 async function downloadWordAll(workProducts, project) {
-  const allSections = [];
-  workProducts.forEach((wp, i) => {
-    const proc = PROCESSES.find(p => p.id === wp.process_id);
-    const wpc = wp.content || {};
-    if (i > 0) allSections.push({ type: "pagebreak" });
-    allSections.push(...buildDocxSections(wpc, project, proc || { id: wp.process_id, label: wp.process_id }));
-  });
-  const blob = createDocxBlob(allSections);
+  const blob = createDocxBlob(project, workProducts);
   triggerDownload(blob, `${project.name}_ASPICE_전체산출물.docx`);
 }
 
@@ -853,7 +1240,11 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         {PROCESSES.map((proc, idx) => {
           const wps = wpByProcess[proc.id];
-          const hasPrev = idx === 0 || wpByProcess[PROCESSES[idx - 1].id]?.length > 0;
+          // 이전 단계가 존재하고 승인됨 상태여야 다음 단계 생성 가능
+          const prevId = idx > 0 ? PROCESSES[idx - 1].id : null;
+          const prevWPs = prevId ? (wpByProcess[prevId] || []) : [];
+          const prevApproved = idx === 0 || prevWPs.some(w => w.status === "승인됨");
+          const hasPrev = idx === 0 || (prevWPs.length > 0 && prevApproved);
           const isActive = activeProcess === proc.id;
           const isGenerating = generatingId === proc.id;
 
@@ -882,7 +1273,7 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
                       <StatusBadge status={wp.status} />
                       <div style={{ display: "flex", gap: 6 }}>
                         <Btn size="sm" variant="ghost" onClick={() => setViewingWP({ wp, proc })}>보기</Btn>
-                        <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc); } catch(e) { alert("다운로드 실패: " + (e.message || e.toString())); } }}>⬇ Word</Btn>
+                        <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc, workProducts); } catch(e) { alert("다운로드 실패: " + (e.message || e.toString())); } }}>⬇ Word</Btn>
           
                         <Btn size="sm" variant="ghost" style={{ color: T.red }} onClick={() => handleDelete(wp.id)}>✕</Btn>
                       </div>
@@ -915,7 +1306,7 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
                       {wps?.length ? `+ 재생성` : `⚡ ${proc.id} 생성`}
                     </Btn>
                     {!hasPrev && idx > 0 && (
-                      <span style={{ fontSize: 11, color: T.muted, alignSelf: "center" }}>← {PROCESSES[idx - 1].id}를 먼저 생성하세요</span>
+                      <span style={{ fontSize: 11, color: T.muted, alignSelf: "center" }}>← {prevWPs.length === 0 ? `${PROCESSES[idx-1].id}를 먼저 생성하세요` : `${PROCESSES[idx-1].id} 승인 후 진행 가능합니다`}</span>
                     )}
                   </div>
                 )}
@@ -925,13 +1316,13 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
         })}
       </div>
 
-      {viewingWP && <WPDetailModal wpData={viewingWP} project={project} onClose={() => setViewingWP(null)} />}
+      {viewingWP && <WPDetailModal wpData={viewingWP} project={project} allWorkProducts={workProducts} onClose={() => setViewingWP(null)} />}
     </div>
   );
 }
 
 // ── 산출물 상세 모달 ─────────────────────────────────────────────────────────
-function WPDetailModal({ wpData, project, onClose }) {
+function WPDetailModal({ wpData, project, allWorkProducts, onClose }) {
   const { wp, proc } = wpData;
   const [tab, setTab] = useState("content");
   return (
@@ -944,7 +1335,7 @@ function WPDetailModal({ wpData, project, onClose }) {
             <StatusBadge status={wp.status} />
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc); } catch(e) { alert("다운로드 실패: " + (e.message || e.toString())); } }}>⬇ Word</Btn>
+            <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc, workProducts); } catch(e) { alert("다운로드 실패: " + (e.message || e.toString())); } }}>⬇ Word</Btn>
 
             <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 20 }}>✕</button>
           </div>
