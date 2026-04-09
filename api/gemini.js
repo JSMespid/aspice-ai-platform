@@ -34,10 +34,17 @@ export default async function handler(req, res) {
         .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
         .map(m => m.name.replace('models/', ''));
       if (found.length > 0) {
-        // flash 계열 우선
+        // tts/audio/embedding/vision 모델 제외, flash 계열 우선
+        const filtered = found.filter(m =>
+          !m.includes('tts') &&
+          !m.includes('audio') &&
+          !m.includes('embed') &&
+          !m.includes('vision') &&
+          !m.includes('aqa')
+        );
         availableModels = [
-          ...found.filter(m => m.includes('flash') && !m.includes('think')),
-          ...found.filter(m => !m.includes('flash') && !m.includes('think')),
+          ...filtered.filter(m => m.includes('flash') && !m.includes('think')),
+          ...filtered.filter(m => !m.includes('flash') && !m.includes('think')),
         ];
       }
     }
