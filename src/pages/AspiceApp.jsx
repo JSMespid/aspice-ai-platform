@@ -1387,7 +1387,7 @@ function WPDetailModal({ wpData, project, allWorkProducts, onClose }) {
             <StatusBadge status={wp.status} />
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc, workProducts); } catch(e) { alert("다운로드 실패: " + (e.message || e.toString())); } }}>⬇ Word</Btn>
+            <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc, allWorkProducts || []); } catch(e) { alert("다운로드 실패: " + (e.message || e.toString())); } }}>⬇ Word</Btn>
 
             <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 20 }}>✕</button>
           </div>
