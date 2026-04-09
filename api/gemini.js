@@ -12,16 +12,39 @@ export default async function handler(req, res) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY 환경변수가 설정되지 않았습니다.' });
 
+  // Google AI Studio Tier1 계정에서 사용 가능한 최신 모델 목록
   const models = [
-    'gemini-2.0-flash-lite',
     'gemini-2.0-flash',
+    'gemini-2.0-flash-lite',
+    'gemini-1.5-flash-8b',
+    'gemini-1.5-flash-002',
+    'gemini-1.5-flash-001',
     'gemini-1.5-flash',
-    'gemini-1.5-pro',
   ];
 
-  let lastError = '';
+  // 먼저 사용 가능한 모델 목록 조회
+  let availableModels = models;
+  try {
+    const listRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100`
+    );
+    if (listRes.ok) {
+      const listData = await listRes.json();
+      const found = (listData.models || [])
+        .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+        .map(m => m.name.replace('models/', ''));
+      if (found.length > 0) {
+        // flash 계열 우선
+        availableModels = [
+          ...found.filter(m => m.includes('flash') && !m.includes('think')),
+          ...found.filter(m => !m.includes('flash') && !m.includes('think')),
+        ];
+      }
+    }
+  } catch {}
 
-  for (const model of models) {
+  let lastError = '';
+  for (const model of availableModels.slice(0, 6)) {
     try {
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -46,43 +69,25 @@ export default async function handler(req, res) {
       }
 
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-      if (!text) {
-        lastError = `[${model}] 응답 비어있음`;
-        continue;
-      }
+      if (!text) { lastError = `[${model}] 빈 응답`; continue; }
 
-      // JSON 추출: 코드블록 제거 후 { } 범위 추출
-      const cleaned = text
-        .replace(/```json\s*/gi, '')
-        .replace(/```\s*/g, '')
-        .trim();
-
-      // { 로 시작하는 위치부터 마지막 } 까지 추출
+      // JSON 추출
+      const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*/g, '').trim();
       const jsonStart = cleaned.indexOf('{');
       const jsonEnd = cleaned.lastIndexOf('}');
-
-      if (jsonStart === -1 || jsonEnd === -1) {
-        lastError = `[${model}] JSON 형식 없음`;
-        continue;
-      }
+      if (jsonStart === -1 || jsonEnd === -1) { lastError = `[${model}] JSON 없음`; continue; }
 
       const jsonStr = cleaned.slice(jsonStart, jsonEnd + 1);
-
-      // JSON 파싱 검증
-      try {
-        JSON.parse(jsonStr);
-      } catch {
-        lastError = `[${model}] JSON 파싱 실패`;
-        continue;
-      }
+      try { JSON.parse(jsonStr); } catch { lastError = `[${model}] JSON 파싱실패`; continue; }
 
       return res.status(200).json({ text: jsonStr, model });
-
     } catch (e) {
       lastError = `[${model}] ${e.message}`;
-      continue;
     }
   }
 
-  return res.status(500).json({ error: `QA 검증 실패: ${lastError}` });
+  return res.status(500).json({
+    error: `QA 검증 실패: ${lastError}`,
+    triedModels: availableModels.slice(0, 6),
+  });
 }
