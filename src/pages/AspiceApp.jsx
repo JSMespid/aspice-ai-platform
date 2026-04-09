@@ -183,23 +183,52 @@ async function apiCall(path, method = "GET", body = null) {
 // ── 다운로드 유틸 (Word .docx) ──────────────────────────────────────────────
 // docxjs CDN을 통해 브라우저에서 직접 .docx 생성
 async function loadDocx() {
-  if (window.docx) return window.docx;
+  // 이미 로드된 경우
+  const candidates = [window.docx, window.Docx, window.DOCX];
+  for (const c of candidates) {
+    if (c && c.Document && c.Packer) return c;
+  }
+  // CDN에서 로드
   await new Promise((resolve, reject) => {
     const s = document.createElement("script");
-    s.src = "https://unpkg.com/docx@8.5.0/build/index.js";
-    s.onload = resolve; s.onerror = reject;
+    // jsdelivr CDN (UMD 번들, window.docx 에 노출)
+    s.src = "https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.js";
+    s.onload = resolve;
+    s.onerror = () => {
+      // fallback: unpkg
+      const s2 = document.createElement("script");
+      s2.src = "https://unpkg.com/docx@8.5.0/build/index.js";
+      s2.onload = resolve;
+      s2.onerror = reject;
+      document.head.appendChild(s2);
+    };
     document.head.appendChild(s);
   });
-  return window.docx;
+  // 로드 후 다시 탐색
+  for (const c of [window.docx, window.Docx, window.DOCX]) {
+    if (c && c.Document && c.Packer) return c;
+  }
+  // UMD가 전역에 없는 경우 — 직접 require 시도
+  if (typeof require !== "undefined") {
+    try { return require("docx"); } catch {}
+  }
+  throw new Error("docx 라이브러리 로드 실패. 네트워크 연결을 확인하세요.");
 }
 
 async function downloadWordSingle(wpContent, project, proc) {
-  const docx = await loadDocx();
-  const {
-    Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-    HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType,
-    LevelFormat,
-  } = docx;
+  const docxLib = await loadDocx();
+  const Document = docxLib.Document;
+  const Packer = docxLib.Packer;
+  const Paragraph = docxLib.Paragraph;
+  const TextRun = docxLib.TextRun;
+  const Table = docxLib.Table;
+  const TableRow = docxLib.TableRow;
+  const TableCell = docxLib.TableCell;
+  const HeadingLevel = docxLib.HeadingLevel;
+  const AlignmentType = docxLib.AlignmentType;
+  const BorderStyle = docxLib.BorderStyle;
+  const WidthType = docxLib.WidthType;
+  const ShadingType = docxLib.ShadingType;
 
   const BLUE = "1E3A6E";
   const LIGHT_BLUE = "D6E4F0";
@@ -363,11 +392,19 @@ async function downloadWordSingle(wpContent, project, proc) {
 }
 
 async function downloadWordAll(workProducts, project) {
-  const docx = await loadDocx();
-  const {
-    Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
-    HeadingLevel, BorderStyle, WidthType, ShadingType, PageBreak,
-  } = docx;
+  const docxLib = await loadDocx();
+  const Document = docxLib.Document;
+  const Packer = docxLib.Packer;
+  const Paragraph = docxLib.Paragraph;
+  const TextRun = docxLib.TextRun;
+  const Table = docxLib.Table;
+  const TableRow = docxLib.TableRow;
+  const TableCell = docxLib.TableCell;
+  const HeadingLevel = docxLib.HeadingLevel;
+  const BorderStyle = docxLib.BorderStyle;
+  const WidthType = docxLib.WidthType;
+  const ShadingType = docxLib.ShadingType;
+  const PageBreak = docxLib.PageBreak;
 
   const BLUE = "1E3A6E";
   const LIGHT_BLUE = "D6E4F0";
@@ -788,7 +825,7 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
         <div style={{ display: "flex", gap: 8 }}>
           {workProducts.length > 0 && (
             <>
-              <Btn variant="outline" size="sm" onClick={async () => { try { await downloadWordAll(workProducts, project); } catch(e) { alert("다운로드 실패: " + e.message); } }}>⬇ Word 전체 다운로드</Btn>
+              <Btn variant="outline" size="sm" onClick={async () => { try { await downloadWordAll(workProducts, project); } catch(e) { alert("다운로드 실패: " + (e.message || e.toString())); } }}>⬇ Word 전체 다운로드</Btn>
 
             </>
           )}
@@ -852,7 +889,7 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
                       <StatusBadge status={wp.status} />
                       <div style={{ display: "flex", gap: 6 }}>
                         <Btn size="sm" variant="ghost" onClick={() => setViewingWP({ wp, proc })}>보기</Btn>
-                        <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc); } catch(e) { alert("다운로드 실패: " + e.message); } }}>⬇ Word</Btn>
+                        <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc); } catch(e) { alert("다운로드 실패: " + (e.message || e.toString())); } }}>⬇ Word</Btn>
           
                         <Btn size="sm" variant="ghost" style={{ color: T.red }} onClick={() => handleDelete(wp.id)}>✕</Btn>
                       </div>
@@ -914,7 +951,7 @@ function WPDetailModal({ wpData, project, onClose }) {
             <StatusBadge status={wp.status} />
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc); } catch(e) { alert("다운로드 실패: " + e.message); } }}>⬇ Word</Btn>
+            <Btn size="sm" variant="outline" onClick={async () => { try { await downloadWordSingle(wp.content, project, proc); } catch(e) { alert("다운로드 실패: " + (e.message || e.toString())); } }}>⬇ Word</Btn>
 
             <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 20 }}>✕</button>
           </div>
