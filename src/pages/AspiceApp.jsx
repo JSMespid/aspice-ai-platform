@@ -817,7 +817,6 @@ function xmlCover(project, wps, date) {
 
 // ── 전체 문서 XML 조립 ────────────────────────────────────────────────────────
 function xmlTOC(wps) {
-  // 포함된 프로세스 기반으로 목차 항목 생성
   const PROC_ORDER = ["SYS.1","SYS.2","SYS.3","SYS.4","SYS.5"];
   const PROC_LABELS = {
     "SYS.1": "SYS.1 — Stakeholder Requirements Definition",
@@ -828,53 +827,44 @@ function xmlTOC(wps) {
   };
   const included = PROC_ORDER.filter(id => wps.some(w => w.process_id === id));
 
-  // 목차 제목
-  const tocTitle = `<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:numPr><w:ilvl w:val="0"/></w:numPr></w:pPr><w:r><w:t>목차 (Table of Contents)</w:t></w:r></w:p>`;
-
-  // 각 장 목차 항목 (TOC1 스타일)
-  const tocItems = included.map((id, i) => {
-    const label = PROC_LABELS[id];
-    const chapNum = i + 1;
+  function tocRow(text, indent) {
+    const left = indent ? 360 : 0;
     return `<w:p>
-      <w:pPr><w:pStyle w:val="TOC1"/>
-        <w:tabs>
-          <w:tab w:val="right" w:leader="dot" w:pos="9360"/>
-        </w:tabs>
+      <w:pPr>
+        <w:spacing w:before="80" w:after="80"/>
+        <w:ind w:left="${left}"/>
+        <w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9000"/></w:tabs>
       </w:pPr>
-      <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
-        <w:t xml:space="preserve">${chapNum}. ${ex(label)}</w:t>
-      </w:r>
+      <w:r><w:rPr>
+        <w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>
+        <w:sz w:val="${indent ? 20 : 22}"/><w:szCs w:val="${indent ? 20 : 22}"/>
+        ${indent ? "" : "<w:b/>"}
+      </w:rPr><w:t xml:space="preserve">${ex(text)}</w:t></w:r>
     </w:p>`;
-  }).join('');
+  }
 
-  // 추적성 및 부록 항목
-  const extraItems = included.length >= 2
-    ? `<w:p>
-        <w:pPr><w:pStyle w:val="TOC1"/>
-          <w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9360"/></w:tabs>
-        </w:pPr>
-        <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
-          <w:t xml:space="preserve">${included.length + 1}. 추적성 가이드라인 (Traceability Guidelines)</w:t>
-        </w:r>
-      </w:p>
-      <w:p>
-        <w:pPr><w:pStyle w:val="TOC1"/>
-          <w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9360"/></w:tabs>
-        </w:pPr>
-        <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
-          <w:t xml:space="preserve">부록 A. 용어 정의 (Glossary)</w:t>
-        </w:r>
-      </w:p>`
-    : `<w:p>
-        <w:pPr><w:pStyle w:val="TOC1"/>
-          <w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9360"/></w:tabs>
-        </w:pPr>
-        <w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="22"/></w:rPr>
-          <w:t>부록 A. 용어 정의 (Glossary)</w:t>
-        </w:r>
-      </w:p>`;
+  const parts = [];
 
-  return tocTitle + tocItems + extraItems;
+  // 목차 제목
+  parts.push(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>목차 (Table of Contents)</w:t></w:r></w:p>`);
+  parts.push(`<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>`);
+
+  // 각 SYS 장
+  included.forEach((id, i) => {
+    parts.push(tocRow(`${i + 1}.  ${PROC_LABELS[id]}`, false));
+  });
+
+  // 추적성 가이드라인
+  if (included.length >= 2) {
+    parts.push(tocRow(`${included.length + 1}.  추적성 가이드라인 (Traceability Guidelines)`, false));
+  }
+
+  // 부록
+  parts.push(tocRow(`부록 A.  용어 정의 (Glossary)`, false));
+
+  parts.push(`<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>`);
+
+  return parts.join('\n');
 }
 
 function buildDocumentXml(project, wps) {
