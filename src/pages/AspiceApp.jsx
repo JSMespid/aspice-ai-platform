@@ -1,23 +1,56 @@
-import { useState, useEffect } from "react";
-import { T, GLOBAL_CSS, Card, Btn, Badge, Input, Select, Textarea, Spinner, EmptyState, StatusBadge, SeverityBadge } from "../components/ui.jsx";
+import { useState, useEffect, useCallback } from "react";
+import {
+  T, GLOBAL_CSS, Card, Btn, Badge, Input, Select,
+  Textarea, Spinner, EmptyState, StatusBadge, SeverityBadge,
+} from "../components/ui.jsx";
 
-// ── 상수 ─────────────────────────────────────────────────────────────────────
+// ── 상수 ──────────────────────────────────────────────────────────────────────
 const PROCESSES = [
-  { id: "SYS.1", label: "SYS.1 - Stakeholder Requirements", color: T.accent, icon: "①",
-    desc: "이해관계자 니즈를 수집하여 요구사항으로 정의합니다." },
-  { id: "SYS.2", label: "SYS.2 - System Requirements", color: T.purple, icon: "②",
-    desc: "이해관계자 요구사항을 시스템 요구사항과 검증 기준으로 변환합니다." },
-  { id: "SYS.3", label: "SYS.3 - System Architecture", color: T.teal, icon: "③",
-    desc: "시스템 요구사항을 시스템 요소에 할당하고 아키텍처를 설계합니다." },
-  { id: "SYS.4", label: "SYS.4 - System Integration Test", color: T.amber, icon: "④",
-    desc: "시스템 요소를 통합하고 인터페이스 및 상호작용을 검증합니다." },
-  { id: "SYS.5", label: "SYS.5 - System Qualification Test", color: T.green, icon: "⑤",
-    desc: "시스템이 요구사항을 만족하는지 최종 검증합니다." },
+  {
+    id: "SYS.1", label: "SYS.1 — Stakeholder Requirements", short: "STK-REQ",
+    color: T.accent, icon: "①",
+    desc: "이해관계자 니즈를 수집하여 요구사항으로 정의합니다.",
+    inputLabel: "프로젝트 배경 / 이해관계자 니즈",
+    inputPlaceholder: "예: 전방 카메라 기반 자동 하이빔 제어\n이해관계자: 운전자, OEM, 법규 기관\n주요 요구: 야간 가시성 확보, 눈부심 방지",
+    outputSummary: (c) => `Needs ${c?.summary?.total_needs ?? "?"}개 · REQ ${c?.summary?.total_requirements ?? "?"}개`,
+  },
+  {
+    id: "SYS.2", label: "SYS.2 — System Requirements", short: "SYS-REQ",
+    color: T.purple, icon: "②",
+    desc: "STK-REQ를 시스템 요구사항과 검증 기준으로 변환합니다. (SYS.1 OUT → SYS.2 IN)",
+    inputLabel: "이전 단계 산출물 자동 주입 + 추가 기술 맥락",
+    inputPlaceholder: "SYS.1 산출물이 자동으로 주입됩니다.\n추가 기술 제약이 있으면 입력하세요.",
+    outputSummary: (c) => `Functional ${c?.summary?.total_functional ?? "?"}개 · VC ${c?.summary?.total_vc ?? "?"}개`,
+  },
+  {
+    id: "SYS.3", label: "SYS.3 — System Architecture", short: "Architecture",
+    color: T.teal, icon: "③",
+    desc: "SYS-REQ를 시스템 요소에 할당하고 아키텍처를 설계합니다. (SYS.2 OUT → SYS.3 IN)",
+    inputLabel: "이전 단계 산출물 자동 주입 + 아키텍처 제약",
+    inputPlaceholder: "SYS.2 산출물이 자동으로 주입됩니다.\n하드웨어 제약, 플랫폼 정보 등을 입력하세요.",
+    outputSummary: (c) => `Elements ${c?.summary?.total_elements ?? "?"}개 · IF ${c?.summary?.total_interfaces ?? "?"}개`,
+  },
+  {
+    id: "SYS.4", label: "SYS.4 — System Integration Test", short: "Integration",
+    color: T.amber, icon: "④",
+    desc: "시스템 요소를 통합하고 인터페이스를 검증합니다. (SYS.3 OUT → SYS.4 IN)",
+    inputLabel: "이전 단계 산출물 자동 주입 + 테스트 환경",
+    inputPlaceholder: "SYS.3 산출물이 자동으로 주입됩니다.\n테스트 환경, 장비 정보를 입력하세요.",
+    outputSummary: (c) => `Test Cases ${c?.test_cases?.length ?? c?.summary?.total_test_cases ?? "?"}개`,
+  },
+  {
+    id: "SYS.5", label: "SYS.5 — System Qualification Test", short: "Qualification",
+    color: T.green, icon: "⑤",
+    desc: "시스템이 요구사항을 만족하는지 최종 검증합니다. (SYS.2+SYS.3 OUT → SYS.5 IN)",
+    inputLabel: "이전 단계 산출물 자동 주입 + 검증 기준",
+    inputPlaceholder: "SYS.2, SYS.3 산출물이 자동으로 주입됩니다.\n검증 환경, 법규 기준을 입력하세요.",
+    outputSummary: (c) => `Test Cases ${c?.summary?.total_test_cases ?? "?"}개`,
+  },
 ];
 
-const STATUS_FLOW = ["초안", "검토중", "승인됨", "거부됨"];
+const DOMAIN_OPTIONS = ["자동차 부품", "소프트웨어 시스템", "하드웨어 시스템", "임베디드 시스템", "IT 서비스", "항공우주", "의료기기"];
 
-// ── API 호출 헬퍼 ─────────────────────────────────────────────────────────────
+// ── JSON 파싱 안전 처리 ───────────────────────────────────────────────────────
 function safeParseJSON(raw) {
   const text = raw.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
   try { return JSON.parse(text); } catch {}
@@ -28,6 +61,7 @@ function safeParseJSON(raw) {
   throw new Error("JSON 파싱 실패 — 다시 시도해 주세요.");
 }
 
+// ── Claude API 호출 ───────────────────────────────────────────────────────────
 async function callClaude(systemMsg, userMsg, maxTokens = 8000) {
   const res = await fetch("/api/chat", {
     method: "POST",
@@ -48,7 +82,13 @@ async function callClaude(systemMsg, userMsg, maxTokens = 8000) {
 
 // ── Gemini QA 호출 ────────────────────────────────────────────────────────────
 async function callGeminiQA(workProduct) {
-  const prompt = `당신은 ASPICE 4.0 QA 전문가입니다. 아래 산출물을 검증하고 반드시 JSON만 응답하세요. 마크다운 없이 JSON만 출력하세요.\n\n산출물:\n${JSON.stringify(workProduct, null, 2)}\n\n다음 JSON 구조로만 응답하세요:\n{"overall_score":85,"completeness":{"score":90,"issues":[]},"consistency":{"score":80,"issues":[]},"traceability":{"score":85,"issues":[]},"issues":[{"id":"QA-001","severity":"Critical|Major|Minor|Info","category":"Completeness|Consistency|Traceability|Verifiability|Structure","description":"string","location":"string","recommendation":"string"}],"summary":{"total_issues":0,"critical":0,"major":0,"minor":0,"info":0},"recommendation":"승인 권장|수정 후 재검토|반려"}`;
+  const prompt = `당신은 ASPICE 4.0 QA 전문가입니다. 아래 산출물을 검증하고 반드시 JSON만 응답하세요. 마크다운 없이 JSON만 출력하세요.
+
+산출물:
+${JSON.stringify(workProduct, null, 2)}
+
+다음 JSON 구조로만 응답하세요:
+{"overall_score":85,"completeness":{"score":90,"issues":[]},"consistency":{"score":80,"issues":[]},"traceability":{"score":85,"issues":[]},"issues":[{"id":"QA-001","severity":"Critical|Major|Minor|Info","category":"Completeness|Consistency|Traceability|Verifiability|Structure","description":"string","location":"string","recommendation":"string"}],"summary":{"total_issues":0,"critical":0,"major":0,"minor":0,"info":0},"recommendation":"승인 권장|수정 후 재검토|반려"}`;
 
   const res = await fetch("/api/gemini", {
     method: "POST",
@@ -60,9 +100,15 @@ async function callGeminiQA(workProduct) {
   return safeParseJSON(data.text || "");
 }
 
-// ── 산출물 생성 함수 ──────────────────────────────────────────────────────────
-async function generateWorkProduct(processId, context, projectInfo) {
-  const SYS_BASE = `당신은 ASPICE 4.0 전문가입니다. 반드시 유효한 JSON만 응답하세요. 마크다운, 설명, 전문어 없이 JSON만 출력하세요.`;
+// ── QA 검증 함수 ──────────────────────────────────────────────────────────────
+async function runQACheck(workProduct) {
+  return await callGeminiQA(workProduct);
+}
+
+// ── 산출물 생성 프롬프트 ─────────────────────────────────────────────────────
+async function generateWorkProduct(processId, context, projectInfo, prevContents) {
+  const SYS_BASE = `당신은 ASPICE 4.0 전문가입니다. 반드시 유효한 JSON만 응답하세요. 마크다운, 설명 없이 완전한 JSON만 출력하세요.`;
+  const prev = (key) => prevContents[key] ? `\n\n[이전 단계 산출물 - ${key}]\n${JSON.stringify(prevContents[key], null, 2)}` : "";
 
   const prompts = {
     "SYS.1": {
@@ -72,116 +118,43 @@ async function generateWorkProduct(processId, context, projectInfo) {
 컨텍스트: ${context}
 
 다음 JSON 구조로 Stakeholder Requirements 산출물을 생성하세요:
-{
-  "process": "SYS.1",
-  "title": "Stakeholder Requirements Specification",
-  "needs": [{"id":"N-001","description":"string","source":"string"}],
-  "requirements": [
-    {"id":"STK-REQ-001","title":"string","description":"string","source_needs":["N-001"],"priority":"High|Medium|Low","acceptance_criteria":"string","stability":"Stable|Volatile"}
-  ],
-  "traceability": [{"need_id":"N-001","req_id":"STK-REQ-001","relation":"SATISFIES"}],
-  "summary": {"total_needs":0,"total_requirements":0,"high_priority":0}
-}`
+{"process":"SYS.1","title":"Stakeholder Requirements Specification","needs":[{"id":"N-001","description":"string","source":"string"}],"requirements":[{"id":"STK-REQ-001","title":"string","description":"string","source_needs":["N-001"],"priority":"High|Medium|Low","acceptance_criteria":"string","stability":"Stable|Volatile"}],"traceability":[{"need_id":"N-001","req_id":"STK-REQ-001","relation":"SATISFIES"}],"summary":{"total_needs":0,"total_requirements":0,"high_priority":0}}`,
     },
     "SYS.2": {
       system: SYS_BASE,
       user: `Requirements 최대 7개, VC 최대 7개로 제한하세요. 완전한 JSON만 출력하세요.
 프로젝트: ${projectInfo.name}, 도메인: ${projectInfo.domain}
-이해관계자 요구사항 컨텍스트: ${context}
+추가 맥락: ${context}${prev("SYS.1")}
 
-다음 JSON 구조로 System Requirements + Verification Criteria를 동시 생성하세요 (SYS.2.BP4 준수):
-{
-  "process": "SYS.2",
-  "title": "System Requirements Specification",
-  "requirements": [
-    {"id":"SYS-REQ-F-001","title":"string","description":"string","type":"Functional|Non-functional","source_stk_req":["STK-REQ-001"],"priority":"High|Medium|Low","allocated_to":["SE-001"],"relation_type":"REFINES|DERIVES"}
-  ],
-  "verification_criteria": [
-    {"id":"VC-001","req_id":"SYS-REQ-F-001","method":"Test|Analysis|Inspection|Demonstration","acceptance_criteria":"string","test_level":"System"}
-  ],
-  "traceability": [{"from":"STK-REQ-001","to":"SYS-REQ-F-001","type":"REFINES"}],
-  "summary": {"total_functional":0,"total_nonfunctional":0,"total_vc":0}
-}`
+위의 SYS.1 Stakeholder Requirements를 바탕으로 System Requirements + Verification Criteria를 생성하세요:
+{"process":"SYS.2","title":"System Requirements Specification","requirements":[{"id":"SYS-REQ-F-001","title":"string","description":"string","type":"Functional|Non-functional","source_stk_req":["STK-REQ-001"],"priority":"High|Medium|Low","allocated_to":["SE-001"],"relation_type":"REFINES|DERIVES"}],"verification_criteria":[{"id":"VC-001","req_id":"SYS-REQ-F-001","method":"Test|Analysis|Inspection|Demonstration","acceptance_criteria":"string","test_level":"System"}],"traceability":[{"from":"STK-REQ-001","to":"SYS-REQ-F-001","type":"REFINES"}],"summary":{"total_functional":0,"total_nonfunctional":0,"total_vc":0}}`,
     },
     "SYS.3": {
       system: SYS_BASE,
       user: `Elements 최대 5개, Interfaces 최대 5개로 제한하세요. 완전한 JSON만 출력하세요.
 프로젝트: ${projectInfo.name}, 도메인: ${projectInfo.domain}
-시스템 요구사항 컨텍스트: ${context}
+추가 맥락: ${context}${prev("SYS.2")}
 
-다음 JSON 구조로 System Architecture를 생성하세요:
-{
-  "process": "SYS.3",
-  "title": "System Architectural Design",
-  "system_elements": [
-    {"id":"SE-001","name":"string","type":"HW|SW|Mechanical|Electrical","description":"string","allocated_requirements":["SYS-REQ-F-001"],"interfaces":["IF-001"]}
-  ],
-  "interfaces": [
-    {"id":"IF-001","name":"string","source":"SE-001","target":"SE-002","type":"Data|Control|Power","protocol":"string","specification":"string"}
-  ],
-  "allocation_matrix": [{"req_id":"SYS-REQ-F-001","element_id":"SE-001","rationale":"string"}],
-  "integration_strategy": {"approach":"Bottom-up|Top-down|Sandwich","phases":["string"]},
-  "summary": {"total_elements":0,"total_interfaces":0}
-}`
+위의 SYS.2 System Requirements를 바탕으로 System Architecture를 생성하세요:
+{"process":"SYS.3","title":"System Architectural Design","system_elements":[{"id":"SE-001","name":"string","type":"HW|SW|Mechanical|Electrical","description":"string","allocated_requirements":["SYS-REQ-F-001"],"interfaces":["IF-001"]}],"interfaces":[{"id":"IF-001","name":"string","source":"SE-001","target":"SE-002","type":"Data|Control|Power","protocol":"string","specification":"string"}],"allocation_matrix":[{"req_id":"SYS-REQ-F-001","element_id":"SE-001","rationale":"string"}],"integration_strategy":{"approach":"Bottom-up","phases":["string"]},"summary":{"total_elements":0,"total_interfaces":0}}`,
     },
     "SYS.4": {
       system: SYS_BASE,
       user: `Test Cases 최대 5개로 제한하세요. 완전한 JSON만 출력하세요.
 프로젝트: ${projectInfo.name}, 도메인: ${projectInfo.domain}
-아키텍처 컨텍스트: ${context}
+추가 맥락: ${context}${prev("SYS.3")}
 
-다음 JSON 구조로 System Integration Test를 생성하세요 (인터페이스 중심):
-{
-  "process": "SYS.4",
-  "title": "System Integration Test Specification",
-  "integration_strategy": {
-    "approach":"Bottom-up","phases":[{"phase":"Phase 1","description":"string","elements":["SE-001","SE-002"],"interface_verified":"IF-001"}]
-  },
-  "test_cases": [
-    {
-      "id":"ITC-001","title":"string","objective":"string",
-      "primary_target":{"interface_id":"IF-001","description":"string"},
-      "integrated_elements":["SE-001","SE-002"],
-      "related_sys_req":["SYS-REQ-F-001"],
-      "precondition":"string",
-      "test_steps":["string"],
-      "expected_result":"string",
-      "pass_criteria":"string",
-      "note":"SYS-REQ는 간접 추적 (해당 인터페이스가 구현하는 요구사항)"
-    }
-  ],
-  "traceability": [{"test_id":"ITC-001","primary_interface":"IF-001","elements":["SE-001","SE-002"],"indirect_req":"SYS-REQ-F-001"}],
-  "summary": {"total_test_cases":0,"total_interfaces_covered":0}
-}`
+위의 SYS.3 Architecture를 바탕으로 System Integration Test를 생성하세요:
+{"process":"SYS.4","title":"System Integration Test Specification","integration_strategy":{"approach":"Bottom-up","phases":[{"phase":"Phase 1","description":"string","elements":["SE-001","SE-002"],"interface_verified":"IF-001"}]},"test_cases":[{"id":"ITC-001","title":"string","objective":"string","primary_target":{"interface_id":"IF-001","description":"string"},"integrated_elements":["SE-001","SE-002"],"related_sys_req":["SYS-REQ-F-001"],"precondition":"string","test_steps":["string"],"expected_result":"string","pass_criteria":"string"}],"traceability":[{"test_id":"ITC-001","primary_interface":"IF-001","elements":["SE-001","SE-002"],"indirect_req":"SYS-REQ-F-001"}],"summary":{"total_test_cases":0,"total_interfaces_covered":0}}`,
     },
     "SYS.5": {
       system: SYS_BASE,
       user: `Test Cases 최대 5개로 제한하세요. 완전한 JSON만 출력하세요.
 프로젝트: ${projectInfo.name}, 도메인: ${projectInfo.domain}
-시스템 요구사항 및 검증 기준 컨텍스트: ${context}
+추가 맥락: ${context}${prev("SYS.2")}${prev("SYS.3")}
 
-다음 JSON 구조로 System Qualification Test를 생성하세요:
-{
-  "process": "SYS.5",
-  "title": "System Qualification Test Specification",
-  "test_cases": [
-    {
-      "id":"STC-001","title":"string","objective":"string",
-      "system_requirements":["SYS-REQ-F-001"],
-      "reference_stk_req":["STK-REQ-001"],
-      "verification_criteria":["VC-001"],
-      "test_environment":"string",
-      "test_steps":["string"],
-      "expected_result":"string",
-      "pass_criteria":"string",
-      "test_type":"Functional|Performance|Safety|Regulatory",
-      "note":"STK-REQ는 참조용 (Acceptance Test에서 직접 검증됨)"
-    }
-  ],
-  "traceability": [{"test_id":"STC-001","primary_req":"SYS-REQ-F-001","vc":"VC-001","reference_stk":"STK-REQ-001"}],
-  "coverage_analysis": {"sys_req_covered":"string","vc_covered":"string"},
-  "summary": {"total_test_cases":0}
-}`
+위의 SYS.2 + SYS.3 산출물을 바탕으로 System Qualification Test를 생성하세요:
+{"process":"SYS.5","title":"System Qualification Test Specification","test_cases":[{"id":"STC-001","title":"string","objective":"string","system_requirements":["SYS-REQ-F-001"],"reference_stk_req":["STK-REQ-001"],"verification_criteria":["VC-001"],"test_environment":"string","test_steps":["string"],"expected_result":"string","pass_criteria":"string","test_type":"Functional|Performance|Safety|Regulatory"}],"traceability":[{"test_id":"STC-001","primary_req":"SYS-REQ-F-001","vc":"VC-001","reference_stk":"STK-REQ-001"}],"coverage_analysis":{"sys_req_covered":"string","vc_covered":"string"},"summary":{"total_test_cases":0}}`,
     },
   };
 
@@ -189,84 +162,158 @@ async function generateWorkProduct(processId, context, projectInfo) {
   return await callClaude(p.system, p.user);
 }
 
-// ── QA 검증 함수 (Gemini) ────────────────────────────────────────────────────
-async function runQACheck(workProduct) {
-  return await callGeminiQA(workProduct);
-}
-
-// ── 추적성 분석 함수 ─────────────────────────────────────────────────────────
-async function analyzeTraceability(workProducts) {
-  const result = await callClaude(
-    `당신은 ASPICE 4.0 추적성 전문가입니다. 반드시 JSON만 응답하세요.`,
-    `다음 산출물들의 양방향 추적성을 분석하세요:
-${JSON.stringify(workProducts.map(w => ({ process: w.process_id, data: w.content })), null, 2)}
-
-다음 JSON 구조로 응답하세요:
-{
-  "forward_chain": [
-    {"from":"N-001","to":"STK-REQ-001","relation":"SATISFIES"},
-    {"from":"STK-REQ-001","to":"SYS-REQ-F-001","relation":"REFINES"},
-    {"from":"SYS-REQ-F-001","to":"SE-001","relation":"ALLOCATED_TO"},
-    {"from":"SYS-REQ-F-001","to":"VC-001","relation":"VERIFIED_BY"},
-    {"from":"VC-001","to":"STC-001","relation":"TESTED_BY"}
-  ],
-  "coverage": {
-    "needs_covered": "5/5 (100%)",
-    "stk_req_covered": "4/4 (100%)",
-    "sys_req_covered": "5/5 (100%)",
-    "elements_allocated": "4/4 (100%)",
-    "vc_covered": "5/5 (100%)",
-    "test_cases_coverage": "5/5 (100%)"
-  },
-  "orphans": [],
-  "gaps": [],
-  "v_model_mapping": [
-    {"left":"SYS.1 STK-REQ","right":"Acceptance Test","relation":"↔"},
-    {"left":"SYS.2 SYS-REQ","right":"SYS.5 Qualification","relation":"↔"},
-    {"left":"SYS.3 Architecture","right":"SYS.4 Integration","relation":"↔"}
-  ]
-}`
+// ── 추적성 분석 ───────────────────────────────────────────────────────────────
+async function analyzeTraceability(wps) {
+  return await callClaude(
+    `당신은 ASPICE 4.0 추적성 전문가입니다. 반드시 완전한 JSON만 응답하세요.`,
+    `다음 산출물들의 양방향 추적성을 분석하세요:\n${JSON.stringify(wps.map(w => ({ process: w.process_id, data: w.content })), null, 2)}\n\n다음 JSON 구조로 응답:\n{"forward_chain":[{"from":"N-001","to":"STK-REQ-001","relation":"SATISFIES"}],"coverage":{"needs_covered":"5/5 (100%)","stk_req_covered":"4/4 (100%)","sys_req_covered":"5/5 (100%)","elements_allocated":"4/4 (100%)","vc_covered":"5/5 (100%)","test_cases_coverage":"5/5 (100%)"},"orphans":[],"gaps":[],"v_model_mapping":[{"left":"SYS.1 STK-REQ","right":"Acceptance Test","relation":"↔"},{"left":"SYS.2 SYS-REQ","right":"SYS.5 Qualification","relation":"↔"},{"left":"SYS.3 Architecture","right":"SYS.4 Integration","relation":"↔"}]}`
   );
-  return result;
 }
 
-// ── 메인 앱 컴포넌트 ──────────────────────────────────────────────────────────
+// ── API 헬퍼 ─────────────────────────────────────────────────────────────────
+async function apiCall(path, method = "GET", body = null) {
+  const res = await fetch(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : null,
+  });
+  return res.json();
+}
+
+// ── 다운로드 유틸 ─────────────────────────────────────────────────────────────
+function downloadJSON(content, filename) {
+  const blob = new Blob([JSON.stringify(content, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadMarkdown(content, project, proc) {
+  const lines = [
+    `# ${content.title || proc.label}`,
+    ``,
+    `> **프로젝트**: ${project.name}  `,
+    `> **도메인**: ${project.domain}  `,
+    `> **프로세스**: ${proc.id}  `,
+    `> **생성일**: ${new Date().toLocaleDateString("ko-KR")}`,
+    ``,
+    `---`,
+    ``,
+  ];
+  const renderSection = (title, items, fields) => {
+    if (!items?.length) return;
+    lines.push(`## ${title}`, ``);
+    items.forEach((item, i) => {
+      lines.push(`### ${i + 1}. ${item.id || ""} ${item.title || item.name || ""}`);
+      fields.forEach(f => {
+        if (item[f] !== undefined) {
+          const val = Array.isArray(item[f]) ? item[f].join(", ") : typeof item[f] === "object" ? JSON.stringify(item[f]) : String(item[f]);
+          lines.push(`- **${f}**: ${val}`);
+        }
+      });
+      lines.push(``);
+    });
+  };
+  if (content.needs) renderSection("Needs", content.needs, ["id", "description", "source"]);
+  if (content.requirements) renderSection("Requirements", content.requirements, ["id", "title", "description", "type", "priority", "acceptance_criteria"]);
+  if (content.verification_criteria) renderSection("Verification Criteria", content.verification_criteria, ["id", "req_id", "method", "acceptance_criteria"]);
+  if (content.system_elements) renderSection("System Elements", content.system_elements, ["id", "name", "type", "description", "allocated_requirements"]);
+  if (content.interfaces) renderSection("Interfaces", content.interfaces, ["id", "name", "source", "target", "protocol"]);
+  if (content.test_cases) renderSection("Test Cases", content.test_cases, ["id", "title", "objective", "pass_criteria", "test_type"]);
+  if (content.summary) {
+    lines.push(`## Summary`, ``);
+    Object.entries(content.summary).forEach(([k, v]) => lines.push(`- **${k}**: ${v}`));
+  }
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = `${project.name}_${proc.id}.md`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+function downloadAllMarkdown(workProducts, project) {
+  const lines = [`# ASPICE 산출물 패키지`, ``, `> **프로젝트**: ${project.name}  `, `> **생성일**: ${new Date().toLocaleDateString("ko-KR")}`, ``, `---`, ``];
+  workProducts.forEach(wp => {
+    const proc = PROCESSES.find(p => p.id === wp.process_id);
+    const content = wp.content || {};
+    lines.push(`# ${proc?.id} — ${content.title || proc?.short}`, ``, `---`, ``);
+    const renderSection = (title, items, fields) => {
+      if (!items?.length) return;
+      lines.push(`## ${title}`, ``);
+      items.forEach((item, i) => {
+        lines.push(`### ${i + 1}. ${item.id || ""} ${item.title || item.name || ""}`);
+        fields.forEach(f => { if (item[f] !== undefined) lines.push(`- **${f}**: ${Array.isArray(item[f]) ? item[f].join(", ") : String(item[f])}`); });
+        lines.push(``);
+      });
+    };
+    if (content.needs) renderSection("Needs", content.needs, ["id", "description", "source"]);
+    if (content.requirements) renderSection("Requirements", content.requirements, ["id", "title", "description", "priority", "acceptance_criteria"]);
+    if (content.verification_criteria) renderSection("Verification Criteria", content.verification_criteria, ["id", "req_id", "method", "acceptance_criteria"]);
+    if (content.system_elements) renderSection("System Elements", content.system_elements, ["id", "name", "type", "description"]);
+    if (content.interfaces) renderSection("Interfaces", content.interfaces, ["id", "name", "source", "target", "protocol"]);
+    if (content.test_cases) renderSection("Test Cases", content.test_cases, ["id", "title", "objective", "pass_criteria"]);
+    lines.push(``, `---`, ``);
+  });
+  const blob = new Blob([lines.join("\n")], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url; a.download = `${project.name}_ASPICE_전체산출물.md`; a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── 메인 앱 ───────────────────────────────────────────────────────────────────
 export default function AspiceApp() {
-  const [page, setPage] = useState("dashboard");
+  const [page, setPage] = useState("home");
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [projects, setProjects] = useState([]);
   const [workProducts, setWorkProducts] = useState([]);
-  const [currentWP, setCurrentWP] = useState(null);
   const [loading, setLoading] = useState(true);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
 
   const navItems = [
-    { id: "dashboard", label: "대시보드", icon: "⊞" },
-    { id: "generate", label: "산출물 생성", icon: "✦" },
-    { id: "traceability", label: "추적성 분석", icon: "⇌" },
-    { id: "review", label: "HITL 검토", icon: "◎" },
+    { id: "home", label: "프로젝트 목록", icon: "⊞" },
+    ...(selectedProject ? [
+      { id: "pipeline", label: "파이프라인", icon: "⇒" },
+      { id: "review", label: "HITL 검토", icon: "◎" },
+      { id: "traceability", label: "추적성 분석", icon: "⇌" },
+    ] : []),
   ];
 
-  useEffect(() => { fetchWorkProducts(); }, []);
+  const nav = useCallback((p, proj = undefined) => {
+    setPage(p);
+    if (proj !== undefined) setSelectedProject(proj);
+    setMenuOpen(false);
+  }, []);
 
-  async function fetchWorkProducts() {
+  useEffect(() => { fetchProjects(); }, []);
+  useEffect(() => { if (selectedProject) fetchWorkProducts(selectedProject.id); }, [selectedProject]);
+
+  async function fetchProjects() {
     setLoading(true);
     try {
-      const res = await fetch("/api/projects");
-      const data = await res.json();
-      setWorkProducts(Array.isArray(data) ? data.map(d => ({
-        ...d, content: typeof d.content === "string" ? JSON.parse(d.content || "{}") : d.content || {}
-      })) : []);
-    } catch { setWorkProducts([]); }
+      const data = await apiCall("/api/projects?resource=projects");
+      setProjects(Array.isArray(data) ? data : []);
+    } catch { setProjects([]); }
     setLoading(false);
   }
 
-  const nav = (p, wp = null) => { setPage(p); if (wp) setCurrentWP(wp); setMenuOpen(false); };
+  async function fetchWorkProducts(projectId) {
+    try {
+      const data = await apiCall(`/api/projects?resource=work_products&project_id=${projectId}`);
+      setWorkProducts(Array.isArray(data) ? data.map(d => ({
+        ...d,
+        content: typeof d.content === "string" ? safeParseJSON(d.content) : d.content || {},
+        qa_result: d.qa_result ? (typeof d.qa_result === "string" ? safeParseJSON(d.qa_result) : d.qa_result) : null,
+      })) : []);
+    } catch { setWorkProducts([]); }
+  }
+
+  const onRefreshWPs = () => selectedProject && fetchWorkProducts(selectedProject.id);
 
   const pages = {
-    dashboard: <Dashboard wps={workProducts} loading={loading} nav={nav} />,
-    generate: <GeneratePage onSave={fetchWorkProducts} nav={nav} />,
-    traceability: <TraceabilityPage wps={workProducts} />,
-    review: <ReviewPage wps={workProducts} onUpdate={fetchWorkProducts} nav={nav} />,
-    detail: <DetailPage wp={currentWP} nav={nav} onUpdate={fetchWorkProducts} />,
+    home: <ProjectListPage projects={projects} loading={loading} onSelect={(proj) => { setSelectedProject(proj); setWorkProducts([]); nav("pipeline"); }} onRefresh={fetchProjects} />,
+    pipeline: selectedProject ? <PipelinePage project={selectedProject} workProducts={workProducts} onRefresh={onRefreshWPs} nav={nav} /> : null,
+    review: selectedProject ? <ReviewPage project={selectedProject} wps={workProducts} onUpdate={onRefreshWPs} nav={nav} /> : null,
+    traceability: selectedProject ? <TraceabilityPage project={selectedProject} wps={workProducts} /> : null,
   };
 
   return (
@@ -275,13 +322,13 @@ export default function AspiceApp() {
 
       {/* 모바일 헤더 */}
       <div className="mob-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: T.surface, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0, zIndex: 100 }}>
-        <Logo />
-        <button onClick={() => setMenuOpen(!menuOpen)} style={{ background: "none", border: "none", color: T.text, fontSize: 22, cursor: "pointer" }}>
-          {menuOpen ? "✕" : "☰"}
-        </button>
+        <Logo onClick={() => nav("home", null)} />
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => setShowGuide(true)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, color: T.muted, fontSize: 12, cursor: "pointer", padding: "4px 10px" }}>?</button>
+          <button onClick={() => setMenuOpen(!menuOpen)} style={{ background: "none", border: "none", color: T.text, fontSize: 22, cursor: "pointer" }}>{menuOpen ? "✕" : "☰"}</button>
+        </div>
       </div>
 
-      {/* 모바일 드롭다운 */}
       {menuOpen && (
         <div className="mob-menu" style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "8px 12px", zIndex: 99 }}>
           {navItems.map(item => (
@@ -295,10 +342,16 @@ export default function AspiceApp() {
 
       <div style={{ display: "flex", flex: 1 }}>
         {/* PC 사이드바 */}
-        <aside className="sidebar" style={{ display: "none", width: 220, background: T.surface, borderRight: `1px solid ${T.border}`, flexDirection: "column", padding: "24px 0", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
-          <div style={{ padding: "0 20px 24px", borderBottom: `1px solid ${T.border}` }}>
-            <Logo />
+        <aside className="sidebar" style={{ display: "none", width: 230, background: T.surface, borderRight: `1px solid ${T.border}`, flexDirection: "column", padding: "24px 0", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
+          <div style={{ padding: "0 20px 20px", borderBottom: `1px solid ${T.border}` }}>
+            <Logo onClick={() => nav("home", null)} />
           </div>
+          {selectedProject && (
+            <div style={{ padding: "12px 20px", borderBottom: `1px solid ${T.border}`, background: T.accentGlow }}>
+              <div style={{ fontSize: 10, color: T.muted, marginBottom: 3 }}>현재 프로젝트</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: T.accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedProject.name}</div>
+            </div>
+          )}
           <nav style={{ padding: "14px 10px", flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
             {navItems.map(item => (
               <button key={item.id} onClick={() => nav(item.id)}
@@ -307,261 +360,374 @@ export default function AspiceApp() {
               </button>
             ))}
           </nav>
-          <div style={{ padding: "16px 20px", borderTop: `1px solid ${T.border}` }}>
-            <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>총 산출물</div>
-            <div style={{ fontSize: 24, fontWeight: 700 }}>{workProducts.length}<span style={{ fontSize: 13, color: T.muted, fontWeight: 400 }}> 건</span></div>
+          <div style={{ padding: "14px 20px", borderTop: `1px solid ${T.border}` }}>
+            <button onClick={() => setShowGuide(true)} style={{ width: "100%", padding: "8px 12px", background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 10, color: T.muted, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}>
+              📖 사용 가이드
+            </button>
           </div>
         </aside>
 
         <main className="main-pad" style={{ flex: 1, overflow: "auto", padding: "20px 16px", animation: "fadeIn .3s ease" }}>
-          {pages[page] || pages.dashboard}
+          {pages[page] || pages.home}
         </main>
       </div>
+
+      {showGuide && <GuideModal onClose={() => setShowGuide(false)} />}
     </div>
   );
 }
 
-function Logo() {
+function Logo({ onClick }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
       <div style={{ width: 34, height: 34, background: `linear-gradient(135deg,${T.accent},${T.purple})`, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "#fff", flexShrink: 0 }}>A</div>
       <div>
         <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: -0.3 }}>ASPICE AI</div>
-        <div style={{ fontSize: 10, color: T.muted }}>v1.0 · SYS.1~SYS.5</div>
+        <div style={{ fontSize: 10, color: T.muted }}>v2.0 · SYS.1~SYS.5 Pipeline</div>
       </div>
     </div>
   );
 }
 
-// ── 대시보드 ──────────────────────────────────────────────────────────────────
-function Dashboard({ wps, loading, nav }) {
-  const stats = [
-    { label: "전체 산출물", value: wps.length, color: T.accent },
-    { label: "승인됨", value: wps.filter(w => w.status === "승인됨").length, color: T.green },
-    { label: "검토중", value: wps.filter(w => w.status === "검토중").length, color: T.amber },
-    { label: "QA 완료", value: wps.filter(w => w.qa_result).length, color: T.purple },
+// ── 사용 가이드 모달 ─────────────────────────────────────────────────────────
+function GuideModal({ onClose }) {
+  const steps = [
+    { icon: "①", color: T.accent, title: "프로젝트 생성", desc: "홈에서 [+ 새 프로젝트]를 클릭해 프로젝트명·도메인·설명을 입력합니다." },
+    { icon: "②", color: T.purple, title: "SYS.1 생성 (파이프라인 시작)", desc: "파이프라인 탭에서 SYS.1 카드의 [생성] 버튼을 누릅니다. 프로젝트 배경과 이해관계자 니즈를 입력하면 AI가 자동 생성합니다." },
+    { icon: "③", color: T.teal, title: "SYS.2~5 순차 생성 (IN→OUT→IN→OUT)", desc: "이전 단계 산출물이 자동으로 다음 단계에 주입됩니다. 각 단계에서 [생성] 버튼만 누르면 됩니다." },
+    { icon: "④", color: T.amber, title: "QA 검증 & 승인 (Gemini)", desc: "HITL 검토 탭에서 산출물 선택 → [QA 검증 실행]으로 Gemini AI가 품질을 점검합니다. 검토 후 [승인] 또는 [거부]를 결정합니다." },
+    { icon: "⑤", color: T.green, title: "다운로드", desc: "각 산출물의 [⬇ MD] 또는 [JSON] 버튼으로 개별 저장, 상단 [⬇ 전체 다운로드]로 모든 산출물을 한 번에 내보낼 수 있습니다." },
   ];
-  const processCoverage = PROCESSES.map(p => ({
-    ...p, count: wps.filter(w => w.process_id === p.id).length,
-    approved: wps.filter(w => w.process_id === p.id && w.status === "승인됨").length,
-  }));
-
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>ASPICE 4.0 AI 산출물 플랫폼</h1>
-        <p style={{ color: T.muted, fontSize: 13 }}>SYS.1~SYS.5 산출물 자동 생성 · QA 검증 · 양방향 추적성 관리</p>
-      </div>
-
-      {/* 통계 카드 */}
-      <div className="grid4" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 12, marginBottom: 24 }}>
-        {stats.map(s => (
-          <Card key={s.label} style={{ padding: "16px 18px" }}>
-            <div style={{ fontSize: 11, color: T.muted, marginBottom: 6 }}>{s.label}</div>
-            <div style={{ fontSize: 28, fontWeight: 700, color: s.color, lineHeight: 1 }}>{s.value}</div>
-          </Card>
-        ))}
-      </div>
-
-      {/* 프로세스 커버리지 */}
-      <Card style={{ padding: 20, marginBottom: 20 }}>
-        <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>V-Model 프로세스 현황</h2>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {processCoverage.map(p => (
-            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 30, height: 30, borderRadius: 8, background: p.color + "20", border: `1px solid ${p.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: p.color, flexShrink: 0 }}>{p.icon}</div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.label}</div>
-                <div style={{ height: 4, background: T.border, borderRadius: 4, overflow: "hidden" }}>
-                  <div style={{ height: "100%", background: p.color, borderRadius: 4, width: p.count > 0 ? "100%" : "0%", transition: "width .5s" }} />
-                </div>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: 32, maxWidth: 580, width: "100%", maxHeight: "90vh", overflowY: "auto", animation: "fadeIn .25s ease" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>📖 사용 가이드</h2>
+            <p style={{ fontSize: 12, color: T.muted }}>ASPICE AI Platform — 5단계로 완성하는 ASPICE 산출물</p>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
+          {steps.map((s, i) => (
+            <div key={i} style={{ display: "flex", gap: 14, padding: "14px 16px", background: T.bg, borderRadius: 12, border: `1px solid ${T.border}` }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: s.color + "20", border: `1px solid ${s.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: s.color, fontWeight: 800, flexShrink: 0 }}>{s.icon}</div>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: s.color }}>{s.title}</div>
+                <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7 }}>{s.desc}</div>
               </div>
-              <div style={{ fontSize: 11, color: T.muted, flexShrink: 0 }}>{p.count}건 / {p.approved}승인</div>
             </div>
           ))}
         </div>
-      </Card>
-
-      {/* 산출물 목록 */}
-      <Card style={{ padding: 20 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 600 }}>최근 산출물</h2>
-          <Btn size="sm" onClick={() => nav("generate")}>+ 산출물 생성</Btn>
+        <div style={{ padding: "14px 16px", background: T.accentGlow, border: `1px solid ${T.accentDim}`, borderRadius: 12, marginBottom: 20 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.accent, marginBottom: 6 }}>💡 파이프라인 핵심 원리</div>
+          <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.8 }}>
+            <span style={{ color: T.accent }}>SYS.1 OUT</span> → <span style={{ color: T.purple }}>SYS.2 IN</span> → <span style={{ color: T.purple }}>SYS.2 OUT</span> → <span style={{ color: T.teal }}>SYS.3 IN</span> → <span style={{ color: T.teal }}>SYS.3 OUT</span> → <span style={{ color: T.amber }}>SYS.4 IN</span><br />
+            각 단계 산출물이 자동으로 다음 단계의 입력이 됩니다.
+          </div>
         </div>
-        {loading ? <Spinner text="산출물 불러오는 중…" /> :
-          wps.length === 0 ? <EmptyState icon="◈" title="산출물이 없습니다" desc="ASPICE 프로세스별 산출물을 AI로 자동 생성해보세요." action={<Btn onClick={() => nav("generate")}>첫 산출물 생성하기</Btn>} /> :
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {wps.slice(0, 10).map(wp => (
-                <WPCard key={wp.id} wp={wp} onClick={() => nav("detail", wp)} />
-              ))}
-            </div>
-        }
-      </Card>
-
-      {/* ASPICE V-Model 안내 */}
-      <Card style={{ padding: 20, marginTop: 20 }}>
-        <h2 style={{ fontSize: 13, fontWeight: 600, marginBottom: 14, color: T.muted }}>ASPICE V-Model 추적성 원칙</h2>
-        <div className="grid3" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
-          {[
-            { left: "SYS.1 STK-REQ", right: "Acceptance Test", color: T.accent, note: "STK-REQ는 Acceptance Test에서 직접 검증" },
-            { left: "SYS.2 SYS-REQ", right: "SYS.5 Qualification", color: T.purple, note: "SYS-REQ는 SYS.5에서 직접 검증" },
-            { left: "SYS.3 Architecture", right: "SYS.4 Integration", color: T.teal, note: "Interface/Element는 SYS.4에서 직접 검증" },
-          ].map(r => (
-            <div key={r.left} style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
-              <div style={{ fontSize: 11, color: r.color, fontWeight: 600, minWidth: 80 }}>{r.left}</div>
-              <div style={{ color: T.muted, fontSize: 12 }}>↔</div>
-              <div style={{ fontSize: 11, color: r.color, fontWeight: 600, minWidth: 80 }}>{r.right}</div>
-              <div style={{ fontSize: 10, color: T.muted, flex: 1 }}>{r.note}</div>
-            </div>
-          ))}
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-function WPCard({ wp, onClick }) {
-  const proc = PROCESSES.find(p => p.id === wp.process_id);
-  return (
-    <div onClick={onClick} style={{ padding: "12px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, cursor: "pointer", transition: "border-color .2s" }}
-      onMouseEnter={e => e.currentTarget.style.borderColor = T.borderHover}
-      onMouseLeave={e => e.currentTarget.style.borderColor = T.border}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 6 }}>
-        <div style={{ fontWeight: 600, fontSize: 13 }}>{wp.title || wp.process_id}</div>
-        <StatusBadge status={wp.status || "초안"} />
-      </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <Badge color={proc?.color || T.accent}>{wp.process_id}</Badge>
-        {wp.qa_result && <Badge color={T.purple}>QA완료</Badge>}
-        <span style={{ fontSize: 11, color: T.muted, marginLeft: "auto" }}>{wp.created_at ? new Date(wp.created_at).toLocaleDateString("ko-KR") : ""}</span>
+        <Btn onClick={onClose} style={{ width: "100%", justifyContent: "center" }}>시작하기 →</Btn>
       </div>
     </div>
   );
 }
 
-// ── 산출물 생성 페이지 ────────────────────────────────────────────────────────
-function GeneratePage({ onSave, nav }) {
-  const [step, setStep] = useState(0);
-  const [projectInfo, setProjectInfo] = useState({ name: "", domain: "자동차 부품", description: "" });
-  const [selectedProcess, setSelectedProcess] = useState(null);
-  const [context, setContext] = useState("");
-  const [generating, setGenerating] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
+// ── 프로젝트 목록 페이지 ─────────────────────────────────────────────────────
+function ProjectListPage({ projects, loading, onSelect, onRefresh }) {
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ name: "", domain: "자동차 부품", description: "" });
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  const domainOptions = ["자동차 부품", "소프트웨어 시스템", "하드웨어 시스템", "임베디드 시스템", "IT 서비스", "항공우주", "의료기기"];
-
-  async function handleGenerate() {
-    if (!selectedProcess || !projectInfo.name) { setError("프로젝트명과 프로세스를 선택하세요."); return; }
-    setGenerating(true); setError(""); setResult(null);
+  async function handleCreate() {
+    if (!form.name.trim()) { setError("프로젝트명을 입력하세요."); return; }
+    setSaving(true); setError("");
     try {
-      const wp = await generateWorkProduct(selectedProcess.id, context, projectInfo);
-      setResult(wp);
-      setStep(2);
+      await apiCall("/api/projects?resource=projects", "POST", { ...form, status: "active" });
+      await onRefresh();
+      setCreating(false);
+      setForm({ name: "", domain: "자동차 부품", description: "" });
     } catch (e) { setError("생성 실패: " + e.message); }
-    setGenerating(false);
+    setSaving(false);
   }
 
-  async function handleSave(status = "초안") {
-    if (!result) return;
-    setSaving(true);
-    try {
-      await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          process_id: selectedProcess.id,
-          title: result.title || selectedProcess.label,
-          project_name: projectInfo.name,
-          domain: projectInfo.domain,
-          content: JSON.stringify(result),
-          status,
-          created_at: new Date().toISOString(),
-        }),
-      });
-      await onSave();
-      nav("dashboard");
-    } catch (e) { setError("저장 실패: " + e.message); }
-    setSaving(false);
+  async function handleDelete(id, e) {
+    e.stopPropagation();
+    if (!confirm("프로젝트와 모든 산출물을 삭제합니다. 계속할까요?")) return;
+    await apiCall(`/api/projects?resource=projects&id=${id}`, "DELETE");
+    await onRefresh();
   }
 
   return (
     <div style={{ maxWidth: 900, margin: "0 auto" }}>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>ASPICE 산출물 생성</h1>
-        <p style={{ color: T.muted, fontSize: 13 }}>AI가 ASPICE 4.0 기준에 맞는 산출물을 자동으로 생성합니다.</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>ASPICE 프로젝트</h1>
+          <p style={{ color: T.muted, fontSize: 13 }}>프로젝트를 생성하고 SYS.1~SYS.5 산출물을 파이프라인으로 자동 생성합니다.</p>
+        </div>
+        <Btn onClick={() => setCreating(true)}>+ 새 프로젝트</Btn>
       </div>
 
-      {/* 스텝 표시 */}
-      <div style={{ display: "flex", gap: 0, marginBottom: 28, position: "relative" }}>
-        <div style={{ position: "absolute", top: 11, left: 11, right: 11, height: 2, background: T.border }} />
-        <div style={{ position: "absolute", top: 11, left: 11, height: 2, background: T.accent, transition: "width .4s", width: step === 0 ? "0%" : step === 1 ? "50%" : "100%" }} />
-        {["프로젝트 설정", "프로세스 & 컨텍스트", "결과 확인"].map((s, i) => (
-          <div key={s} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 6, zIndex: 1 }}>
-            <div style={{ width: 22, height: 22, borderRadius: "50%", background: i <= step ? T.accent : T.surface, border: `2px solid ${i <= step ? T.accent : T.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 9, fontWeight: 700, color: i <= step ? "#fff" : T.muted }}>
-              {i < step ? "✓" : i + 1}
+      {creating && (
+        <Card style={{ padding: 24, marginBottom: 24, border: `1px solid ${T.accent}` }}>
+          <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16, color: T.accent }}>새 프로젝트 생성</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <Input label="프로젝트명" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="예: 헤드램프 제어 시스템 개발" required />
+            <Select label="도메인" value={form.domain} onChange={v => setForm(f => ({ ...f, domain: v }))} options={DOMAIN_OPTIONS} />
+            <Textarea label="프로젝트 설명 (선택)" value={form.description} onChange={v => setForm(f => ({ ...f, description: v }))} placeholder="프로젝트의 목적과 범위를 설명하세요." rows={3} />
+            {error && <div style={{ color: T.red, fontSize: 12, padding: "8px 12px", background: T.redDim, borderRadius: 8 }}>{error}</div>}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <Btn variant="ghost" onClick={() => { setCreating(false); setError(""); }}>취소</Btn>
+              <Btn onClick={handleCreate} disabled={saving}>{saving ? "생성 중…" : "프로젝트 생성"}</Btn>
             </div>
-            <span style={{ fontSize: 10, color: i === step ? T.accent : T.muted, fontWeight: i === step ? 600 : 400, textAlign: "center" }}>{s}</span>
           </div>
-        ))}
+        </Card>
+      )}
+
+      {loading ? <Spinner text="프로젝트 불러오는 중…" /> :
+        projects.length === 0 ? (
+          <EmptyState icon="◈" title="프로젝트가 없습니다" desc="ASPICE 산출물을 관리할 프로젝트를 먼저 생성하세요."
+            action={<Btn onClick={() => setCreating(true)}>첫 프로젝트 만들기</Btn>} />
+        ) : (
+          <div className="grid2" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 14 }}>
+            {projects.map(proj => (
+              <ProjectCard key={proj.id} project={proj} onClick={() => onSelect(proj)} onDelete={(e) => handleDelete(proj.id, e)} />
+            ))}
+          </div>
+        )}
+    </div>
+  );
+}
+
+function ProjectCard({ project, onClick, onDelete }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      style={{ padding: "20px 22px", background: T.surface, border: `1px solid ${hov ? T.accent : T.border}`, borderRadius: 14, cursor: "pointer", transition: "all .2s", boxShadow: hov ? `0 0 24px ${T.accentGlow}` : "none" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{project.name}</div>
+          {project.description && <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.6 }}>{project.description}</div>}
+        </div>
+        <button onClick={onDelete} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 14, padding: "2px 6px", borderRadius: 6, flexShrink: 0, marginLeft: 10 }}>✕</button>
       </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <Badge color={T.accent}>{project.domain}</Badge>
+        <span style={{ fontSize: 11, color: T.muted, marginLeft: "auto" }}>{project.created_at ? new Date(project.created_at).toLocaleDateString("ko-KR") : ""}</span>
+      </div>
+      <div style={{ marginTop: 14 }}>
+        <span style={{ fontSize: 11, color: T.accent, fontWeight: 600 }}>파이프라인 열기 →</span>
+      </div>
+    </div>
+  );
+}
 
-      <Card style={{ padding: 24, marginBottom: 16 }}>
-        {step === 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>프로젝트 정보 입력</h2>
-            <Input label="프로젝트명" value={projectInfo.name} onChange={v => setProjectInfo(p => ({ ...p, name: v }))} placeholder="예: 헤드램프 제어 시스템 개발" required />
-            <Select label="도메인" value={projectInfo.domain} onChange={v => setProjectInfo(p => ({ ...p, domain: v }))} options={domainOptions} />
-            <Textarea label="프로젝트 설명 (선택)" value={projectInfo.description} onChange={v => setProjectInfo(p => ({ ...p, description: v }))} placeholder="프로젝트의 주요 목적과 범위를 설명하세요." rows={3} />
+// ── 파이프라인 페이지 ─────────────────────────────────────────────────────────
+function PipelinePage({ project, workProducts, onRefresh, nav }) {
+  const [activeProcess, setActiveProcess] = useState(null);
+  const [generatingId, setGeneratingId] = useState(null);
+  const [viewingWP, setViewingWP] = useState(null);
+  const [error, setError] = useState("");
+  const [contextInputs, setContextInputs] = useState({});
+
+  const wpByProcess = {};
+  PROCESSES.forEach(p => { wpByProcess[p.id] = workProducts.filter(w => w.process_id === p.id); });
+
+  function buildPrevContents(processId) {
+    const prevContents = {};
+    const idx = PROCESSES.findIndex(p => p.id === processId);
+    for (let i = 0; i < idx; i++) {
+      const prevId = PROCESSES[i].id;
+      const prevWPs = wpByProcess[prevId];
+      if (prevWPs?.length) prevContents[prevId] = prevWPs[prevWPs.length - 1].content;
+    }
+    return prevContents;
+  }
+
+  async function handleGenerate(processId) {
+    setGeneratingId(processId); setError("");
+    try {
+      const proc = PROCESSES.find(p => p.id === processId);
+      const result = await generateWorkProduct(processId, contextInputs[processId] || "", project, buildPrevContents(processId));
+      await apiCall("/api/projects?resource=work_products", "POST", {
+        project_id: project.id,
+        process_id: processId,
+        title: result.title || proc.label,
+        domain: project.domain,
+        content: JSON.stringify(result),
+        status: "초안",
+        created_at: new Date().toISOString(),
+      });
+      await onRefresh();
+      setActiveProcess(null);
+    } catch (e) { setError(`[${processId}] 생성 실패: ${e.message}`); }
+    setGeneratingId(null);
+  }
+
+  async function handleDelete(wpId) {
+    if (!confirm("이 산출물을 삭제합니까?")) return;
+    await apiCall(`/api/projects?resource=work_products&id=${wpId}`, "DELETE");
+    await onRefresh();
+  }
+
+  return (
+    <div style={{ maxWidth: 980, margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+            <button onClick={() => nav("home")} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 18 }}>←</button>
+            <h1 style={{ fontSize: 20, fontWeight: 700 }}>{project.name}</h1>
           </div>
-        )}
-
-        {step === 1 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
-            <h2 style={{ fontSize: 15, fontWeight: 600 }}>프로세스 선택 및 컨텍스트 입력</h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {PROCESSES.map(p => (
-                <div key={p.id} onClick={() => setSelectedProcess(p)}
-                  style={{ padding: 16, borderRadius: 12, border: `2px solid ${selectedProcess?.id === p.id ? p.color : T.border}`, background: selectedProcess?.id === p.id ? p.color + "10" : T.bg, cursor: "pointer", transition: "all .2s" }}>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 4 }}>
-                    <span style={{ fontSize: 18 }}>{p.icon}</span>
-                    <span style={{ fontWeight: 700, fontSize: 14, color: selectedProcess?.id === p.id ? p.color : T.text }}>{p.label}</span>
-                  </div>
-                  <div style={{ fontSize: 12, color: T.muted, paddingLeft: 28 }}>{p.desc}</div>
-                </div>
-              ))}
-            </div>
-            <Textarea label="컨텍스트 / 추가 정보" value={context} onChange={setContext}
-              placeholder={`예: 전방 카메라 기반 자동 하이빔 제어, ECE R48 법규 준수 필요\n이해관계자: 운전자, 차량 OEM, 법규 기관\n주요 기능: 야간 가시성 확보, 눈부심 방지, 코너링 조명`}
-              rows={5} />
-            {generating && <Spinner />}
-            {error && <div style={{ color: T.red, fontSize: 12, padding: "10px 14px", background: T.redDim, borderRadius: 9 }}>{error}</div>}
-          </div>
-        )}
-
-        {step === 2 && result && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h2 style={{ fontSize: 15, fontWeight: 600 }}>생성 결과</h2>
-              <Btn size="sm" variant="outline" onClick={() => { setResult(null); setStep(1); }}>재생성</Btn>
-            </div>
-            <WPResultViewer wp={result} process={selectedProcess} />
-            {error && <div style={{ color: T.red, fontSize: 12, padding: "10px 14px", background: T.redDim, borderRadius: 9 }}>{error}</div>}
-          </div>
-        )}
-      </Card>
-
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <Btn variant="ghost" onClick={() => step > 0 ? setStep(s => s - 1) : nav("dashboard")}>← 이전</Btn>
+          <p style={{ color: T.muted, fontSize: 12, paddingLeft: 28 }}>{project.domain} · SYS.1~SYS.5 파이프라인</p>
+        </div>
         <div style={{ display: "flex", gap: 8 }}>
-          {step === 1 && <Btn onClick={handleGenerate} disabled={!selectedProcess || !projectInfo.name || generating}>⚡ AI 생성</Btn>}
-          {step === 0 && <Btn disabled={!projectInfo.name} onClick={() => setStep(1)}>다음 →</Btn>}
-          {step === 2 && result && (
+          {workProducts.length > 0 && (
             <>
-              <Btn variant="ghost" onClick={() => handleSave("초안")} disabled={saving}>초안 저장</Btn>
-              <Btn onClick={() => handleSave("검토중")} disabled={saving}>{saving ? "저장 중…" : "검토 요청"}</Btn>
+              <Btn variant="outline" size="sm" onClick={() => downloadAllMarkdown(workProducts, project)}>⬇ 전체 다운로드</Btn>
+              <Btn variant="ghost" size="sm" onClick={() => downloadJSON(workProducts.map(w => ({ process: w.process_id, ...w.content })), `${project.name}_all.json`)}>JSON</Btn>
             </>
+          )}
+        </div>
+      </div>
+
+      {/* 파이프라인 흐름 표시 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: 24, overflowX: "auto", paddingBottom: 8 }}>
+        {PROCESSES.map((proc, idx) => {
+          const done = wpByProcess[proc.id]?.length > 0;
+          return (
+            <div key={proc.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+              <div style={{ textAlign: "center", width: 72 }}>
+                <div style={{ width: 42, height: 42, borderRadius: "50%", background: done ? proc.color : T.surface, border: `2px solid ${done ? proc.color : T.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: done ? "#fff" : T.muted, margin: "0 auto 6px" }}>
+                  {done ? "✓" : proc.icon}
+                </div>
+                <div style={{ fontSize: 10, color: done ? proc.color : T.muted, fontWeight: done ? 700 : 400 }}>{proc.id}</div>
+              </div>
+              {idx < PROCESSES.length - 1 && (
+                <div style={{ width: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                  <div style={{ width: "100%", height: 2, background: wpByProcess[proc.id]?.length > 0 ? proc.color : T.border }} />
+                  <div style={{ fontSize: 9, color: T.muted }}>OUT→IN</div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {error && <div style={{ color: T.red, fontSize: 12, padding: "10px 14px", background: T.redDim, borderRadius: 10, marginBottom: 16 }}>{error}</div>}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {PROCESSES.map((proc, idx) => {
+          const wps = wpByProcess[proc.id];
+          const hasPrev = idx === 0 || wpByProcess[PROCESSES[idx - 1].id]?.length > 0;
+          const isActive = activeProcess === proc.id;
+          const isGenerating = generatingId === proc.id;
+
+          return (
+            <Card key={proc.id} style={{ padding: 0, overflow: "hidden", border: `1px solid ${wps?.length ? proc.color + "44" : T.border}` }}>
+              <div style={{ padding: "16px 20px", background: wps?.length ? proc.color + "0D" : "transparent", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: proc.color + "20", border: `1px solid ${proc.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: proc.color, flexShrink: 0 }}>{proc.icon}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: proc.color }}>{proc.label}</div>
+                  <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{proc.desc}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                  {wps?.length > 0 && <Badge color={proc.color}>{wps.length}개</Badge>}
+                  {!hasPrev && idx > 0 && <Badge color={T.muted}>이전 단계 필요</Badge>}
+                </div>
+              </div>
+
+              {wps?.length > 0 && (
+                <div style={{ padding: "12px 20px", borderBottom: `1px solid ${T.border}` }}>
+                  {wps.map(wp => (
+                    <div key={wp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wp.content?.title || proc.label}</div>
+                        <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{proc.outputSummary(wp.content)}</div>
+                      </div>
+                      <StatusBadge status={wp.status} />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <Btn size="sm" variant="ghost" onClick={() => setViewingWP({ wp, proc })}>보기</Btn>
+                        <Btn size="sm" variant="outline" onClick={() => downloadMarkdown(wp.content, project, proc)}>⬇ MD</Btn>
+                        <Btn size="sm" variant="ghost" onClick={() => downloadJSON(wp.content, `${project.name}_${proc.id}.json`)}>JSON</Btn>
+                        <Btn size="sm" variant="ghost" style={{ color: T.red }} onClick={() => handleDelete(wp.id)}>✕</Btn>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ padding: "14px 20px" }}>
+                {isActive ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    {idx > 0 && (
+                      <div style={{ padding: "8px 12px", background: proc.color + "10", border: `1px solid ${proc.color}30`, borderRadius: 8, fontSize: 11, color: T.muted }}>
+                        ⟳ <strong style={{ color: proc.color }}>이전 단계 산출물 자동 주입됨</strong> — 추가 맥락만 입력하세요.
+                      </div>
+                    )}
+                    <Textarea label={proc.inputLabel} value={contextInputs[proc.id] || ""} onChange={v => setContextInputs(c => ({ ...c, [proc.id]: v }))} placeholder={proc.inputPlaceholder} rows={4} />
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <Btn variant="ghost" onClick={() => setActiveProcess(null)}>취소</Btn>
+                      <Btn onClick={() => handleGenerate(proc.id)} disabled={isGenerating || !hasPrev}>
+                        {isGenerating ? "생성 중…" : `⚡ ${proc.id} AI 생성`}
+                      </Btn>
+                    </div>
+                    {isGenerating && <Spinner text={`${proc.id} 산출물 AI 생성 중…`} />}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <Btn size="sm" onClick={() => setActiveProcess(proc.id)} disabled={!hasPrev || generatingId !== null}
+                      style={{ background: proc.color, borderColor: proc.color }}>
+                      {wps?.length ? `+ 재생성` : `⚡ ${proc.id} 생성`}
+                    </Btn>
+                    {!hasPrev && idx > 0 && (
+                      <span style={{ fontSize: 11, color: T.muted, alignSelf: "center" }}>← {PROCESSES[idx - 1].id}를 먼저 생성하세요</span>
+                    )}
+                  </div>
+                )}
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {viewingWP && <WPDetailModal wpData={viewingWP} project={project} onClose={() => setViewingWP(null)} />}
+    </div>
+  );
+}
+
+// ── 산출물 상세 모달 ─────────────────────────────────────────────────────────
+function WPDetailModal({ wpData, project, onClose }) {
+  const { wp, proc } = wpData;
+  const [tab, setTab] = useState("content");
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, width: "100%", maxWidth: 780, maxHeight: "92vh", display: "flex", flexDirection: "column", animation: "fadeIn .25s ease" }}>
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <Badge color={proc.color}>{proc.id}</Badge>
+            <span style={{ fontSize: 14, fontWeight: 700 }}>{wp.content?.title || proc.label}</span>
+            <StatusBadge status={wp.status} />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Btn size="sm" variant="outline" onClick={() => downloadMarkdown(wp.content, project, proc)}>⬇ MD</Btn>
+            <Btn size="sm" variant="ghost" onClick={() => downloadJSON(wp.content, `${project.name}_${proc.id}.json`)}>JSON</Btn>
+            <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 20 }}>✕</button>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 2, padding: "10px 24px 0", flexShrink: 0, borderBottom: `1px solid ${T.border}` }}>
+          {[["content", "산출물 내용"], ["raw", "Raw JSON"]].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              style={{ padding: "7px 16px", borderRadius: "8px 8px 0 0", fontSize: 12, fontWeight: tab === id ? 700 : 400, background: tab === id ? T.bg : "transparent", color: tab === id ? T.text : T.muted, border: `1px solid ${tab === id ? T.border : "transparent"}`, borderBottom: "none", cursor: "pointer", fontFamily: "inherit" }}>
+              {label}
+            </button>
+          ))}
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+          {tab === "content" && <WPResultViewer wp={wp.content} process={proc} />}
+          {tab === "raw" && (
+            <pre style={{ fontSize: 11, color: T.text, fontFamily: "JetBrains Mono, monospace", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap" }}>
+              {JSON.stringify(wp.content, null, 2)}
+            </pre>
           )}
         </div>
       </div>
@@ -570,64 +736,50 @@ function GeneratePage({ onSave, nav }) {
 }
 
 // ── 산출물 결과 뷰어 ─────────────────────────────────────────────────────────
-function WPResultViewer({ wp, process }) {
-  if (!wp) return null;
-  const color = process?.color || T.accent;
-
+function WPResultViewer({ wp, process: proc }) {
+  if (!wp) return <EmptyState icon="◈" title="내용 없음" desc="산출물 데이터가 없습니다." />;
+  const color = proc?.color || T.accent;
   const renderArray = (arr, fields) => {
-    if (!arr || !arr.length) return <div style={{ color: T.muted, fontSize: 12 }}>데이터 없음</div>;
+    if (!arr?.length) return <div style={{ color: T.muted, fontSize: 12, padding: "8px 0" }}>데이터 없음</div>;
     return arr.map((item, i) => (
       <div key={i} style={{ padding: "12px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
         {fields.map(f => item[f] !== undefined && (
-          <div key={f} style={{ marginBottom: 4 }}>
-            <span style={{ fontSize: 10, color: T.muted, fontWeight: 600, textTransform: "uppercase", marginRight: 6 }}>{f}:</span>
-            <span style={{ fontSize: 12, color: T.text }}>{Array.isArray(item[f]) ? item[f].join(", ") : String(item[f])}</span>
+          <div key={f} style={{ marginBottom: 5, display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <span style={{ fontSize: 10, color: T.muted, fontWeight: 700, textTransform: "uppercase", minWidth: 80, flexShrink: 0, paddingTop: 1 }}>{f}:</span>
+            <span style={{ fontSize: 12, color: T.text, lineHeight: 1.6, flex: 1 }}>{Array.isArray(item[f]) ? item[f].join(", ") : typeof item[f] === "object" ? JSON.stringify(item[f]) : String(item[f])}</span>
           </div>
         ))}
       </div>
     ));
   };
-
   const sections = {
-    "SYS.1": [
-      { key: "needs", label: "Needs", fields: ["id", "description", "source"] },
-      { key: "requirements", label: "Stakeholder Requirements", fields: ["id", "title", "description", "priority", "acceptance_criteria"] },
-      { key: "traceability", label: "추적성", fields: ["need_id", "req_id", "relation"] },
-    ],
-    "SYS.2": [
-      { key: "requirements", label: "System Requirements", fields: ["id", "title", "type", "description", "relation_type"] },
-      { key: "verification_criteria", label: "Verification Criteria", fields: ["id", "req_id", "method", "acceptance_criteria"] },
-    ],
-    "SYS.3": [
-      { key: "system_elements", label: "System Elements", fields: ["id", "name", "type", "description", "allocated_requirements"] },
-      { key: "interfaces", label: "Interfaces", fields: ["id", "name", "source", "target", "protocol"] },
-    ],
-    "SYS.4": [
-      { key: "test_cases", label: "Integration Test Cases", fields: ["id", "title", "primary_target", "integrated_elements", "related_sys_req", "pass_criteria", "note"] },
-    ],
-    "SYS.5": [
-      { key: "test_cases", label: "Qualification Test Cases", fields: ["id", "title", "system_requirements", "reference_stk_req", "test_type", "pass_criteria", "note"] },
-    ],
+    "SYS.1": [{ key: "needs", label: "Needs", fields: ["id", "description", "source"] }, { key: "requirements", label: "Stakeholder Requirements", fields: ["id", "title", "description", "priority", "acceptance_criteria", "stability"] }, { key: "traceability", label: "추적성", fields: ["need_id", "req_id", "relation"] }],
+    "SYS.2": [{ key: "requirements", label: "System Requirements", fields: ["id", "title", "type", "description", "source_stk_req", "priority"] }, { key: "verification_criteria", label: "Verification Criteria", fields: ["id", "req_id", "method", "acceptance_criteria"] }, { key: "traceability", label: "추적성", fields: ["from", "to", "type"] }],
+    "SYS.3": [{ key: "system_elements", label: "System Elements", fields: ["id", "name", "type", "description", "allocated_requirements"] }, { key: "interfaces", label: "Interfaces", fields: ["id", "name", "source", "target", "type", "protocol"] }, { key: "allocation_matrix", label: "Allocation Matrix", fields: ["req_id", "element_id", "rationale"] }],
+    "SYS.4": [{ key: "test_cases", label: "Integration Test Cases", fields: ["id", "title", "objective", "primary_target", "integrated_elements", "pass_criteria"] }],
+    "SYS.5": [{ key: "test_cases", label: "Qualification Test Cases", fields: ["id", "title", "objective", "system_requirements", "test_type", "pass_criteria"] }],
   };
-
+  const processId = wp.process || proc?.id;
   return (
     <div>
-      <div style={{ padding: "14px 16px", background: color + "10", border: `1px solid ${color}30`, borderRadius: 12, marginBottom: 16 }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 6 }}>
-          <Badge color={color}>{wp.process}</Badge>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>{wp.title}</span>
+      <div style={{ padding: "14px 16px", background: color + "10", border: `1px solid ${color}30`, borderRadius: 12, marginBottom: 20 }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8 }}>
+          <Badge color={color}>{processId}</Badge>
+          <span style={{ fontWeight: 700, fontSize: 14 }}>{wp.title}</span>
         </div>
         {wp.summary && (
           <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
             {Object.entries(wp.summary).map(([k, v]) => (
-              <div key={k} style={{ fontSize: 11, color: T.muted }}><span style={{ color: color, fontWeight: 600 }}>{v}</span> {k.replace(/_/g, " ")}</div>
+              <div key={k} style={{ fontSize: 11, color: T.muted }}><span style={{ color, fontWeight: 700 }}>{v}</span> {k.replace(/_/g, " ")}</div>
             ))}
           </div>
         )}
       </div>
-      {(sections[wp.process] || []).map(s => (
-        <div key={s.key} style={{ marginBottom: 20 }}>
-          <h3 style={{ fontSize: 12, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>{s.label}</h3>
+      {(sections[processId] || []).map(s => (
+        <div key={s.key} style={{ marginBottom: 24 }}>
+          <h3 style={{ fontSize: 11, fontWeight: 700, color: T.muted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ width: 3, height: 14, background: color, borderRadius: 2, display: "inline-block" }} />{s.label}
+          </h3>
           {renderArray(wp[s.key], s.fields)}
         </div>
       ))}
@@ -635,118 +787,40 @@ function WPResultViewer({ wp, process }) {
   );
 }
 
-// ── 추적성 분석 페이지 ────────────────────────────────────────────────────────
-function TraceabilityPage({ wps }) {
-  const [analyzing, setAnalyzing] = useState(false);
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState("");
-
-  async function handleAnalyze() {
-    if (wps.length === 0) { setError("산출물이 없습니다. 먼저 산출물을 생성하세요."); return; }
-    setAnalyzing(true); setError(""); setResult(null);
-    try {
-      const r = await analyzeTraceability(wps);
-      setResult(r);
-    } catch (e) { setError("분석 실패: " + e.message); }
-    setAnalyzing(false);
-  }
-
+// ── QA 결과 뷰어 ─────────────────────────────────────────────────────────────
+function QAResultView({ qa }) {
   return (
-    <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>양방향 추적성 분석</h1>
-        <p style={{ color: T.muted, fontSize: 13 }}>Need → STK-REQ → SYS-REQ → Element → VC → Test의 전체 추적성 체인을 분석합니다.</p>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div className="grid4" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
+        {[["종합 점수", qa.overall_score, qa.overall_score >= 80 ? T.green : qa.overall_score >= 60 ? T.amber : T.red], ["완전성", qa.completeness?.score, T.accent], ["일관성", qa.consistency?.score, T.purple], ["추적성", qa.traceability?.score, T.teal]].map(([label, val, color]) => (
+          <div key={label} style={{ padding: "12px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.muted, marginBottom: 4 }}>{label}</div>
+            <div style={{ fontSize: 22, fontWeight: 700, color }}>{val ?? "—"}</div>
+          </div>
+        ))}
       </div>
-
-      {wps.length === 0 ? (
-        <EmptyState icon="⇌" title="산출물 없음" desc="추적성 분석을 위해 먼저 SYS.1~SYS.5 산출물을 생성하세요." />
-      ) : (
-        <Card style={{ padding: 20, marginBottom: 20 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <div>
-              <h2 style={{ fontSize: 14, fontWeight: 600 }}>산출물 현황 ({wps.length}건)</h2>
-              <p style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>선택된 모든 산출물의 추적성을 AI로 분석합니다.</p>
+      {qa.issues?.length > 0 && (
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 10 }}>이슈 ({qa.summary?.total_issues}건)</div>
+          {qa.issues.map((issue, i) => (
+            <div key={i} style={{ padding: "10px 12px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 6 }}><SeverityBadge severity={issue.severity} /><Badge color={T.muted}>{issue.category}</Badge></div>
+              <div style={{ fontSize: 12, marginBottom: 4 }}>{issue.description}</div>
+              {issue.recommendation && <div style={{ fontSize: 11, color: T.teal, marginTop: 4 }}>권장: {issue.recommendation}</div>}
             </div>
-            <Btn onClick={handleAnalyze} disabled={analyzing}>⇌ 추적성 분석</Btn>
-          </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            {PROCESSES.map(p => {
-              const count = wps.filter(w => w.process_id === p.id).length;
-              return count > 0 && <Badge key={p.id} color={p.color}>{p.id} ({count})</Badge>;
-            })}
-          </div>
-        </Card>
-      )}
-
-      {analyzing && <Spinner text="추적성 분석 중…" />}
-      {error && <div style={{ color: T.red, fontSize: 12, padding: 14, background: T.redDim, borderRadius: 10, marginBottom: 16 }}>{error}</div>}
-
-      {result && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, animation: "fadeIn .4s" }}>
-          {/* Coverage */}
-          <Card style={{ padding: 20 }}>
-            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>커버리지 분석</h2>
-            <div className="grid3" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
-              {Object.entries(result.coverage || {}).map(([k, v]) => (
-                <div key={k} style={{ padding: "10px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}` }}>
-                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>{k.replace(/_/g, " ").toUpperCase()}</div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: v.includes("100%") ? T.green : T.amber }}>{v}</div>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* Forward Chain */}
-          <Card style={{ padding: 20 }}>
-            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Forward Traceability 체인</h2>
-            <div style={{ overflowX: "auto" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 400 }}>
-                {(result.forward_chain || []).map((link, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: T.bg, borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 12 }}>
-                    <span style={{ color: T.accent, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>{link.from}</span>
-                    <span style={{ color: T.muted }}>→</span>
-                    <Badge color={
-                      link.relation === "SATISFIES" ? T.accent : link.relation === "REFINES" ? T.purple :
-                        link.relation === "DERIVES" ? T.purple : link.relation === "ALLOCATED_TO" ? T.teal :
-                          link.relation === "VERIFIED_BY" ? T.green : T.amber
-                    }>{link.relation}</Badge>
-                    <span style={{ color: T.accent, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>{link.to}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Card>
-
-          {/* V-Model 매핑 */}
-          <Card style={{ padding: 20 }}>
-            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>V-Model 매핑</h2>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {(result.v_model_mapping || []).map((m, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}` }}>
-                  <span style={{ fontSize: 12, color: T.accent, fontWeight: 600, flex: 1 }}>{m.left}</span>
-                  <span style={{ color: T.muted, fontSize: 14 }}>{m.relation}</span>
-                  <span style={{ fontSize: 12, color: T.accent, fontWeight: 600, flex: 1, textAlign: "right" }}>{m.right}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          {/* Orphans / Gaps */}
-          {(result.orphans?.length > 0 || result.gaps?.length > 0) && (
-            <Card style={{ padding: 20 }}>
-              <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14, color: T.amber }}>⚠ 추적성 이슈</h2>
-              {result.orphans?.map((o, i) => <div key={i} style={{ color: T.red, fontSize: 12, marginBottom: 4 }}>고아 항목: {JSON.stringify(o)}</div>)}
-              {result.gaps?.map((g, i) => <div key={i} style={{ color: T.amber, fontSize: 12, marginBottom: 4 }}>Gap: {JSON.stringify(g)}</div>)}
-            </Card>
-          )}
+          ))}
         </div>
       )}
+      <div style={{ padding: "10px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
+        <span style={{ fontSize: 11, color: T.muted, marginRight: 8 }}>Gemini 권장:</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: qa.recommendation?.includes("승인") ? T.green : T.amber }}>{qa.recommendation}</span>
+      </div>
     </div>
   );
 }
 
 // ── HITL 검토 페이지 ─────────────────────────────────────────────────────────
-function ReviewPage({ wps, onUpdate, nav }) {
+function ReviewPage({ project, wps, onUpdate, nav }) {
   const [selected, setSelected] = useState(null);
   const [qaRunning, setQaRunning] = useState(false);
   const [qaResult, setQaResult] = useState(null);
@@ -761,12 +835,7 @@ function ReviewPage({ wps, onUpdate, nav }) {
     try {
       const r = await runQACheck(selected.content);
       setQaResult(r);
-      // QA 결과 저장
-      await fetch(`/api/projects?id=${selected.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ qa_result: JSON.stringify(r) }),
-      });
+      await apiCall(`/api/projects?resource=work_products&id=${selected.id}`, "PATCH", { qa_result: JSON.stringify(r) });
       await onUpdate();
     } catch (e) { setError("QA 실패: " + e.message); }
     setQaRunning(false);
@@ -776,11 +845,7 @@ function ReviewPage({ wps, onUpdate, nav }) {
     if (!selected) return;
     setUpdating(true);
     try {
-      await fetch(`/api/projects?id=${selected.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
+      await apiCall(`/api/projects?resource=work_products&id=${selected.id}`, "PATCH", { status });
       await onUpdate();
       setSelected(prev => ({ ...prev, status }));
     } catch (e) { setError("업데이트 실패: " + e.message); }
@@ -789,97 +854,51 @@ function ReviewPage({ wps, onUpdate, nav }) {
 
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>HITL 검토 (Human-in-the-Loop)</h1>
-        <p style={{ color: T.muted, fontSize: 13 }}>AI가 생성한 산출물을 QA 검증 후 승인/거부합니다. 3단계: 제시 → QA검증 → 확정 <span style={{color:T.teal,fontWeight:700}}>· QA 검증 엔진: Gemini 2.0 Flash</span></p>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <button onClick={() => nav("pipeline")} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 18 }}>←</button>
+        <h1 style={{ fontSize: 20, fontWeight: 700 }}>HITL 검토</h1>
       </div>
+      <p style={{ color: T.muted, fontSize: 13, marginBottom: 24, paddingLeft: 28 }}>
+        {project.name} · AI 산출물 QA 검증 → 승인/거부 &nbsp;
+        <span style={{ color: T.teal, fontWeight: 700 }}>· QA 엔진: Gemini 2.0 Flash</span>
+      </p>
 
       <div className="grid2" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
-        {/* 검토 대기 목록 */}
         <Card style={{ padding: 20 }}>
-          <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>검토 대기 산출물 ({pendingWPs.length})</h2>
+          <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>검토 대기 ({pendingWPs.length})</h2>
           {pendingWPs.length === 0 ? (
-            <EmptyState icon="◎" title="검토 대기 없음" desc="검토 요청된 산출물이 없습니다." />
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {pendingWPs.map(wp => (
-                <div key={wp.id} onClick={() => { setSelected(wp); setQaResult(wp.qa_result ? (typeof wp.qa_result === "string" ? JSON.parse(wp.qa_result) : wp.qa_result) : null); }}
-                  style={{ padding: "12px 14px", borderRadius: 10, border: `2px solid ${selected?.id === wp.id ? T.accent : T.border}`, background: selected?.id === wp.id ? T.accentGlow : T.bg, cursor: "pointer", transition: "all .2s" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>{wp.title || wp.process_id}</span>
-                    <StatusBadge status={wp.status} />
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Badge color={PROCESSES.find(p => p.id === wp.process_id)?.color || T.accent}>{wp.process_id}</Badge>
-                    {wp.qa_result && <Badge color={T.purple}>QA완료</Badge>}
-                  </div>
+            <EmptyState icon="◎" title="검토 대기 없음" desc="파이프라인에서 산출물을 생성하세요." action={<Btn onClick={() => nav("pipeline")}>파이프라인으로</Btn>} />
+          ) : pendingWPs.map(wp => {
+            const proc = PROCESSES.find(p => p.id === wp.process_id);
+            return (
+              <div key={wp.id} onClick={() => { setSelected(wp); setQaResult(wp.qa_result); }}
+                style={{ padding: "12px 14px", borderRadius: 10, border: `2px solid ${selected?.id === wp.id ? T.accent : T.border}`, background: selected?.id === wp.id ? T.accentGlow : T.bg, cursor: "pointer", transition: "all .2s", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{wp.content?.title || wp.process_id}</span>
+                  <StatusBadge status={wp.status} />
                 </div>
-              ))}
-            </div>
-          )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Badge color={proc?.color || T.accent}>{wp.process_id}</Badge>
+                  {wp.qa_result && <Badge color={T.purple}>QA완료</Badge>}
+                </div>
+              </div>
+            );
+          })}
         </Card>
 
-        {/* QA 패널 */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div>
           {selected ? (
-            <>
-              <Card style={{ padding: 20 }}>
-                <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>QA 검증 — {selected.title}</h2>
-                <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-                  <Btn onClick={handleQA} disabled={qaRunning}>🔍 QA 검증 실행</Btn>
-                  <Btn variant="success" onClick={() => handleStatusUpdate("승인됨")} disabled={updating}>✓ 승인</Btn>
-                  <Btn variant="danger" onClick={() => handleStatusUpdate("거부됨")} disabled={updating}>✕ 거부</Btn>
-                </div>
-                {qaRunning && <Spinner text="QA Agent 검증 중…" />}
-                {error && <div style={{ color: T.red, fontSize: 12, padding: 10, background: T.redDim, borderRadius: 8 }}>{error}</div>}
-
-                {qaResult && (
-                  <div style={{ animation: "fadeIn .4s" }}>
-                    {/* 점수 */}
-                    <div className="grid3" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 16 }}>
-                      {[
-                        { label: "종합 점수", value: qaResult.overall_score, color: qaResult.overall_score >= 80 ? T.green : qaResult.overall_score >= 60 ? T.amber : T.red },
-                        { label: "완전성", value: qaResult.completeness?.score, color: T.accent },
-                        { label: "일관성", value: qaResult.consistency?.score, color: T.purple },
-                        { label: "추적성", value: qaResult.traceability?.score, color: T.teal },
-                      ].map(s => (
-                        <div key={s.label} style={{ padding: "12px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, textAlign: "center" }}>
-                          <div style={{ fontSize: 10, color: T.muted, marginBottom: 4 }}>{s.label}</div>
-                          <div style={{ fontSize: 22, fontWeight: 700, color: s.color }}>{s.value ?? "—"}</div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* 이슈 목록 */}
-                    {qaResult.issues?.length > 0 && (
-                      <div>
-                        <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: T.muted }}>식별된 이슈 ({qaResult.summary?.total_issues}건)</div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 320, overflowY: "auto" }}>
-                          {qaResult.issues.map((issue, i) => (
-                            <div key={i} style={{ padding: "10px 12px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
-                              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6 }}>
-                                <SeverityBadge severity={issue.severity} />
-                                <Badge color={T.muted}>{issue.category}</Badge>
-                                <span style={{ fontSize: 10, color: T.muted, fontFamily: "JetBrains Mono, monospace" }}>{issue.id}</span>
-                              </div>
-                              <div style={{ fontSize: 12, marginBottom: 4 }}>{issue.description}</div>
-                              {issue.location && <div style={{ fontSize: 11, color: T.muted }}>위치: {issue.location}</div>}
-                              {issue.recommendation && <div style={{ fontSize: 11, color: T.teal, marginTop: 4 }}>권장: {issue.recommendation}</div>}
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* 권장 사항 */}
-                    <div style={{ marginTop: 14, padding: "10px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
-                      <span style={{ fontSize: 11, color: T.muted, marginRight: 8 }}>AI 권장:</span>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: qaResult.recommendation?.includes("승인") ? T.green : T.amber }}>{qaResult.recommendation}</span>
-                    </div>
-                  </div>
-                )}
-              </Card>
-            </>
+            <Card style={{ padding: 20 }}>
+              <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>QA 검증 — {selected.content?.title || selected.process_id}</h2>
+              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+                <Btn onClick={handleQA} disabled={qaRunning}>🔍 QA 검증 실행</Btn>
+                <Btn variant="success" onClick={() => handleStatusUpdate("승인됨")} disabled={updating}>✓ 승인</Btn>
+                <Btn variant="danger" onClick={() => handleStatusUpdate("거부됨")} disabled={updating}>✕ 거부</Btn>
+              </div>
+              {qaRunning && <Spinner text="Gemini QA 검증 중…" />}
+              {error && <div style={{ color: T.red, fontSize: 12, padding: 10, background: T.redDim, borderRadius: 8, marginBottom: 12 }}>{error}</div>}
+              {qaResult && <QAResultView qa={qaResult} />}
+            </Card>
           ) : (
             <Card style={{ padding: 40, textAlign: "center" }}>
               <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.3 }}>◎</div>
@@ -892,78 +911,78 @@ function ReviewPage({ wps, onUpdate, nav }) {
   );
 }
 
-// ── 상세 보기 페이지 ─────────────────────────────────────────────────────────
-function DetailPage({ wp, nav, onUpdate }) {
-  const [tab, setTab] = useState("content");
-  const [confirmDelete, setConfirmDelete] = useState(false);
+// ── 추적성 분석 페이지 ────────────────────────────────────────────────────────
+function TraceabilityPage({ project, wps }) {
+  const [analyzing, setAnalyzing] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
 
-  if (!wp) return <div style={{ padding: 40, color: T.muted }}>산출물을 선택하세요.</div>;
-  const proc = PROCESSES.find(p => p.id === wp.process_id);
-  const qaResult = wp.qa_result ? (typeof wp.qa_result === "string" ? JSON.parse(wp.qa_result) : wp.qa_result) : null;
-
-  async function handleDelete() {
-    await fetch(`/api/projects?id=${wp.id}`, { method: "DELETE" });
-    await onUpdate();
-    nav("dashboard");
+  async function handleAnalyze() {
+    if (!wps.length) { setError("산출물이 없습니다."); return; }
+    setAnalyzing(true); setError(""); setResult(null);
+    try { setResult(await analyzeTraceability(wps)); }
+    catch (e) { setError("분석 실패: " + e.message); }
+    setAnalyzing(false);
   }
 
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-        <button onClick={() => nav("dashboard")} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 20 }}>←</button>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-            <Badge color={proc?.color || T.accent}>{wp.process_id}</Badge>
-            <StatusBadge status={wp.status} />
+      <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>추적성 분석</h1>
+      <p style={{ color: T.muted, fontSize: 13, marginBottom: 24 }}>{project.name} · Need → STK-REQ → SYS-REQ → Element → VC → Test</p>
+      <Card style={{ padding: 20, marginBottom: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div>
+            <h2 style={{ fontSize: 14, fontWeight: 600 }}>산출물 현황 ({wps.length}건)</h2>
+            <p style={{ fontSize: 12, color: T.muted, marginTop: 4 }}>생성된 산출물의 추적성을 AI로 분석합니다.</p>
           </div>
-          <h1 style={{ fontSize: 17, fontWeight: 700 }}>{wp.title}</h1>
+          <Btn onClick={handleAnalyze} disabled={analyzing || !wps.length}>⇌ 분석 실행</Btn>
         </div>
-        {confirmDelete
-          ? <div style={{ display: "flex", gap: 6 }}><Btn variant="danger" onClick={handleDelete} size="sm">삭제 확인</Btn><Btn variant="ghost" onClick={() => setConfirmDelete(false)} size="sm">취소</Btn></div>
-          : <Btn variant="ghost" onClick={() => setConfirmDelete(true)} size="sm" style={{ color: T.red }}>삭제</Btn>
-        }
-      </div>
-
-      <div style={{ display: "flex", gap: 3, marginBottom: 20, background: T.surface, borderRadius: 10, padding: 3, border: `1px solid ${T.border}` }}>
-        {[["content", "산출물 내용"], ["qa", "QA 결과"], ["raw", "Raw JSON"]].map(([id, label]) => (
-          <button key={id} onClick={() => setTab(id)}
-            style={{ flex: 1, padding: "7px 0", borderRadius: 7, fontSize: 12, fontWeight: tab === id ? 700 : 400, background: tab === id ? T.accent : "transparent", color: tab === id ? "#fff" : T.muted, border: "none", cursor: "pointer", fontFamily: "inherit" }}>
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {tab === "content" && <WPResultViewer wp={wp.content} process={proc} />}
-      {tab === "qa" && (
-        qaResult ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <Card style={{ padding: 20 }}>
-              <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>QA 검증 결과</h2>
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-                {[["종합", qaResult.overall_score], ["완전성", qaResult.completeness?.score], ["일관성", qaResult.consistency?.score], ["추적성", qaResult.traceability?.score]].map(([k, v]) => (
-                  <div key={k} style={{ padding: "10px 16px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, textAlign: "center" }}>
-                    <div style={{ fontSize: 10, color: T.muted, marginBottom: 2 }}>{k}</div>
-                    <div style={{ fontSize: 20, fontWeight: 700, color: v >= 80 ? T.green : v >= 60 ? T.amber : T.red }}>{v ?? "—"}</div>
-                  </div>
-                ))}
-              </div>
-              {qaResult.issues?.map((issue, i) => (
-                <div key={i} style={{ padding: "10px 12px", background: T.surface2, borderRadius: 10, marginBottom: 8, border: `1px solid ${T.border}` }}>
-                  <div style={{ display: "flex", gap: 8, marginBottom: 6 }}><SeverityBadge severity={issue.severity} /><Badge color={T.muted}>{issue.category}</Badge></div>
-                  <div style={{ fontSize: 12 }}>{issue.description}</div>
-                  {issue.recommendation && <div style={{ fontSize: 11, color: T.teal, marginTop: 4 }}>권장: {issue.recommendation}</div>}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {PROCESSES.map(p => { const count = wps.filter(w => w.process_id === p.id).length; return count > 0 && <Badge key={p.id} color={p.color}>{p.id} ({count})</Badge>; })}
+        </div>
+      </Card>
+      {analyzing && <Spinner text="추적성 분석 중…" />}
+      {error && <div style={{ color: T.red, fontSize: 12, padding: 14, background: T.redDim, borderRadius: 10, marginBottom: 16 }}>{error}</div>}
+      {result && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16, animation: "fadeIn .4s" }}>
+          <Card style={{ padding: 20 }}>
+            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>커버리지</h2>
+            <div className="grid3" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+              {Object.entries(result.coverage || {}).map(([k, v]) => (
+                <div key={k} style={{ padding: "10px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}` }}>
+                  <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>{k.replace(/_/g, " ").toUpperCase()}</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: String(v).includes("100%") ? T.green : T.amber }}>{v}</div>
                 </div>
               ))}
-            </Card>
-          </div>
-        ) : <EmptyState icon="🔍" title="QA 미실행" desc="HITL 검토 페이지에서 QA를 실행하세요." action={<Btn onClick={() => nav("review")}>검토 페이지로</Btn>} />
-      )}
-      {tab === "raw" && (
-        <Card style={{ padding: 20 }}>
-          <pre style={{ fontSize: 11, color: T.text, fontFamily: "JetBrains Mono, monospace", lineHeight: 1.7, overflowX: "auto", whiteSpace: "pre-wrap" }}>
-            {JSON.stringify(wp.content, null, 2)}
-          </pre>
-        </Card>
+            </div>
+          </Card>
+          <Card style={{ padding: 20 }}>
+            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>Forward Traceability</h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {(result.forward_chain || []).map((link, i) => {
+                const relColor = { SATISFIES: T.accent, REFINES: T.purple, DERIVES: T.purple, ALLOCATED_TO: T.teal, VERIFIED_BY: T.green, TESTED_BY: T.amber }[link.relation] || T.muted;
+                return (
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: T.bg, borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 12 }}>
+                    <span style={{ color: T.accent, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>{link.from}</span>
+                    <span style={{ color: T.muted }}>→</span>
+                    <Badge color={relColor}>{link.relation}</Badge>
+                    <span style={{ color: T.accent, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>{link.to}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+          <Card style={{ padding: 20 }}>
+            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>V-Model 매핑</h2>
+            {(result.v_model_mapping || []).map((m, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
+                <span style={{ fontSize: 12, color: T.accent, fontWeight: 600, flex: 1 }}>{m.left}</span>
+                <span style={{ color: T.muted, fontSize: 14 }}>{m.relation}</span>
+                <span style={{ fontSize: 12, color: T.accent, fontWeight: 600, flex: 1, textAlign: "right" }}>{m.right}</span>
+              </div>
+            ))}
+          </Card>
+        </div>
       )}
     </div>
   );
