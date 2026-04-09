@@ -82,7 +82,7 @@ async function callClaude(systemMsg, userMsg, maxTokens = 8000) {
 
 // ── Gemini QA 호출 ────────────────────────────────────────────────────────────
 async function callGeminiQA(workProduct) {
-  const prompt = `당신은 ASPICE 4.0 QA 전문가입니다. 아래 산출물을 검증하고 반드시 JSON만 응답하세요. 마크다운 없이 JSON만 출력하세요.
+  const prompt = `당신은 ASPICE 4.0 QA 전문가입니다. 반드시 한국어로 작성하세요. description과 recommendation 필드는 반드시 한국어로 작성하세요. 아래 산출물을 검증하고 반드시 JSON만 응답하세요. 마크다운 없이 JSON만 출력하세요.
 
 산출물:
 ${JSON.stringify(workProduct, null, 2)}
