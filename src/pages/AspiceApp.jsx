@@ -372,74 +372,98 @@ function pHRule() {
 }
 
 // 2열 상세 표 (왼쪽=라벨 남색, 오른쪽=값)
-function tbl2col(rows, colW1 = 2400, colW2 = 6960) {
-  const bdr = `<w:top w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:left w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:right w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>`;
-  const marg = `<w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tcMar>`;
+function tbl2col(rows, colW1, colW2) {
+  colW1 = colW1 || 2400; colW2 = colW2 || 6960;
+  var bdr = '<w:top w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:left w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:right w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>';
+  var mar1 = '<w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tcMar>';
+  var mar2 = '<w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar>';
 
-  const rowsXml = rows.map(([label, value]) => {
-    // 값이 배열이거나 줄바꿈 포함 시 여러 단락으로 분리
-    const vals = String(value || "").split(/\n|\\n/).filter(Boolean);
-    const valParas = vals.map((v, i) =>
-      `<w:p><w:pPr><w:spacing w:after="${i < vals.length - 1 ? "60" : "0"}"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr><w:t xml:space="preserve">${ex(v)}</w:t></w:r></w:p>`
-    ).join("") || `<w:p><w:r><w:t></w:t></w:r></w:p>`;
-
-    return `<w:tr>
-      <w:tc>
-        <w:tcPr><w:tcW w:w="${colW1}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1E3A6E"/><w:tblCellBdr>${bdr}</w:tblCellBdr>${marg}</w:tcPr>
-        <w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="19"/><w:szCs w:val="19"/></w:rPr><w:t xml:space="preserve">${ex(label)}</w:t></w:r></w:p>
-      </w:tc>
-      <w:tc>
-        <w:tcPr><w:tcW w:w="${colW2}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="F8FAFC"/><w:tblCellBdr>${bdr}</w:tblCellBdr>${marg}</w:tcPr>
-        ${valParas}
-      </w:tc>
-    </w:tr>`;
+  var rowsXml = rows.map(function(pair) {
+    var label = pair[0]; var value = pair[1];
+    var vals = String(value == null ? "" : value).split("\n").filter(function(v){ return v.trim() !== ""; });
+    var valParas = vals.length
+      ? vals.map(function(v, i){
+          return '<w:p><w:pPr><w:spacing w:after="' + (i < vals.length-1 ? 60 : 0) + '"/></w:pPr>' +
+            '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>' +
+            '<w:t xml:space="preserve">' + ex(v) + '</w:t></w:r></w:p>';
+        }).join("")
+      : '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:t xml:space="preserve"> </w:t></w:r></w:p>';
+    return '<w:tr>' +
+      '<w:tc><w:tcPr><w:tcW w:w="' + colW1 + '" w:type="dxa"/>' +
+        '<w:shd w:val="clear" w:color="auto" w:fill="1E3A6E"/>' + mar1 + '</w:tcPr>' +
+        '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr>' +
+          '<w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/>' +
+            '<w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>' +
+            '<w:sz w:val="19"/><w:szCs w:val="19"/></w:rPr>' +
+          '<w:t xml:space="preserve">' + ex(label) + '</w:t></w:r></w:p></w:tc>' +
+      '<w:tc><w:tcPr><w:tcW w:w="' + colW2 + '" w:type="dxa"/>' +
+        '<w:shd w:val="clear" w:color="auto" w:fill="F8FAFC"/>' + mar2 + '</w:tcPr>' +
+        valParas + '</w:tc>' +
+      '</w:tr>';
   }).join("");
 
-  return `<w:tbl>
-    <w:tblPr>
-      <w:tblW w:w="${colW1 + colW2}" w:type="dxa"/>
-      <w:tblBorders>${bdr.replace(/>/g, ` w:insideH="single" w:insideHColor="CCCCCC"/>`).split("/></w:tblCellBdr>")[0]}</w:tblBorders>
-      <w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar>
-    </w:tblPr>
-    <w:tblGrid><w:gridCol w:w="${colW1}"/><w:gridCol w:w="${colW2}"/></w:tblGrid>
-    ${rowsXml}
-  </w:tbl>${pEmpty(160)}`;
+  return '<w:tbl>' +
+    '<w:tblPr>' +
+      '<w:tblW w:w="' + (colW1+colW2) + '" w:type="dxa"/>' +
+      '<w:tblBorders>' + bdr + '</w:tblBorders>' +
+      '<w:tblLook w:val="0000"/>' +
+    '</w:tblPr>' +
+    '<w:tblGrid><w:gridCol w:w="' + colW1 + '"/><w:gridCol w:w="' + colW2 + '"/></w:tblGrid>' +
+    rowsXml +
+    '</w:tbl>' +
+    '<w:p><w:pPr><w:spacing w:after="160"/></w:pPr></w:p>';
 }
 
-// 일반 표 (헤더행 포함)
 function tblGeneral(headers, rows) {
-  const bdr = `<w:top w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:left w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/><w:right w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>`;
-  const totalW = 9360;
-  const colW = Math.floor(totalW / headers.length);
-  const marg = `<w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar>`;
+  var bdr = '<w:top w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:left w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:bottom w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:right w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:insideH w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>' +
+    '<w:insideV w:val="single" w:sz="4" w:space="0" w:color="CCCCCC"/>';
+  var totalW = 9360;
+  var colW = Math.floor(totalW / headers.length);
+  var mar = '<w:tcMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tcMar>';
 
-  const hRow = `<w:tr>${headers.map(h =>
-    `<w:tc><w:tcPr><w:tcW w:w="${colW}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="1E3A6E"/>${marg}</w:tcPr><w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="19"/></w:rPr><w:t xml:space="preserve">${ex(h)}</w:t></w:r></w:p></w:tc>`
-  ).join("")}</w:tr>`;
+  var hRow = '<w:tr>' + headers.map(function(h){
+    return '<w:tc><w:tcPr><w:tcW w:w="' + colW + '" w:type="dxa"/>' +
+      '<w:shd w:val="clear" w:color="auto" w:fill="1E3A6E"/>' + mar + '</w:tcPr>' +
+      '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr>' +
+        '<w:r><w:rPr><w:b/><w:color w:val="FFFFFF"/>' +
+          '<w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>' +
+          '<w:sz w:val="19"/><w:szCs w:val="19"/></w:rPr>' +
+        '<w:t xml:space="preserve">' + ex(h) + '</w:t></w:r></w:p></w:tc>';
+  }).join("") + '</w:tr>';
 
-  const dRows = rows.map((row, ri) => {
-    const fill = ri % 2 === 0 ? "FFFFFF" : "F0F4F8";
-    return `<w:tr>${row.map(cell =>
-      `<w:tc><w:tcPr><w:tcW w:w="${colW}" w:type="dxa"/><w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>${marg}</w:tcPr><w:p><w:pPr><w:spacing w:after="0"/></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:sz w:val="20"/></w:rPr><w:t xml:space="preserve">${ex(String(cell || ""))}</w:t></w:r></w:p></w:tc>`
-    ).join("")}</w:tr>`;
+  var dRows = rows.map(function(row, ri){
+    var fill = ri % 2 === 0 ? "FFFFFF" : "EEF4F8";
+    return '<w:tr>' + row.map(function(cell){
+      return '<w:tc><w:tcPr><w:tcW w:w="' + colW + '" w:type="dxa"/>' +
+        '<w:shd w:val="clear" w:color="auto" w:fill="' + fill + '"/>' + mar + '</w:tcPr>' +
+        '<w:p><w:pPr><w:spacing w:after="0"/></w:pPr>' +
+          '<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>' +
+            '<w:sz w:val="20"/><w:szCs w:val="20"/></w:rPr>' +
+          '<w:t xml:space="preserve">' + ex(String(cell == null ? "" : cell)) + '</w:t></w:r></w:p></w:tc>';
+    }).join("") + '</w:tr>';
   }).join("");
 
-  return `<w:tbl>
-    <w:tblPr><w:tblW w:w="${totalW}" w:type="dxa"/><w:tblStyle w:val="Normal"/></w:tblPr>
-    <w:tblGrid>${headers.map(() => `<w:gridCol w:w="${colW}"/>`).join("")}</w:tblGrid>
-    ${hRow}${dRows}
-  </w:tbl>${pEmpty(160)}`;
+  return '<w:tbl>' +
+    '<w:tblPr>' +
+      '<w:tblW w:w="' + totalW + '" w:type="dxa"/>' +
+      '<w:tblBorders>' + bdr + '</w:tblBorders>' +
+      '<w:tblLook w:val="0000"/>' +
+    '</w:tblPr>' +
+    '<w:tblGrid>' + headers.map(function(){ return '<w:gridCol w:w="' + colW + '"/>'; }).join("") + '</w:tblGrid>' +
+    hRow + dRows +
+    '</w:tbl>' +
+    '<w:p><w:pPr><w:spacing w:after="160"/></w:pPr></w:p>';
 }
 
-// 목차 (TOC 필드)
-function xmlTOC() {
-  return `<w:p><w:pPr><w:pStyle w:val="TOCHeading"/></w:pPr><w:r><w:t>목차 (Table of Contents)</w:t></w:r></w:p>
-<w:p><w:pPr><w:pStyle w:val="TOC1"/></w:pPr>
-  <w:fldSimple w:instr=" TOC \\o &quot;1-3&quot; \\h \\z \\u ">
-    <w:r><w:rPr><w:rStyle w:val="Hyperlink"/></w:rPr><w:t>목차를 업데이트하려면 이 필드를 우클릭 → 필드 업데이트를 선택하세요.</w:t></w:r>
-  </w:fldSimple>
-</w:p>`;
-}
 
 // ── SYS별 XML 생성 ────────────────────────────────────────────────────────────
 function xmlSYS1(c, chapNum) {
@@ -1219,9 +1243,23 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
           return (
             <div key={proc.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
               <div style={{ textAlign: "center", width: 72 }}>
-                <div style={{ width: 42, height: 42, borderRadius: "50%", background: done ? proc.color : T.surface, border: `2px solid ${done ? proc.color : T.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: done ? "#fff" : T.muted, margin: "0 auto 6px" }}>
-                  {done ? "✓" : proc.icon}
-                </div>
+                {(() => {
+                  const procWPs = wpByProcess[proc.id] || [];
+                  const isApproved = procWPs.some(w => w.status === "승인됨");
+                  const hasDraft = procWPs.length > 0;
+                  const bg = isApproved ? proc.color : hasDraft ? "transparent" : T.surface;
+                  const border = isApproved ? proc.color : hasDraft ? proc.color : T.border;
+                  const iconColor = isApproved ? "#fff" : hasDraft ? proc.color : T.muted;
+                  const icon = isApproved ? "✓" : hasDraft ? "⏳" : proc.icon;
+                  return (
+                    <div style={{ width: 42, height: 42, borderRadius: "50%", background: bg,
+                      border: `2px solid ${border}`, display: "flex", alignItems: "center",
+                      justifyContent: "center", fontSize: 16, fontWeight: 700,
+                      color: iconColor, margin: "0 auto 6px" }}>
+                      {icon}
+                    </div>
+                  );
+                })()}
                 <div style={{ fontSize: 10, color: done ? proc.color : T.muted, fontWeight: done ? 700 : 400 }}>{proc.id}</div>
               </div>
               {idx < PROCESSES.length - 1 && (
@@ -1300,13 +1338,27 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
                     {isGenerating && <Spinner text={`${proc.id} 산출물 AI 생성 중…`} />}
                   </div>
                 ) : (
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <Btn size="sm" onClick={() => setActiveProcess(proc.id)} disabled={!hasPrev || generatingId !== null}
-                      style={{ background: proc.color, borderColor: proc.color }}>
-                      {wps?.length ? `+ 재생성` : `⚡ ${proc.id} 생성`}
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                    <Btn size="sm" onClick={() => setActiveProcess(proc.id)}
+                      disabled={!hasPrev || generatingId !== null}
+                      style={{ background: hasPrev ? proc.color : T.muted, borderColor: hasPrev ? proc.color : T.muted }}>
+                      {wps?.length ? `↺ 재생성` : `⚡ ${proc.id} 생성`}
                     </Btn>
+                    {/* 생성은 됐지만 미승인인 경우 → HITL 검토 유도 */}
+                    {wps?.length > 0 && !wps.some(w => w.status === "승인됨") && (
+                      <Btn size="sm" variant="outline" onClick={() => nav("review")}
+                        style={{ borderColor: T.amber, color: T.amber }}>
+                        ◎ Gemini QA 검토하기 →
+                      </Btn>
+                    )}
+                    {/* 승인 완료 표시 */}
+                    {wps?.some(w => w.status === "승인됨") && (
+                      <span style={{ fontSize: 11, color: T.green, fontWeight: 700 }}>✓ 승인됨</span>
+                    )}
                     {!hasPrev && idx > 0 && (
-                      <span style={{ fontSize: 11, color: T.muted, alignSelf: "center" }}>← {prevWPs.length === 0 ? `${PROCESSES[idx-1].id}를 먼저 생성하세요` : `${PROCESSES[idx-1].id} 승인 후 진행 가능합니다`}</span>
+                      <span style={{ fontSize: 11, color: T.amber, alignSelf: "center", fontWeight: 600 }}>
+                        ← {prevWPs.length === 0 ? `${PROCESSES[idx-1].id}를 먼저 생성하세요` : `${PROCESSES[idx-1].id} 승인 후 진행 가능합니다`}
+                      </span>
                     )}
                   </div>
                 )}
@@ -1474,6 +1526,10 @@ function ReviewPage({ project, wps, onUpdate, nav }) {
       await apiCall(`/api/projects?resource=work_products&id=${selected.id}`, "PATCH", { status });
       await onUpdate();
       setSelected(prev => ({ ...prev, status }));
+      // 승인 시 파이프라인으로 자동 이동 + 성공 메시지
+      if (status === "승인됨") {
+        setTimeout(() => nav("pipeline"), 800);
+      }
     } catch (e) { setError("업데이트 실패: " + e.message); }
     setUpdating(false);
   }
@@ -1516,11 +1572,19 @@ function ReviewPage({ project, wps, onUpdate, nav }) {
           {selected ? (
             <Card style={{ padding: 20 }}>
               <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>QA 검증 — {selected.content?.title || selected.process_id}</h2>
-              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
                 <Btn onClick={handleQA} disabled={qaRunning}>🔍 QA 검증 실행</Btn>
-                <Btn variant="success" onClick={() => handleStatusUpdate("승인됨")} disabled={updating}>✓ 승인</Btn>
+                <Btn variant="success" onClick={() => handleStatusUpdate("승인됨")} disabled={updating}>
+                  ✓ 승인 → 다음 단계
+                </Btn>
                 <Btn variant="danger" onClick={() => handleStatusUpdate("거부됨")} disabled={updating}>✕ 거부</Btn>
               </div>
+              {updating && (
+                <div style={{ padding: "8px 12px", background: T.greenDim, border: `1px solid ${T.green}44`,
+                  borderRadius: 8, fontSize: 12, color: T.green, marginBottom: 12 }}>
+                  ⏳ 처리 중… 승인되면 파이프라인으로 자동 이동합니다.
+                </div>
+              )}
               {qaRunning && <Spinner text="Gemini QA 검증 중…" />}
               {error && <div style={{ color: T.red, fontSize: 12, padding: 10, background: T.redDim, borderRadius: 8, marginBottom: 12 }}>{error}</div>}
               {qaResult && <QAResultView qa={qaResult} />}
