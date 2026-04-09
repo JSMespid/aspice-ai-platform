@@ -12,52 +12,51 @@ export default async function handler(req, res) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return res.status(500).json({ error: 'GEMINI_API_KEY 환경변수가 설정되지 않았습니다.' });
 
-  // 순서대로 시도할 모델 목록
-  const models = [
-    'gemini-2.0-flash-lite',
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-pro-latest',
+  // v1beta와 v1 두 버전, 여러 모델 조합으로 시도
+  const attempts = [
+    { version: 'v1beta', model: 'gemini-2.0-flash-lite' },
+    { version: 'v1beta', model: 'gemini-1.5-flash' },
+    { version: 'v1',     model: 'gemini-1.5-flash' },
+    { version: 'v1beta', model: 'gemini-pro' },
+    { version: 'v1',     model: 'gemini-pro' },
   ];
 
   let lastError = '';
 
-  for (const model of models) {
+  for (const { version, model } of attempts) {
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.2,
-              maxOutputTokens: 4096,
-            },
-          }),
-        }
-      );
+      const url = `https://generativelanguage.googleapis.com/${version}/models/${model}:generateContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 4096,
+          },
+        }),
+      });
 
       const data = await response.json();
 
       if (!response.ok) {
-        lastError = data.error?.message || `Gemini API 오류 (${response.status})`;
-        continue; // 다음 모델 시도
+        lastError = `[${version}/${model}] ${data.error?.message || response.status}`;
+        continue;
       }
 
       const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
       if (!text) {
-        lastError = 'Gemini 응답이 비어있습니다.';
+        lastError = `[${version}/${model}] 응답 비어있음`;
         continue;
       }
 
-      return res.status(200).json({ text, model });
-    } catch (error) {
-      lastError = error.message;
+      return res.status(200).json({ text, model: `${version}/${model}` });
+    } catch (e) {
+      lastError = `[${version}/${model}] ${e.message}`;
       continue;
     }
   }
 
-  // 모든 모델 실패
   return res.status(500).json({ error: `모든 모델 시도 실패: ${lastError}` });
 }
