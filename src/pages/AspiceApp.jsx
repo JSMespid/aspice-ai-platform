@@ -1541,13 +1541,19 @@ function WPResultViewer({ wp, process: proc }) {
 
 // ── QA 결과 뷰어 ─────────────────────────────────────────────────────────────
 function QAResultView({ qa, onFixRequest }) {
-  // 이슈별 체크 상태 & 지시사항
-  const [issueStates, setIssueStates] = useState(() =>
-    (qa.issues || []).reduce((acc, issue, i) => {
-      acc[i] = { checked: false, skip: false, instruction: "" };
-      return acc;
-    }, {})
-  );
+  // 이슈별 체크 상태 & 지시사항 — qa가 바뀔 때마다 초기화
+  const [issueStates, setIssueStates] = useState({});
+
+  // qa.issues 변경 시 상태 초기화
+  const issueKey = JSON.stringify((qa.issues || []).map(i => i.id || i.description));
+  useEffect(() => {
+    setIssueStates(
+      (qa.issues || []).reduce((acc, issue, i) => {
+        acc[i] = { checked: false, skip: false, instruction: "" };
+        return acc;
+      }, {})
+    );
+  }, [issueKey]);
 
   const checkedCount = Object.values(issueStates).filter(s => s.checked && !s.skip).length;
 
@@ -1667,6 +1673,107 @@ function QAResultView({ qa, onFixRequest }) {
         <span style={{ fontSize: 13, fontWeight: 700, color: qa.recommendation?.includes("승인") ? T.green : T.amber }}>
           {qa.recommendation}
         </span>
+      </div>
+    </div>
+  );
+}
+
+// ── 항목 Claude 수정 요청 모달 ──────────────────────────────────────────────────
+function ItemClaudeFixModal({ item, fieldLabel, onApply, onClose }) {
+  const [instruction, setInstruction] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [preview, setPreview] = useState(null);
+
+  async function handleRequest() {
+    if (!instruction.trim()) return;
+    setLoading(true); setError(""); setPreview(null);
+    try {
+      const prompt = `당신은 ASPICE 4.0 전문가입니다. 반드시 한국어로 작성하세요.
+아래 항목에서 사용자의 지시사항대로 수정하세요.
+수정하지 말라고 하지 않은 필드는 그대로 유지하세요.
+반드시 동일한 JSON 구조로 반환하세요. 마크다운 없이 JSON만 출력하세요.
+
+현재 항목:
+${JSON.stringify(item, null, 2)}
+
+사용자 수정 지시사항:
+${instruction}`;
+
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "수정 실패");
+
+      const cleaned = data.text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+      const s = cleaned.indexOf("{"); const e = cleaned.lastIndexOf("}");
+      const fixed = JSON.parse(cleaned.slice(s, e + 1));
+      setPreview(fixed);
+    } catch (e) { setError(e.message); }
+    setLoading(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: T.surface, borderRadius: 16, padding: 24, width: "min(600px,95vw)", maxHeight: "85vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700 }}>✦ Claude에게 수정 요청</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
+        </div>
+
+        {/* 현재 항목 요약 */}
+        <div style={{ padding: "10px 12px", background: T.bg, borderRadius: 8, border: `1px solid ${T.border}`, marginBottom: 14, fontSize: 12 }}>
+          <div style={{ fontWeight: 700, color: T.accent, marginBottom: 4 }}>{item.id || fieldLabel}</div>
+          {item.title && <div style={{ marginBottom: 2 }}>{item.title}</div>}
+          {item.description && <div style={{ color: T.muted, fontSize: 11 }}>{String(item.description).slice(0, 120)}...</div>}
+        </div>
+
+        {/* 지시사항 입력 */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 11, color: T.muted, marginBottom: 6 }}>수정 지시사항을 입력하세요</div>
+          <textarea
+            value={instruction}
+            onChange={e => setInstruction(e.target.value)}
+            placeholder="예: description에 온도 범위 -40°C~85°C 조건을 추가해주세요"
+            style={{ width: "100%", minHeight: 80, padding: "10px 12px", background: T.bg,
+              border: `1px solid ${T.accent}`, borderRadius: 8, color: T.text, fontSize: 13,
+              resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
+          />
+        </div>
+
+        {error && <div style={{ color: T.red, fontSize: 12, marginBottom: 10 }}>{error}</div>}
+
+        {!preview && (
+          <Btn onClick={handleRequest} disabled={loading || !instruction.trim()}>
+            {loading ? "⏳ Claude 수정 중…" : "✦ 수정 요청"}
+          </Btn>
+        )}
+
+        {/* 미리보기 */}
+        {preview && (
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: T.green, marginBottom: 10 }}>✓ 수정 결과 미리보기</div>
+            {Object.entries(preview).map(([k, v]) => {
+              const origV = item[k];
+              const changed = JSON.stringify(v) !== JSON.stringify(origV);
+              return (
+                <div key={k} style={{ marginBottom: 8, padding: "8px 10px", background: changed ? T.greenDim : T.bg, borderRadius: 6, border: `1px solid ${changed ? T.green + "44" : T.border}` }}>
+                  <div style={{ fontSize: 10, color: T.muted, marginBottom: 2 }}>{k} {changed && <span style={{ color: T.green }}>● 수정됨</span>}</div>
+                  {changed && <div style={{ fontSize: 11, color: T.red + "cc", textDecoration: "line-through", marginBottom: 2 }}>{String(origV ?? "")}</div>}
+                  <div style={{ fontSize: 12 }}>{typeof v === "object" ? JSON.stringify(v) : String(v ?? "")}</div>
+                </div>
+              );
+            })}
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <Btn onClick={() => onApply(preview)} style={{ background: T.green, borderColor: T.green }}>✓ 적용</Btn>
+              <Btn variant="outline" onClick={() => setPreview(null)}>다시 수정</Btn>
+              <Btn variant="outline" onClick={onClose}>취소</Btn>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -1816,9 +1923,13 @@ function ReviewPage({ project, wps, onUpdate, nav }) {
 
   // 자동수정 상태
   const [fixRunning, setFixRunning] = useState(false);
-  const [fixPreview, setFixPreview] = useState(null); // { fixedContent }
-  const [editingItem, setEditingItem] = useState(null); // { field, index, item }
-  const [currentContent, setCurrentContent] = useState(null); // 수정 중인 content
+  const [fixPreview, setFixPreview] = useState(null);
+  const [editingItem, setEditingItem] = useState(null);
+  const [currentContent, setCurrentContent] = useState(null);
+  // 개별 항목 수정 상태
+  const [claudeFixItem, setClaudeFixItem] = useState(null); // { field, index, item }
+  const [directEditItem, setDirectEditItem] = useState(null); // { field, index, item }
+  const [showItemList, setShowItemList] = useState(false);
 
   const pendingWPs = wps.filter(w => ["검토중", "초안"].includes(w.status));
 
@@ -1944,6 +2055,59 @@ ${fixInstructions}
     setUpdating(false);
   }
 
+  // 개별 항목 Claude 수정 적용
+  async function applyItemFix(field, index, fixedItem) {
+    if (!selected) return;
+    const newContent = JSON.parse(JSON.stringify(currentContent || selected.content));
+    if (newContent[field] && newContent[field][index] !== undefined) {
+      newContent[field][index] = fixedItem;
+    }
+    setCurrentContent(newContent);
+    try {
+      await apiCall(`/api/projects?resource=work_products&id=${selected.id}`, "PATCH", { content: newContent });
+      await onUpdate();
+    } catch (e) { setError("저장 실패: " + e.message); }
+    setClaudeFixItem(null);
+  }
+
+  // 개별 항목 직접 편집 저장
+  async function applyDirectEdit(field, index, editedItem) {
+    if (!selected) return;
+    const newContent = JSON.parse(JSON.stringify(currentContent || selected.content));
+    if (newContent[field] && newContent[field][index] !== undefined) {
+      newContent[field][index] = editedItem;
+    }
+    setCurrentContent(newContent);
+    try {
+      await apiCall(`/api/projects?resource=work_products&id=${selected.id}`, "PATCH", { content: newContent });
+      await onUpdate();
+    } catch (e) { setError("저장 실패: " + e.message); }
+    setDirectEditItem(null);
+  }
+
+  // 현재 content에서 편집 가능한 항목 배열 필드 추출
+  function getEditableItems() {
+    const c = currentContent || selected?.content || {};
+    const ARRAY_FIELDS = {
+      needs: "Needs",
+      requirements: "Requirements",
+      system_elements: "System Elements",
+      interfaces: "Interfaces",
+      test_cases: "Test Cases",
+      verification_criteria: "Verification Criteria",
+      allocation_matrix: "Allocation Matrix",
+    };
+    const result = [];
+    for (const [field, label] of Object.entries(ARRAY_FIELDS)) {
+      if (Array.isArray(c[field]) && c[field].length > 0) {
+        c[field].forEach((item, index) => {
+          result.push({ field, label, index, item });
+        });
+      }
+    }
+    return result;
+  }
+
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
@@ -2017,6 +2181,66 @@ ${fixInstructions}
                   onFixRequest={handleFixRequest}
                 />
               )}
+
+              {/* 산출물 항목 직접 수정 섹션 */}
+              {selected && (
+                <div style={{ marginTop: 16, borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>
+                      📋 산출물 항목 직접 수정
+                    </div>
+                    <Btn size="sm" variant="outline" onClick={() => setShowItemList(v => !v)}>
+                      {showItemList ? "▲ 접기" : "▼ 항목 목록 보기"}
+                    </Btn>
+                  </div>
+                  {showItemList && (() => {
+                    const items = getEditableItems();
+                    if (items.length === 0) return (
+                      <div style={{ color: T.muted, fontSize: 12 }}>편집 가능한 항목이 없습니다.</div>
+                    );
+                    let lastField = "";
+                    return items.map(({ field, label, index, item }) => {
+                      const isNewField = field !== lastField;
+                      lastField = field;
+                      return (
+                        <div key={`${field}-${index}`}>
+                          {isNewField && (
+                            <div style={{ fontSize: 11, color: T.muted, fontWeight: 700,
+                              marginTop: 10, marginBottom: 6, textTransform: "uppercase" }}>
+                              {label}
+                            </div>
+                          )}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                            padding: "8px 12px", background: T.bg, borderRadius: 8,
+                            border: `1px solid ${T.border}`, marginBottom: 6 }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <span style={{ fontSize: 12, fontWeight: 600, color: T.accent }}>
+                                {item.id || `${label} ${index + 1}`}
+                              </span>
+                              {item.title && (
+                                <span style={{ fontSize: 12, color: T.muted, marginLeft: 8 }}>
+                                  {String(item.title).slice(0, 40)}{item.title?.length > 40 ? "…" : ""}
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                              <Btn size="sm" onClick={() => setClaudeFixItem({ field, index, item })}
+                                style={{ background: T.purple, borderColor: T.purple, fontSize: 11 }}>
+                                ✦ Claude
+                              </Btn>
+                              <Btn size="sm" variant="outline"
+                                onClick={() => setDirectEditItem({ field, index, item })}
+                                style={{ fontSize: 11 }}>
+                                ✏️ 직접
+                              </Btn>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              )}
             </Card>
           ) : (
             <Card style={{ padding: 40, textAlign: "center" }}>
@@ -2038,12 +2262,31 @@ ${fixInstructions}
         />
       )}
 
-      {/* 항목 직접 편집 모달 */}
+      {/* 항목 직접 편집 모달 (미리보기에서) */}
       {editingItem && (
         <ItemEditModal
           item={editingItem.item}
           onSave={handleItemSave}
           onClose={() => setEditingItem(null)}
+        />
+      )}
+
+      {/* 개별 항목 Claude 수정 요청 모달 */}
+      {claudeFixItem && (
+        <ItemClaudeFixModal
+          item={claudeFixItem.item}
+          fieldLabel={claudeFixItem.field}
+          onApply={(fixed) => applyItemFix(claudeFixItem.field, claudeFixItem.index, fixed)}
+          onClose={() => setClaudeFixItem(null)}
+        />
+      )}
+
+      {/* 개별 항목 직접 편집 모달 */}
+      {directEditItem && (
+        <ItemEditModal
+          item={directEditItem.item}
+          onSave={(edited) => applyDirectEdit(directEditItem.field, directEditItem.index, edited)}
+          onClose={() => setDirectEditItem(null)}
         />
       )}
     </div>
