@@ -1007,6 +1007,163 @@ export default function AspiceApp() {
   useEffect(() => { fetchProjects(); }, []);
   useEffect(() => { if (selectedProject) fetchWorkProducts(selectedProject.id); }, [selectedProject]);
 
+  // 글로벌 디자인 개선 CSS 주입
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.id = "aspice-design-override";
+    style.textContent = `
+      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+      * { box-sizing: border-box; }
+      body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        background: #090b0f !important;
+        color: #e2e8f0 !important;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      /* 사이드바 */
+      .sidebar {
+        background: linear-gradient(180deg, #0d1117 0%, #111827 100%) !important;
+        border-right: 1px solid rgba(255,255,255,0.05) !important;
+        box-shadow: 4px 0 32px rgba(0,0,0,0.4) !important;
+      }
+
+      /* 카드 */
+      .aspice-card {
+        background: rgba(17,24,39,0.8) !important;
+        border: 1px solid rgba(255,255,255,0.07) !important;
+        border-radius: 14px !important;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05) !important;
+        backdrop-filter: blur(12px) !important;
+      }
+
+      /* 버튼 기본 */
+      button {
+        font-family: 'Inter', sans-serif !important;
+        letter-spacing: -0.01em !important;
+        transition: all 0.15s ease !important;
+      }
+      button:hover { filter: brightness(1.1); transform: translateY(-1px); }
+      button:active { transform: translateY(0); }
+
+      /* 네비 버튼 */
+      .nav-btn {
+        border-radius: 8px !important;
+        transition: all 0.15s ease !important;
+      }
+      .nav-btn:hover { background: rgba(99,102,241,0.12) !important; }
+
+      /* 파이프라인 스텝 */
+      .pipeline-step {
+        background: rgba(17,24,39,0.9) !important;
+        border: 1px solid rgba(255,255,255,0.07) !important;
+        border-radius: 14px !important;
+        transition: all 0.2s ease !important;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.2) !important;
+      }
+      .pipeline-step:hover { border-color: rgba(99,102,241,0.3) !important; box-shadow: 0 4px 20px rgba(99,102,241,0.1) !important; }
+
+      /* 배지 */
+      .aspice-badge {
+        font-size: 10px !important;
+        font-weight: 600 !important;
+        letter-spacing: 0.04em !important;
+        border-radius: 6px !important;
+        padding: 3px 8px !important;
+      }
+
+      /* 입력창 */
+      input, textarea, select {
+        font-family: 'Inter', sans-serif !important;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+      }
+      input:focus, textarea:focus {
+        outline: none !important;
+        border-color: rgba(99,102,241,0.6) !important;
+        box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
+      }
+
+      /* 스크롤바 */
+      ::-webkit-scrollbar { width: 4px; height: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+      /* 텍스트 */
+      h1, h2, h3 { letter-spacing: -0.02em; }
+
+      /* 모달 배경 */
+      .modal-overlay {
+        backdrop-filter: blur(8px) !important;
+        background: rgba(0,0,0,0.7) !important;
+      }
+
+      /* 상태 배지 */
+      .status-approved { background: rgba(16,185,129,0.15) !important; color: #10b981 !important; border: 1px solid rgba(16,185,129,0.3) !important; }
+      .status-draft { background: rgba(99,102,241,0.15) !important; color: #818cf8 !important; border: 1px solid rgba(99,102,241,0.3) !important; }
+      .status-rejected { background: rgba(239,68,68,0.15) !important; color: #f87171 !important; border: 1px solid rgba(239,68,68,0.3) !important; }
+
+      /* QA 점수 카드 */
+      .qa-score-card {
+        background: linear-gradient(135deg, rgba(17,24,39,0.9), rgba(30,41,59,0.9)) !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+        border-radius: 12px !important;
+      }
+
+      /* 이슈 카드 */
+      .issue-card {
+        border-radius: 10px !important;
+        border: 1px solid rgba(255,255,255,0.06) !important;
+        transition: all 0.2s ease !important;
+      }
+      .issue-card:hover { border-color: rgba(99,102,241,0.2) !important; }
+
+      /* CRITICAL 배지 */
+      .severity-critical { background: rgba(239,68,68,0.2) !important; color: #fca5a5 !important; border: 1px solid rgba(239,68,68,0.4) !important; }
+      .severity-major { background: rgba(245,158,11,0.2) !important; color: #fcd34d !important; border: 1px solid rgba(245,158,11,0.4) !important; }
+      .severity-minor { background: rgba(99,102,241,0.2) !important; color: #a5b4fc !important; border: 1px solid rgba(99,102,241,0.3) !important; }
+      .severity-info { background: rgba(20,184,166,0.15) !important; color: #5eead4 !important; border: 1px solid rgba(20,184,166,0.3) !important; }
+
+      /* 프로젝트 카드 hover */
+      .project-card {
+        transition: all 0.2s ease !important;
+        border-radius: 14px !important;
+      }
+      .project-card:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 8px 32px rgba(99,102,241,0.15) !important;
+        border-color: rgba(99,102,241,0.3) !important;
+      }
+
+      /* 로고 */
+      .aspice-logo { letter-spacing: -0.03em !important; }
+
+      /* 파이프라인 연결선 */
+      .pipeline-arrow {
+        opacity: 0.5 !important;
+        font-size: 18px !important;
+      }
+
+      /* 버튼 스타일 강화 */
+      .btn-primary {
+        background: linear-gradient(135deg, #4f46e5, #6366f1) !important;
+        box-shadow: 0 2px 12px rgba(99,102,241,0.35) !important;
+        border: 1px solid rgba(99,102,241,0.5) !important;
+      }
+      .btn-success {
+        background: linear-gradient(135deg, #059669, #10b981) !important;
+        box-shadow: 0 2px 12px rgba(16,185,129,0.3) !important;
+      }
+      .btn-danger {
+        background: linear-gradient(135deg, #dc2626, #ef4444) !important;
+        box-shadow: 0 2px 12px rgba(239,68,68,0.25) !important;
+      }
+    `;
+    document.head.appendChild(style);
+    return () => { const el = document.getElementById("aspice-design-override"); if (el) el.remove(); };
+  }, []);
+
   async function fetchProjects() {
     setLoading(true);
     try {
@@ -1037,20 +1194,20 @@ export default function AspiceApp() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: T.bg, color: T.text }}>
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "linear-gradient(135deg,#090b0f 0%,#0d1117 60%,#0a0f1a 100%)", color: T.text }}>
       <style>{GLOBAL_CSS}</style>
 
       {/* 모바일 헤더 */}
-      <div className="mob-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: T.surface, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0, zIndex: 100 }}>
+      <div className="mob-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: "rgba(13,17,23,0.9)", borderBottom: `1px solid rgba(255,255,255,0.07)`, position: "sticky", top: 0, zIndex: 100 }}>
         <Logo onClick={() => nav("home", null)} />
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setShowGuide(true)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 8, color: T.muted, fontSize: 12, cursor: "pointer", padding: "4px 10px" }}>?</button>
+          <button onClick={() => setShowGuide(true)} style={{ background: "none", border: `1px solid rgba(255,255,255,0.07)`, borderRadius: 8, color: T.muted, fontSize: 12, cursor: "pointer", padding: "4px 10px" }}>?</button>
           <button onClick={() => setMenuOpen(!menuOpen)} style={{ background: "none", border: "none", color: T.text, fontSize: 22, cursor: "pointer" }}>{menuOpen ? "✕" : "☰"}</button>
         </div>
       </div>
 
       {menuOpen && (
-        <div className="mob-menu" style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "8px 12px", zIndex: 99 }}>
+        <div className="mob-menu" style={{ background: "rgba(13,17,23,0.9)", borderBottom: `1px solid rgba(255,255,255,0.07)`, padding: "8px 12px", zIndex: 99 }}>
           {navItems.map(item => (
             <button key={item.id} onClick={() => nav(item.id)}
               style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, width: "100%", background: page === item.id ? T.accentGlow : "transparent", color: page === item.id ? T.accent : T.muted, border: "none", cursor: "pointer", fontSize: 14, fontWeight: page === item.id ? 600 : 400, marginBottom: 4, fontFamily: "inherit" }}>
@@ -1062,26 +1219,26 @@ export default function AspiceApp() {
 
       <div style={{ display: "flex", flex: 1 }}>
         {/* PC 사이드바 */}
-        <aside className="sidebar" style={{ display: "none", width: 230, background: T.surface, borderRight: `1px solid ${T.border}`, flexDirection: "column", padding: "24px 0", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
-          <div style={{ padding: "0 20px 20px", borderBottom: `1px solid ${T.border}` }}>
+        <aside className="sidebar" style={{ display: "none", width: 230, background: "rgba(13,17,23,0.9)", borderRight: `1px solid rgba(255,255,255,0.07)`, flexDirection: "column", padding: "24px 0", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
+          <div style={{ padding: "0 20px 20px", borderBottom: `1px solid rgba(255,255,255,0.07)` }}>
             <Logo onClick={() => nav("home", null)} />
           </div>
           {selectedProject && (
-            <div style={{ padding: "12px 20px", borderBottom: `1px solid ${T.border}`, background: T.accentGlow }}>
-              <div style={{ fontSize: 10, color: T.muted, marginBottom: 3 }}>현재 프로젝트</div>
+            <div style={{ padding: "12px 20px", borderBottom: `1px solid rgba(255,255,255,0.07)`, background: "rgba(99,102,241,0.08)", borderLeft: "2px solid rgba(99,102,241,0.5)" }}>
+              <div style={{ fontSize: 10, color: "rgba(148,163,184,0.6)", marginBottom: 3 }}>현재 프로젝트</div>
               <div style={{ fontSize: 12, fontWeight: 700, color: T.accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedProject.name}</div>
             </div>
           )}
           <nav style={{ padding: "14px 10px", flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
             {navItems.map(item => (
               <button key={item.id} onClick={() => nav(item.id)}
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, background: page === item.id ? T.accentGlow : "transparent", color: page === item.id ? T.accent : T.muted, border: page === item.id ? `1px solid ${T.accentDim}` : "1px solid transparent", cursor: "pointer", fontSize: 13, fontWeight: page === item.id ? 600 : 400, fontFamily: "inherit", textAlign: "left", width: "100%", transition: "all .15s" }}>
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, background: page === item.id ? "rgba(99,102,241,0.15)" : "transparent", color: page === item.id ? "#818cf8" : "rgba(148,163,184,0.7)", border: page === item.id ? "1px solid rgba(99,102,241,0.3)" : "1px solid transparent", boxShadow: page === item.id ? "0 0 12px rgba(99,102,241,0.15)" : "none", cursor: "pointer", fontSize: 13, fontWeight: page === item.id ? 600 : 400, fontFamily: "inherit", textAlign: "left", width: "100%", transition: "all .15s" }}>
                 <span style={{ fontSize: 15 }}>{item.icon}</span> {item.label}
               </button>
             ))}
           </nav>
-          <div style={{ padding: "14px 20px", borderTop: `1px solid ${T.border}` }}>
-            <button onClick={() => setShowGuide(true)} style={{ width: "100%", padding: "8px 12px", background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 10, color: T.muted, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}>
+          <div style={{ padding: "14px 20px", borderTop: `1px solid rgba(255,255,255,0.07)` }}>
+            <button onClick={() => setShowGuide(true)} style={{ width: "100%", padding: "8px 12px", background: "rgba(17,24,39,0.5)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "rgba(148,163,184,0.7)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}>
               📖 사용 가이드
             </button>
           </div>
@@ -1100,10 +1257,16 @@ export default function AspiceApp() {
 function Logo({ onClick }) {
   return (
     <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-      <div style={{ width: 34, height: 34, background: `linear-gradient(135deg,${T.accent},${T.purple})`, borderRadius: 9, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 800, color: "#fff", flexShrink: 0 }}>A</div>
+      <div style={{
+        width: 32, height: 32,
+        background: "linear-gradient(135deg, #4f46e5 0%, #818cf8 100%)",
+        borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 14, fontWeight: 800, color: "#fff",
+        boxShadow: "0 2px 12px rgba(99,102,241,0.4), inset 0 1px 0 rgba(255,255,255,0.2)"
+      }}>A</div>
       <div>
-        <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: -0.3 }}>ASPICE AI</div>
-        <div style={{ fontSize: 10, color: T.muted }}>v2.0 · SYS.1~SYS.5 Pipeline</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", letterSpacing: "-0.02em", lineHeight: 1.2 }}>ASPICE AI</div>
+        <div style={{ fontSize: 9, color: "rgba(148,163,184,0.6)", letterSpacing: "0.06em", marginTop: 1 }}>v2.0 · SYS.1~SYS.5 Pipeline</div>
       </div>
     </div>
   );
@@ -1120,7 +1283,7 @@ function GuideModal({ onClose }) {
   ];
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, padding: 32, maxWidth: 580, width: "100%", maxHeight: "90vh", overflowY: "auto", animation: "fadeIn .25s ease" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "rgba(13,17,23,0.9)", border: `1px solid rgba(255,255,255,0.07)`, borderRadius: 18, padding: 32, maxWidth: 580, width: "100%", maxHeight: "90vh", overflowY: "auto", animation: "fadeIn .25s ease" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <div>
             <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>📖 사용 가이드</h2>
@@ -1130,7 +1293,7 @@ function GuideModal({ onClose }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
           {steps.map((s, i) => (
-            <div key={i} style={{ display: "flex", gap: 14, padding: "14px 16px", background: T.bg, borderRadius: 12, border: `1px solid ${T.border}` }}>
+            <div key={i} style={{ display: "flex", gap: 14, padding: "14px 16px", background: "rgba(17,24,39,0.6)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.07)" }}>
               <div style={{ width: 36, height: 36, borderRadius: 10, background: s.color + "20", border: `1px solid ${s.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: s.color, fontWeight: 800, flexShrink: 0 }}>{s.icon}</div>
               <div>
                 <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: s.color }}>{s.title}</div>
@@ -1179,10 +1342,10 @@ function ProjectListPage({ projects, loading, onSelect, onRefresh }) {
   }
 
   return (
-    <div style={{ maxWidth: 900, margin: "0 auto" }}>
+    <div style={{ maxWidth: 960, margin: "0 auto" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 28, flexWrap: "wrap", gap: 12 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4 }}>ASPICE 프로젝트</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, marginBottom: 4, letterSpacing: "-0.02em" }}>ASPICE 프로젝트</h1>
           <p style={{ color: T.muted, fontSize: 13 }}>프로젝트를 생성하고 SYS.1~SYS.5 산출물을 파이프라인으로 자동 생성합니다.</p>
         </div>
         <Btn onClick={() => setCreating(true)}>+ 새 프로젝트</Btn>
@@ -1223,26 +1386,37 @@ function ProjectCard({ project, onClick, onDelete }) {
   const [hov, setHov] = useState(false);
   return (
     <div onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
-      style={{ padding: "20px 22px", background: T.surface, border: `1px solid ${hov ? T.accent : T.border}`, borderRadius: 14, cursor: "pointer", transition: "all .2s", boxShadow: hov ? `0 0 24px ${T.accentGlow}` : "none" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{project.name}</div>
-          {project.description && <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.6 }}>{project.description}</div>}
-        </div>
-        <button onClick={onDelete} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 14, padding: "2px 6px", borderRadius: 6, flexShrink: 0, marginLeft: 10 }}>✕</button>
+      style={{
+        padding: "20px 22px",
+        background: hov
+          ? "linear-gradient(135deg,rgba(17,24,39,0.95),rgba(30,41,59,0.9))"
+          : "linear-gradient(135deg,rgba(13,17,23,0.9),rgba(17,24,39,0.85))",
+        border: `1px solid ${hov ? "rgba(99,102,241,0.35)" : "rgba(255,255,255,0.07)"}`,
+        borderRadius: 14, cursor: "pointer", position: "relative",
+        transition: "all 0.2s ease",
+        transform: hov ? "translateY(-2px)" : "none",
+        boxShadow: hov ? "0 8px 32px rgba(99,102,241,0.12)" : "0 2px 8px rgba(0,0,0,0.2)"
+      }}>
+      {onDelete && (
+        <button onClick={e => { e.stopPropagation(); onDelete(project.id); }}
+          style={{ position: "absolute", top: 12, right: 12, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 6, width: 24, height: 24, color: "rgba(248,113,113,0.7)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}>✕</button>
+      )}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0", marginBottom: 4, letterSpacing: "-0.01em" }}>{project.name}</div>
+        <div style={{ fontSize: 12, color: "rgba(148,163,184,0.7)", lineHeight: 1.5 }}>{project.description}</div>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <Badge color={T.accent}>{project.domain}</Badge>
-        <span style={{ fontSize: 11, color: T.muted, marginLeft: "auto" }}>{project.created_at ? new Date(project.created_at).toLocaleDateString("ko-KR") : ""}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+        <span style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", background: "rgba(99,102,241,0.15)", color: "#818cf8", borderRadius: 5, border: "1px solid rgba(99,102,241,0.25)", letterSpacing: "0.03em" }}>{project.domain}</span>
+        <span style={{ fontSize: 10, color: "rgba(148,163,184,0.4)" }}>{project.created_at ? new Date(project.created_at).toLocaleDateString("ko-KR") : ""}</span>
       </div>
-      <div style={{ marginTop: 14 }}>
-        <span style={{ fontSize: 11, color: T.accent, fontWeight: 600 }}>파이프라인 열기 →</span>
+      <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
+        <span style={{ fontSize: 11, color: hov ? "#818cf8" : "rgba(99,102,241,0.6)", fontWeight: 600, transition: "color 0.2s" }}>파이프라인 열기 →</span>
       </div>
     </div>
   );
 }
 
-// ── 파이프라인 페이지 ─────────────────────────────────────────────────────────
+
 function PipelinePage({ project, workProducts, onRefresh, nav }) {
   const [activeProcess, setActiveProcess] = useState(null);
   const [generatingId, setGeneratingId] = useState(null);
@@ -1321,8 +1495,8 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
                   const procWPs = wpByProcess[proc.id] || [];
                   const isApproved = procWPs.some(w => w.status === "승인됨");
                   const hasDraft = procWPs.length > 0;
-                  const bg = isApproved ? proc.color : hasDraft ? "transparent" : T.surface;
-                  const border = isApproved ? proc.color : hasDraft ? proc.color : T.border;
+                  const bg = isApproved ? proc.color : hasDraft ? "transparent" : "rgba(13,17,23,0.9)";
+                  const border = isApproved ? proc.color : hasDraft ? proc.color : "rgba(255,255,255,0.15)";
                   const iconColor = isApproved ? "#fff" : hasDraft ? proc.color : T.muted;
                   const icon = isApproved ? "✓" : hasDraft ? "⏳" : proc.icon;
                   return (
@@ -1338,7 +1512,7 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
               </div>
               {idx < PROCESSES.length - 1 && (
                 <div style={{ width: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                  <div style={{ width: "100%", height: 2, background: wpByProcess[proc.id]?.length > 0 ? proc.color : T.border }} />
+                  <div style={{ width: "100%", height: 2, background: wpByProcess[proc.id]?.length > 0 ? proc.color : "rgba(255,255,255,0.15)" }} />
                   <div style={{ fontSize: 9, color: T.muted }}>OUT→IN</div>
                 </div>
               )}
@@ -1361,8 +1535,8 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
           const isGenerating = generatingId === proc.id;
 
           return (
-            <Card key={proc.id} style={{ padding: 0, overflow: "hidden", border: `1px solid ${wps?.length ? proc.color + "44" : T.border}` }}>
-              <div style={{ padding: "16px 20px", background: wps?.length ? proc.color + "0D" : "transparent", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+            <Card key={proc.id} className="pipeline-step" style={{ padding: 0, overflow: "hidden", border: `1px solid ${wps?.length ? proc.color + "44" : "rgba(255,255,255,0.08)"}` }}>
+              <div style={{ padding: "16px 20px", background: wps?.length ? proc.color + "0D" : "transparent", borderBottom: `1px solid rgba(255,255,255,0.07)`, display: "flex", alignItems: "center", gap: 12 }}>
                 <div style={{ width: 36, height: 36, borderRadius: 10, background: proc.color + "20", border: `1px solid ${proc.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: proc.color, flexShrink: 0 }}>{proc.icon}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: proc.color }}>{proc.label}</div>
@@ -1375,9 +1549,9 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
               </div>
 
               {wps?.length > 0 && (
-                <div style={{ padding: "12px 20px", borderBottom: `1px solid ${T.border}` }}>
+                <div style={{ padding: "12px 20px", borderBottom: `1px solid rgba(255,255,255,0.07)` }}>
                   {wps.map(wp => (
-                    <div key={wp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
+                    <div key={wp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "rgba(17,24,39,0.5)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 8 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wp.content?.title || proc.label}</div>
                         <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{proc.outputSummary(wp.content)}</div>
@@ -1453,8 +1627,8 @@ function WPDetailModal({ wpData, project, allWorkProducts, onClose }) {
   const [tab, setTab] = useState("content");
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 18, width: "100%", maxWidth: 780, maxHeight: "92vh", display: "flex", flexDirection: "column", animation: "fadeIn .25s ease" }}>
-        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "rgba(13,17,23,0.9)", border: `1px solid rgba(255,255,255,0.07)`, borderRadius: 18, width: "100%", maxWidth: 780, maxHeight: "92vh", display: "flex", flexDirection: "column", animation: "fadeIn .25s ease" }}>
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid rgba(255,255,255,0.07)`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <Badge color={proc.color}>{proc.id}</Badge>
             <span style={{ fontSize: 14, fontWeight: 700 }}>{wp.content?.title || proc.label}</span>
@@ -1466,10 +1640,10 @@ function WPDetailModal({ wpData, project, allWorkProducts, onClose }) {
             <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 20 }}>✕</button>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 2, padding: "10px 24px 0", flexShrink: 0, borderBottom: `1px solid ${T.border}` }}>
+        <div style={{ display: "flex", gap: 2, padding: "10px 24px 0", flexShrink: 0, borderBottom: `1px solid rgba(255,255,255,0.07)` }}>
           {[["content", "산출물 내용"], ["raw", "Raw JSON"]].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
-              style={{ padding: "7px 16px", borderRadius: "8px 8px 0 0", fontSize: 12, fontWeight: tab === id ? 700 : 400, background: tab === id ? T.bg : "transparent", color: tab === id ? T.text : T.muted, border: `1px solid ${tab === id ? T.border : "transparent"}`, borderBottom: "none", cursor: "pointer", fontFamily: "inherit" }}>
+              style={{ padding: "7px 16px", borderRadius: "8px 8px 0 0", fontSize: 12, fontWeight: tab === id ? 700 : 400, background: tab === id ? "rgba(9,11,15,0.8)" : "transparent", color: tab === id ? T.text : T.muted, border: `1px solid ${tab === id ? "rgba(255,255,255,0.1)" : "transparent"}`, borderBottom: "none", cursor: "pointer", fontFamily: "inherit" }}>
               {label}
             </button>
           ))}
@@ -1494,7 +1668,7 @@ function WPResultViewer({ wp, process: proc }) {
   const renderArray = (arr, fields) => {
     if (!arr?.length) return <div style={{ color: T.muted, fontSize: 12, padding: "8px 0" }}>데이터 없음</div>;
     return arr.map((item, i) => (
-      <div key={i} style={{ padding: "12px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
+      <div key={i} style={{ padding: "12px 14px", background: "rgba(17,24,39,0.5)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 8 }}>
         {fields.map(f => item[f] !== undefined && (
           <div key={f} style={{ marginBottom: 5, display: "flex", gap: 8, alignItems: "flex-start" }}>
             <span style={{ fontSize: 10, color: T.muted, fontWeight: 700, textTransform: "uppercase", minWidth: 80, flexShrink: 0, paddingTop: 1 }}>{f}:</span>
@@ -1583,7 +1757,7 @@ function QAResultView({ qa, onFixRequest }) {
           ["일관성", qa.consistency?.score, T.purple],
           ["추적성", qa.traceability?.score, T.teal]
         ].map(([label, val, color]) => (
-          <div key={label} style={{ padding: "12px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, textAlign: "center" }}>
+          <div key={label} style={{ padding: "12px 14px", background: "linear-gradient(135deg, rgba(17,24,39,0.9), rgba(30,41,59,0.8))", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
             <div style={{ fontSize: 10, color: T.muted, marginBottom: 4 }}>{label}</div>
             <div style={{ fontSize: 22, fontWeight: 700, color }}>{val ?? "—"}</div>
           </div>
@@ -1600,8 +1774,8 @@ function QAResultView({ qa, onFixRequest }) {
             const st = issueStates[i] || {};
             return (
               <div key={i} style={{
-                padding: "12px 14px", background: st.skip ? T.surface : st.checked ? T.accentGlow : T.surface2,
-                borderRadius: 10, border: `1px solid ${st.checked ? T.accent : st.skip ? T.border + "44" : T.border}`,
+                padding: "12px 14px", background: st.skip ? "rgba(17,24,39,0.5)" : st.checked ? "rgba(99,102,241,0.08)" : "rgba(17,24,39,0.7)",
+                borderRadius: 10, border: `1px solid ${st.checked ? "rgba(99,102,241,0.4)" : st.skip ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.06)"}`,
                 marginBottom: 10, opacity: st.skip ? 0.5 : 1, transition: "all .2s"
               }}>
                 {/* 이슈 헤더 */}
@@ -1609,7 +1783,7 @@ function QAResultView({ qa, onFixRequest }) {
                   {/* 수정 체크박스 */}
                   <input type="checkbox" checked={!!st.checked} disabled={st.skip}
                     onChange={() => toggleCheck(i)}
-                    style={{ marginTop: 2, cursor: "pointer", width: 15, height: 15 }} />
+                    style={{ marginTop: 2, cursor: "pointer", width: 15, height: 15, accentColor: "#6366f1" }} />
                   <div style={{ flex: 1 }}>
                     <div style={{ display: "flex", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
                       <SeverityBadge severity={issue.severity} />
@@ -1624,8 +1798,8 @@ function QAResultView({ qa, onFixRequest }) {
                   </div>
                   {/* 수정 안 함 토글 */}
                   <button onClick={() => toggleSkip(i)} style={{
-                    background: st.skip ? T.amber + "33" : T.surface,
-                    border: `1px solid ${st.skip ? T.amber : T.border}`,
+                    background: st.skip ? "rgba(245,158,11,0.15)" : "rgba(255,255,255,0.04)",
+                    border: `1px solid ${st.skip ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.1)"}`,
                     borderRadius: 6, padding: "3px 8px", fontSize: 10,
                     color: st.skip ? T.amber : T.muted, cursor: "pointer", whiteSpace: "nowrap"
                   }}>
@@ -1635,7 +1809,7 @@ function QAResultView({ qa, onFixRequest }) {
 
                 {/* 지시사항 입력창 — 체크된 항목만 표시 */}
                 {st.checked && !st.skip && (
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.border}` }}>
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid rgba(255,255,255,0.07)` }}>
                     <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>
                       수정 지시사항 (비워두면 QA 권장사항 기반으로 Claude가 판단)
                     </div>
@@ -1645,8 +1819,8 @@ function QAResultView({ qa, onFixRequest }) {
                       placeholder={`예: "${issue.recommendation || "구체적인 수정 내용을 입력하세요"}"`}
                       style={{
                         width: "100%", minHeight: 60, padding: "8px 10px",
-                        background: T.bg, border: `1px solid ${T.accent}`,
-                        borderRadius: 8, color: T.text, fontSize: 12, resize: "vertical",
+                        background: "rgba(9,11,15,0.8)", border: "1px solid rgba(99,102,241,0.4)",
+                        borderRadius: 8, color: "#e2e8f0", fontSize: 12, resize: "vertical",
                         fontFamily: "inherit", boxSizing: "border-box"
                       }}
                     />
@@ -1668,7 +1842,7 @@ function QAResultView({ qa, onFixRequest }) {
       )}
 
       {/* Gemini 권장 */}
-      <div style={{ padding: "10px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
+      <div style={{ padding: "10px 14px", background: "rgba(17,24,39,0.6)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)" }}>
         <span style={{ fontSize: 11, color: T.muted, marginRight: 8 }}>Gemini 권장:</span>
         <span style={{ fontSize: 13, fontWeight: 700, color: qa.recommendation?.includes("승인") ? T.green : T.amber }}>
           {qa.recommendation}
@@ -1717,15 +1891,15 @@ ${instruction}`;
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: T.surface, borderRadius: 16, padding: 24, width: "min(600px,95vw)", maxHeight: "85vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 9999, backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "linear-gradient(135deg, #111827, #1a2235)", borderRadius: 16, padding: 24, width: "min(600px,95vw)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", maxHeight: "85vh", overflowY: "auto", border: `1px solid rgba(255,255,255,0.07)` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>✦ Claude에게 수정 요청</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
         </div>
 
         {/* 현재 항목 요약 */}
-        <div style={{ padding: "10px 12px", background: T.bg, borderRadius: 8, border: `1px solid ${T.border}`, marginBottom: 14, fontSize: 12 }}>
+        <div style={{ padding: "10px 12px", background: "rgba(9,11,15,0.8)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.07)", marginBottom: 14, fontSize: 12 }}>
           <div style={{ fontWeight: 700, color: T.accent, marginBottom: 4 }}>{item.id || fieldLabel}</div>
           {item.title && <div style={{ marginBottom: 2 }}>{item.title}</div>}
           {item.description && <div style={{ color: T.muted, fontSize: 11 }}>{String(item.description).slice(0, 120)}...</div>}
@@ -1738,8 +1912,8 @@ ${instruction}`;
             value={instruction}
             onChange={e => setInstruction(e.target.value)}
             placeholder="예: description에 온도 범위 -40°C~85°C 조건을 추가해주세요"
-            style={{ width: "100%", minHeight: 80, padding: "10px 12px", background: T.bg,
-              border: `1px solid ${T.accent}`, borderRadius: 8, color: T.text, fontSize: 13,
+            style={{ width: "100%", minHeight: 80, padding: "10px 12px", background: "rgba(9,11,15,0.8)",
+              border: "1px solid rgba(99,102,241,0.4)", borderRadius: 8, color: "#e2e8f0", fontSize: 13,
               resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
           />
         </div>
@@ -1760,7 +1934,7 @@ ${instruction}`;
               const origV = item[k];
               const changed = JSON.stringify(v) !== JSON.stringify(origV);
               return (
-                <div key={k} style={{ marginBottom: 8, padding: "8px 10px", background: changed ? T.greenDim : T.bg, borderRadius: 6, border: `1px solid ${changed ? T.green + "44" : T.border}` }}>
+                <div key={k} style={{ marginBottom: 8, padding: "8px 10px", background: changed ? "rgba(16,185,129,0.1)" : "rgba(9,11,15,0.7)", borderRadius: 6, border: `1px solid ${changed ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.06)"}` }}>
                   <div style={{ fontSize: 10, color: T.muted, marginBottom: 2 }}>{k} {changed && <span style={{ color: T.green }}>● 수정됨</span>}</div>
                   {changed && <div style={{ fontSize: 11, color: T.red + "cc", textDecoration: "line-through", marginBottom: 2 }}>{String(origV ?? "")}</div>}
                   <div style={{ fontSize: 12 }}>{typeof v === "object" ? JSON.stringify(v) : String(v ?? "")}</div>
@@ -1802,8 +1976,8 @@ function ItemEditModal({ item, onSave, onClose }) {
   const skipKeys = ["id"];
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: T.surface, borderRadius: 16, padding: 24, width: "min(600px,95vw)", maxHeight: "85vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 9999, backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "linear-gradient(135deg, #111827, #1a2235)", borderRadius: 16, padding: 24, width: "min(600px,95vw)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", maxHeight: "85vh", overflowY: "auto", border: `1px solid rgba(255,255,255,0.07)` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>항목 직접 편집</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
@@ -1814,8 +1988,8 @@ function ItemEditModal({ item, onSave, onClose }) {
               <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>{k}</div>
               <textarea value={v} onChange={e => setField(k, e.target.value)}
                 style={{ width: "100%", minHeight: v.length > 100 ? 100 : 44, padding: "8px 10px",
-                  background: T.bg, border: `1px solid ${T.border}`, borderRadius: 8,
-                  color: T.text, fontSize: 12, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
+                  background: "rgba(9,11,15,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
+                  color: "#e2e8f0", fontSize: 12, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
               />
             </div>
           ))}
@@ -1859,8 +2033,8 @@ function FixPreviewModal({ original, fixed, onApply, onEditItem, onClose }) {
   const changes = findChangedItems();
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: T.surface, borderRadius: 16, padding: 24, width: "min(700px,95vw)", maxHeight: "88vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 9998, backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: "linear-gradient(135deg, #111827, #1a2235)", borderRadius: 16, padding: 24, width: "min(700px,95vw)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", maxHeight: "88vh", overflowY: "auto", border: `1px solid rgba(255,255,255,0.07)` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>✦ Claude 수정 결과 미리보기</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
@@ -1874,7 +2048,7 @@ function FixPreviewModal({ original, fixed, onApply, onEditItem, onClose }) {
               총 {changes.length}개 항목이 수정되었습니다. 확인 후 적용하세요.
             </div>
             {changes.map((ch, i) => (
-              <div key={i} style={{ background: T.bg, borderRadius: 10, border: `1px solid ${T.accent}44`, padding: 14 }}>
+              <div key={i} style={{ background: "rgba(9,11,15,0.7)", borderRadius: 10, border: "1px solid rgba(99,102,241,0.2)", padding: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>
                     [{ch.field}] {ch.fixed?.id || `항목 ${ch.index + 1}`}
@@ -2112,7 +2286,7 @@ ${fixInstructions}
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
         <button onClick={() => nav("pipeline")} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 18 }}>←</button>
-        <h1 style={{ fontSize: 20, fontWeight: 700 }}>HITL 검토</h1>
+        <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em" }}>HITL 검토</h1>
       </div>
       <p style={{ color: T.muted, fontSize: 13, marginBottom: 24, paddingLeft: 28 }}>
         {project.name} · AI 산출물 QA 검증 → 수정 → 승인/거부 &nbsp;
@@ -2129,7 +2303,7 @@ ${fixInstructions}
             const proc = PROCESSES.find(p => p.id === wp.process_id);
             return (
               <div key={wp.id} onClick={() => selectWP(wp)}
-                style={{ padding: "12px 14px", borderRadius: 10, border: `2px solid ${selected?.id === wp.id ? T.accent : T.border}`, background: selected?.id === wp.id ? T.accentGlow : T.bg, cursor: "pointer", transition: "all .2s", marginBottom: 8 }}>
+                style={{ padding: "12px 14px", borderRadius: 10, border: `1px solid ${selected?.id === wp.id ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.06)"}`, background: selected?.id === wp.id ? "rgba(99,102,241,0.1)" : "rgba(17,24,39,0.5)", cursor: "pointer", transition: "all .2s", marginBottom: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                   <span style={{ fontWeight: 600, fontSize: 13 }}>{wp.content?.title || wp.process_id}</span>
                   <StatusBadge status={wp.status} />
@@ -2184,7 +2358,7 @@ ${fixInstructions}
 
               {/* 산출물 항목 직접 수정 섹션 */}
               {selected && (
-                <div style={{ marginTop: 16, borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
+                <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 16 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>
                       📋 산출물 항목 직접 수정
@@ -2211,8 +2385,8 @@ ${fixInstructions}
                             </div>
                           )}
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-                            padding: "8px 12px", background: T.bg, borderRadius: 8,
-                            border: `1px solid ${T.border}`, marginBottom: 6 }}>
+                            padding: "8px 12px", background: "rgba(17,24,39,0.6)", borderRadius: 8,
+                            border: "1px solid rgba(255,255,255,0.06)", transition: "all 0.15s ease", marginBottom: 6 }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <span style={{ fontSize: 12, fontWeight: 600, color: T.accent }}>
                                 {item.id || `${label} ${index + 1}`}
@@ -2310,7 +2484,7 @@ function TraceabilityPage({ project, wps }) {
 
   return (
     <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>추적성 분석</h1>
+      <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 4, letterSpacing: "-0.02em" }}>추적성 분석</h1>
       <p style={{ color: T.muted, fontSize: 13, marginBottom: 24 }}>{project.name} · Need → STK-REQ → SYS-REQ → Element → VC → Test</p>
       <Card style={{ padding: 20, marginBottom: 20 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -2332,7 +2506,7 @@ function TraceabilityPage({ project, wps }) {
             <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>커버리지</h2>
             <div className="grid3" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
               {Object.entries(result.coverage || {}).map(([k, v]) => (
-                <div key={k} style={{ padding: "10px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}` }}>
+                <div key={k} style={{ padding: "10px 14px", background: "rgba(9,11,15,0.7)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.07)" }}>
                   <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>{k.replace(/_/g, " ").toUpperCase()}</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: String(v).includes("100%") ? T.green : T.amber }}>{v}</div>
                 </div>
@@ -2345,7 +2519,7 @@ function TraceabilityPage({ project, wps }) {
               {(result.forward_chain || []).map((link, i) => {
                 const relColor = { SATISFIES: T.accent, REFINES: T.purple, DERIVES: T.purple, ALLOCATED_TO: T.teal, VERIFIED_BY: T.green, TESTED_BY: T.amber }[link.relation] || T.muted;
                 return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: T.bg, borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 12 }}>
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(9,11,15,0.7)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", fontSize: 12 }}>
                     <span style={{ color: T.accent, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>{link.from}</span>
                     <span style={{ color: T.muted }}>→</span>
                     <Badge color={relColor}>{link.relation}</Badge>
@@ -2358,7 +2532,7 @@ function TraceabilityPage({ project, wps }) {
           <Card style={{ padding: 20 }}>
             <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>V-Model 매핑</h2>
             {(result.v_model_mapping || []).map((m, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(9,11,15,0.7)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.07)", marginBottom: 8 }}>
                 <span style={{ fontSize: 12, color: T.accent, fontWeight: 600, flex: 1 }}>{m.left}</span>
                 <span style={{ color: T.muted, fontSize: 14 }}>{m.relation}</span>
                 <span style={{ fontSize: 12, color: T.accent, fontWeight: 600, flex: 1, textAlign: "right" }}>{m.right}</span>
