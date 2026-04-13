@@ -827,45 +827,57 @@ function xmlTOC(wps) {
   };
   const included = PROC_ORDER.filter(id => wps.some(w => w.process_id === id));
 
-  function tocRow(text, indent) {
-    const left = indent ? 360 : 0;
+  // 목차 항목 하나 생성 (점선 탭)
+  function tocEntry(text, bold) {
     return `<w:p>
       <w:pPr>
-        <w:spacing w:before="80" w:after="80"/>
-        <w:ind w:left="${left}"/>
-        <w:tabs><w:tab w:val="right" w:leader="dot" w:pos="9000"/></w:tabs>
+        <w:spacing w:before="120" w:after="120"/>
+        <w:tabs>
+          <w:tab w:val="right" w:leader="dot" w:pos="8640"/>
+        </w:tabs>
       </w:pPr>
       <w:r><w:rPr>
         <w:rFonts w:ascii="Arial" w:hAnsi="Arial"/>
-        <w:sz w:val="${indent ? 20 : 22}"/><w:szCs w:val="${indent ? 20 : 22}"/>
-        ${indent ? "" : "<w:b/>"}
-      </w:rPr><w:t xml:space="preserve">${ex(text)}</w:t></w:r>
+        <w:sz w:val="22"/><w:szCs w:val="22"/>
+        ${bold ? '<w:b/>' : ''}
+      </w:rPr>
+        <w:t xml:space="preserve">${ex(text)}</w:t>
+      </w:r>
     </w:p>`;
   }
 
   const parts = [];
 
   // 목차 제목
-  parts.push(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>목차 (Table of Contents)</w:t></w:r></w:p>`);
-  parts.push(`<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>`);
+  parts.push(`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+    <w:r><w:t>목차 (Table of Contents)</w:t></w:r>
+  </w:p>`);
 
-  // 각 SYS 장
+  // 구분선
+  parts.push(`<w:p><w:pPr>
+    <w:pBdr><w:bottom w:val="single" w:sz="6" w:space="1" w:color="1E3A6E"/></w:pBdr>
+    <w:spacing w:after="240"/>
+  </w:pPr></w:p>`);
+
+  // 각 SYS 장 항목
   included.forEach((id, i) => {
-    parts.push(tocRow(`${i + 1}.  ${PROC_LABELS[id]}`, false));
+    parts.push(tocEntry(`${i + 1}.  ${PROC_LABELS[id]}`, true));
   });
 
   // 추적성 가이드라인
   if (included.length >= 2) {
-    parts.push(tocRow(`${included.length + 1}.  추적성 가이드라인 (Traceability Guidelines)`, false));
+    parts.push(tocEntry(`${included.length + 1}.  추적성 가이드라인 (Traceability Guidelines)`, true));
   }
 
   // 부록
-  parts.push(tocRow(`부록 A.  용어 정의 (Glossary)`, false));
+  parts.push(tocEntry(`부록 A.  용어 정의 (Glossary)`, true));
 
-  parts.push(`<w:p><w:pPr><w:spacing w:after="80"/></w:pPr></w:p>`);
+  // 하단 여백
+  parts.push(`<w:p><w:pPr><w:spacing w:after="240"/></w:pPr></w:p>`);
 
   return parts.join('\n');
 }
+
 
 function buildDocumentXml(project, wps) {
   const date = new Date().toLocaleDateString("ko-KR");
@@ -1528,32 +1540,267 @@ function WPResultViewer({ wp, process: proc }) {
 }
 
 // ── QA 결과 뷰어 ─────────────────────────────────────────────────────────────
-function QAResultView({ qa }) {
+function QAResultView({ qa, onFixRequest }) {
+  // 이슈별 체크 상태 & 지시사항
+  const [issueStates, setIssueStates] = useState(() =>
+    (qa.issues || []).reduce((acc, issue, i) => {
+      acc[i] = { checked: false, skip: false, instruction: "" };
+      return acc;
+    }, {})
+  );
+
+  const checkedCount = Object.values(issueStates).filter(s => s.checked && !s.skip).length;
+
+  function toggleCheck(i) {
+    setIssueStates(prev => ({ ...prev, [i]: { ...prev[i], checked: !prev[i].checked } }));
+  }
+  function toggleSkip(i) {
+    setIssueStates(prev => ({ ...prev, [i]: { ...prev[i], skip: !prev[i].skip, checked: false } }));
+  }
+  function setInstruction(i, val) {
+    setIssueStates(prev => ({ ...prev, [i]: { ...prev[i], instruction: val } }));
+  }
+
+  function handleFixRequest() {
+    const targets = (qa.issues || [])
+      .map((issue, i) => ({ issue, ...issueStates[i] }))
+      .filter(s => s.checked && !s.skip);
+    onFixRequest(targets);
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      <div className="grid4" style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
-        {[["종합 점수", qa.overall_score, qa.overall_score >= 80 ? T.green : qa.overall_score >= 60 ? T.amber : T.red], ["완전성", qa.completeness?.score, T.accent], ["일관성", qa.consistency?.score, T.purple], ["추적성", qa.traceability?.score, T.teal]].map(([label, val, color]) => (
+      {/* 점수 */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
+        {[["종합 점수", qa.overall_score, qa.overall_score >= 80 ? T.green : qa.overall_score >= 60 ? T.amber : T.red],
+          ["완전성", qa.completeness?.score, T.accent],
+          ["일관성", qa.consistency?.score, T.purple],
+          ["추적성", qa.traceability?.score, T.teal]
+        ].map(([label, val, color]) => (
           <div key={label} style={{ padding: "12px 14px", background: T.bg, borderRadius: 10, border: `1px solid ${T.border}`, textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.muted, marginBottom: 4 }}>{label}</div>
             <div style={{ fontSize: 22, fontWeight: 700, color }}>{val ?? "—"}</div>
           </div>
         ))}
       </div>
+
+      {/* 이슈 목록 */}
       {qa.issues?.length > 0 && (
         <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 10 }}>이슈 ({qa.summary?.total_issues}건)</div>
-          {qa.issues.map((issue, i) => (
-            <div key={i} style={{ padding: "10px 12px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
-              <div style={{ display: "flex", gap: 8, marginBottom: 6 }}><SeverityBadge severity={issue.severity} /><Badge color={T.muted}>{issue.category}</Badge></div>
-              <div style={{ fontSize: 12, marginBottom: 4 }}>{issue.description}</div>
-              {issue.recommendation && <div style={{ fontSize: 11, color: T.teal, marginTop: 4 }}>권장: {issue.recommendation}</div>}
+          <div style={{ fontSize: 12, fontWeight: 600, color: T.muted, marginBottom: 10 }}>
+            이슈 ({qa.summary?.total_issues}건) — 수정할 항목을 체크하세요
+          </div>
+          {qa.issues.map((issue, i) => {
+            const st = issueStates[i] || {};
+            return (
+              <div key={i} style={{
+                padding: "12px 14px", background: st.skip ? T.surface : st.checked ? T.accentGlow : T.surface2,
+                borderRadius: 10, border: `1px solid ${st.checked ? T.accent : st.skip ? T.border + "44" : T.border}`,
+                marginBottom: 10, opacity: st.skip ? 0.5 : 1, transition: "all .2s"
+              }}>
+                {/* 이슈 헤더 */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
+                  {/* 수정 체크박스 */}
+                  <input type="checkbox" checked={!!st.checked} disabled={st.skip}
+                    onChange={() => toggleCheck(i)}
+                    style={{ marginTop: 2, cursor: "pointer", width: 15, height: 15 }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
+                      <SeverityBadge severity={issue.severity} />
+                      <Badge color={T.muted}>{issue.category}</Badge>
+                    </div>
+                    <div style={{ fontSize: 12, marginBottom: 4 }}>{issue.description}</div>
+                    {issue.recommendation && (
+                      <div style={{ fontSize: 11, color: T.teal, marginTop: 4 }}>
+                        권장: {issue.recommendation}
+                      </div>
+                    )}
+                  </div>
+                  {/* 수정 안 함 토글 */}
+                  <button onClick={() => toggleSkip(i)} style={{
+                    background: st.skip ? T.amber + "33" : T.surface,
+                    border: `1px solid ${st.skip ? T.amber : T.border}`,
+                    borderRadius: 6, padding: "3px 8px", fontSize: 10,
+                    color: st.skip ? T.amber : T.muted, cursor: "pointer", whiteSpace: "nowrap"
+                  }}>
+                    {st.skip ? "✕ 수정 안 함" : "수정 안 함"}
+                  </button>
+                </div>
+
+                {/* 지시사항 입력창 — 체크된 항목만 표시 */}
+                {st.checked && !st.skip && (
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.border}` }}>
+                    <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>
+                      수정 지시사항 (비워두면 QA 권장사항 기반으로 Claude가 판단)
+                    </div>
+                    <textarea
+                      value={st.instruction}
+                      onChange={e => setInstruction(i, e.target.value)}
+                      placeholder={`예: "${issue.recommendation || "구체적인 수정 내용을 입력하세요"}"`}
+                      style={{
+                        width: "100%", minHeight: 60, padding: "8px 10px",
+                        background: T.bg, border: `1px solid ${T.accent}`,
+                        borderRadius: 8, color: T.text, fontSize: 12, resize: "vertical",
+                        fontFamily: "inherit", boxSizing: "border-box"
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* 일괄 자동수정 버튼 */}
+          {checkedCount > 0 && (
+            <div style={{ marginTop: 4 }}>
+              <Btn onClick={handleFixRequest} style={{ background: T.purple, borderColor: T.purple }}>
+                ✦ 선택 항목 Claude 자동 수정 ({checkedCount}건)
+              </Btn>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Gemini 권장 */}
+      <div style={{ padding: "10px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
+        <span style={{ fontSize: 11, color: T.muted, marginRight: 8 }}>Gemini 권장:</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: qa.recommendation?.includes("승인") ? T.green : T.amber }}>
+          {qa.recommendation}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ── 항목 직접 편집 모달 ───────────────────────────────────────────────────────
+function ItemEditModal({ item, onSave, onClose }) {
+  const [fields, setFields] = useState(() =>
+    Object.entries(item).reduce((acc, [k, v]) => {
+      if (typeof v !== "object" || v === null) acc[k] = String(v ?? "");
+      else acc[k] = JSON.stringify(v, null, 2);
+      return acc;
+    }, {})
+  );
+
+  function setField(k, v) { setFields(prev => ({ ...prev, [k]: v })); }
+
+  function handleSave() {
+    const parsed = Object.entries(fields).reduce((acc, [k, v]) => {
+      try { acc[k] = JSON.parse(v); } catch { acc[k] = v; }
+      return acc;
+    }, {});
+    onSave(parsed);
+  }
+
+  const skipKeys = ["id"];
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: T.surface, borderRadius: 16, padding: 24, width: "min(600px,95vw)", maxHeight: "85vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700 }}>항목 직접 편집</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {Object.entries(fields).filter(([k]) => !skipKeys.includes(k)).map(([k, v]) => (
+            <div key={k}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>{k}</div>
+              <textarea value={v} onChange={e => setField(k, e.target.value)}
+                style={{ width: "100%", minHeight: v.length > 100 ? 100 : 44, padding: "8px 10px",
+                  background: T.bg, border: `1px solid ${T.border}`, borderRadius: 8,
+                  color: T.text, fontSize: 12, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
+              />
             </div>
           ))}
         </div>
-      )}
-      <div style={{ padding: "10px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
-        <span style={{ fontSize: 11, color: T.muted, marginRight: 8 }}>Gemini 권장:</span>
-        <span style={{ fontSize: 13, fontWeight: 700, color: qa.recommendation?.includes("승인") ? T.green : T.amber }}>{qa.recommendation}</span>
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <Btn onClick={handleSave}>💾 저장</Btn>
+          <Btn variant="outline" onClick={onClose}>취소</Btn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── 수정 미리보기 모달 ────────────────────────────────────────────────────────
+function FixPreviewModal({ original, fixed, onApply, onEditItem, onClose }) {
+  const proc = original.process_id;
+
+  // 수정된 항목 찾기
+  function findChangedItems() {
+    const changes = [];
+    const origContent = original.content || {};
+    const fixedContent = fixed || {};
+
+    // 모든 배열 필드 비교
+    const arrayFields = ["requirements", "needs", "system_elements", "interfaces",
+      "test_cases", "verification_criteria", "allocation_matrix"];
+
+    for (const field of arrayFields) {
+      const origArr = origContent[field] || [];
+      const fixedArr = fixedContent[field] || [];
+      fixedArr.forEach((item, i) => {
+        const origItem = origArr.find(o => o.id === item.id) || origArr[i];
+        if (JSON.stringify(item) !== JSON.stringify(origItem)) {
+          changes.push({ field, index: i, original: origItem, fixed: item });
+        }
+      });
+    }
+    return changes;
+  }
+
+  const changes = findChangedItems();
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000a", zIndex: 9998, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: T.surface, borderRadius: 16, padding: 24, width: "min(700px,95vw)", maxHeight: "88vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 700 }}>✦ Claude 수정 결과 미리보기</h3>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
+        </div>
+
+        {changes.length === 0 ? (
+          <div style={{ color: T.muted, fontSize: 13, padding: 20, textAlign: "center" }}>수정된 항목이 없습니다.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontSize: 12, color: T.muted, marginBottom: 4 }}>
+              총 {changes.length}개 항목이 수정되었습니다. 확인 후 적용하세요.
+            </div>
+            {changes.map((ch, i) => (
+              <div key={i} style={{ background: T.bg, borderRadius: 10, border: `1px solid ${T.accent}44`, padding: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>
+                    [{ch.field}] {ch.fixed?.id || `항목 ${ch.index + 1}`}
+                  </div>
+                  <Btn size="sm" variant="outline" onClick={() => onEditItem(ch.field, ch.index, ch.fixed)}>
+                    ✏️ 직접 수정
+                  </Btn>
+                </div>
+                {Object.entries(ch.fixed || {}).map(([k, v]) => {
+                  const origV = ch.original?.[k];
+                  const changed = JSON.stringify(v) !== JSON.stringify(origV);
+                  if (!changed || k === "id") return null;
+                  return (
+                    <div key={k} style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 10, color: T.muted, marginBottom: 2 }}>{k}</div>
+                      <div style={{ fontSize: 11, color: T.red + "cc", textDecoration: "line-through", marginBottom: 2 }}>
+                        {String(origV ?? "")}
+                      </div>
+                      <div style={{ fontSize: 11, color: T.green }}>
+                        {typeof v === "object" ? JSON.stringify(v) : String(v ?? "")}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <Btn onClick={onApply} style={{ background: T.green, borderColor: T.green }}>✓ 적용</Btn>
+          <Btn variant="outline" onClick={onClose}>취소</Btn>
+        </div>
       </div>
     </div>
   );
@@ -1567,15 +1814,33 @@ function ReviewPage({ project, wps, onUpdate, nav }) {
   const [error, setError] = useState("");
   const [updating, setUpdating] = useState(false);
 
+  // 자동수정 상태
+  const [fixRunning, setFixRunning] = useState(false);
+  const [fixPreview, setFixPreview] = useState(null); // { fixedContent }
+  const [editingItem, setEditingItem] = useState(null); // { field, index, item }
+  const [currentContent, setCurrentContent] = useState(null); // 수정 중인 content
+
   const pendingWPs = wps.filter(w => ["검토중", "초안"].includes(w.status));
+
+  function selectWP(wp) {
+    setSelected(wp);
+    setQaResult(wp.qa_result ? (typeof wp.qa_result === "string" ? JSON.parse(wp.qa_result) : wp.qa_result) : null);
+    setCurrentContent(wp.content);
+    setFixPreview(null);
+    setError("");
+  }
 
   async function handleQA() {
     if (!selected) return;
     setQaRunning(true); setError(""); setQaResult(null);
     try {
-      const r = await runQACheck(selected.content);
+      const contentToCheck = currentContent || selected.content;
+      const r = await runQACheck(contentToCheck);
       setQaResult(r);
-      await apiCall(`/api/projects?resource=work_products&id=${selected.id}`, "PATCH", { qa_result: JSON.stringify(r) });
+      await apiCall(`/api/projects?resource=work_products&id=${selected.id}`, "PATCH", {
+        qa_result: JSON.stringify(r),
+        content: contentToCheck
+      });
       await onUpdate();
     } catch (e) { setError("QA 실패: " + e.message); }
     setQaRunning(false);
@@ -1588,34 +1853,118 @@ function ReviewPage({ project, wps, onUpdate, nav }) {
       await apiCall(`/api/projects?resource=work_products&id=${selected.id}`, "PATCH", { status });
       await onUpdate();
       setSelected(prev => ({ ...prev, status }));
-      // 승인 시 파이프라인으로 자동 이동 + 성공 메시지
-      if (status === "승인됨") {
-        setTimeout(() => nav("pipeline"), 800);
-      }
+      if (status === "승인됨") setTimeout(() => nav("pipeline"), 800);
     } catch (e) { setError("업데이트 실패: " + e.message); }
     setUpdating(false);
   }
 
+  // Claude 자동수정
+  async function handleFixRequest(targets) {
+    if (!selected || targets.length === 0) return;
+    setFixRunning(true); setError("");
+    try {
+      const content = currentContent || selected.content;
+      const proc = selected.process_id;
+
+      // 수정 지시 프롬프트 생성
+      const fixInstructions = targets.map((t, i) =>
+        `[이슈 ${i + 1}] 심각도: ${t.issue.severity} | 카테고리: ${t.issue.category}
+문제: ${t.issue.description}
+권장: ${t.issue.recommendation}
+${t.instruction ? `사용자 지시사항: ${t.instruction}` : "지시사항 없음 - QA 권장사항 기반으로 수정"}`
+      ).join("\n\n");
+
+      const prompt = `당신은 ASPICE 4.0 전문가입니다. 아래 산출물에서 지정된 이슈들만 수정하세요.
+반드시 한국어로 작성하세요.
+수정하지 않은 항목은 원본 그대로 유지하세요.
+반드시 동일한 JSON 구조로 전체 content를 반환하세요. 마크다운 없이 JSON만 출력하세요.
+
+프로세스: ${proc}
+
+현재 산출물 JSON:
+${JSON.stringify(content, null, 2)}
+
+수정할 이슈 목록:
+${fixInstructions}
+
+중요: 위 이슈들과 관련된 항목만 수정하고, 나머지는 완전히 그대로 유지하세요.
+전체 JSON 구조를 그대로 반환하세요.`;
+
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "수정 실패");
+
+      let fixedContent;
+      try {
+        const cleaned = data.text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+        const s = cleaned.indexOf("{"); const e = cleaned.lastIndexOf("}");
+        fixedContent = JSON.parse(cleaned.slice(s, e + 1));
+      } catch {
+        throw new Error("수정 결과 파싱 실패");
+      }
+
+      setFixPreview({ fixedContent });
+    } catch (e) { setError("자동수정 실패: " + e.message); }
+    setFixRunning(false);
+  }
+
+  // 미리보기에서 항목 직접 수정
+  function handleEditItem(field, index, item) {
+    setEditingItem({ field, index, item });
+  }
+
+  function handleItemSave(savedItem) {
+    if (!fixPreview) return;
+    const newContent = JSON.parse(JSON.stringify(fixPreview.fixedContent));
+    if (newContent[editingItem.field]) {
+      newContent[editingItem.field][editingItem.index] = savedItem;
+    }
+    setFixPreview({ fixedContent: newContent });
+    setEditingItem(null);
+  }
+
+  // 수정 결과 적용
+  async function handleApplyFix() {
+    if (!fixPreview || !selected) return;
+    setUpdating(true);
+    try {
+      await apiCall(`/api/projects?resource=work_products&id=${selected.id}`, "PATCH", {
+        content: fixPreview.fixedContent
+      });
+      setCurrentContent(fixPreview.fixedContent);
+      setFixPreview(null);
+      setQaResult(null);
+      await onUpdate();
+      setError("");
+    } catch (e) { setError("적용 실패: " + e.message); }
+    setUpdating(false);
+  }
+
   return (
-    <div style={{ maxWidth: 1000, margin: "0 auto" }}>
+    <div style={{ maxWidth: 1100, margin: "0 auto" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
         <button onClick={() => nav("pipeline")} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 18 }}>←</button>
         <h1 style={{ fontSize: 20, fontWeight: 700 }}>HITL 검토</h1>
       </div>
       <p style={{ color: T.muted, fontSize: 13, marginBottom: 24, paddingLeft: 28 }}>
-        {project.name} · AI 산출물 QA 검증 → 승인/거부 &nbsp;
+        {project.name} · AI 산출물 QA 검증 → 수정 → 승인/거부 &nbsp;
         <span style={{ color: T.teal, fontWeight: 700 }}>· QA 엔진: Gemini 2.0 Flash</span>
       </p>
 
-      <div className="grid2" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 16 }}>
-        <Card style={{ padding: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16 }}>
+        {/* 좌측: 검토 대기 목록 */}
+        <Card style={{ padding: 20, alignSelf: "start" }}>
           <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>검토 대기 ({pendingWPs.length})</h2>
           {pendingWPs.length === 0 ? (
             <EmptyState icon="◎" title="검토 대기 없음" desc="파이프라인에서 산출물을 생성하세요." action={<Btn onClick={() => nav("pipeline")}>파이프라인으로</Btn>} />
           ) : pendingWPs.map(wp => {
             const proc = PROCESSES.find(p => p.id === wp.process_id);
             return (
-              <div key={wp.id} onClick={() => { setSelected(wp); setQaResult(wp.qa_result); }}
+              <div key={wp.id} onClick={() => selectWP(wp)}
                 style={{ padding: "12px 14px", borderRadius: 10, border: `2px solid ${selected?.id === wp.id ? T.accent : T.border}`, background: selected?.id === wp.id ? T.accentGlow : T.bg, cursor: "pointer", transition: "all .2s", marginBottom: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                   <span style={{ fontWeight: 600, fontSize: 13 }}>{wp.content?.title || wp.process_id}</span>
@@ -1630,10 +1979,18 @@ function ReviewPage({ project, wps, onUpdate, nav }) {
           })}
         </Card>
 
-        <div>
+        {/* 우측: QA 검증 & 수정 */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {selected ? (
             <Card style={{ padding: 20 }}>
-              <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>QA 검증 — {selected.content?.title || selected.process_id}</h2>
+              <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>
+                QA 검증 — {selected.content?.title || selected.process_id}
+                {currentContent !== selected.content && (
+                  <span style={{ marginLeft: 8, fontSize: 11, color: T.amber, fontWeight: 400 }}>● 수정됨 (미저장)</span>
+                )}
+              </h2>
+
+              {/* 액션 버튼 */}
               <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
                 <Btn onClick={handleQA} disabled={qaRunning}>🔍 QA 검증 실행</Btn>
                 <Btn variant="success" onClick={() => handleStatusUpdate("승인됨")} disabled={updating}>
@@ -1641,15 +1998,25 @@ function ReviewPage({ project, wps, onUpdate, nav }) {
                 </Btn>
                 <Btn variant="danger" onClick={() => handleStatusUpdate("거부됨")} disabled={updating}>✕ 거부</Btn>
               </div>
+
               {updating && (
-                <div style={{ padding: "8px 12px", background: T.greenDim, border: `1px solid ${T.green}44`,
-                  borderRadius: 8, fontSize: 12, color: T.green, marginBottom: 12 }}>
+                <div style={{ padding: "8px 12px", background: T.greenDim, border: `1px solid ${T.green}44`, borderRadius: 8, fontSize: 12, color: T.green, marginBottom: 12 }}>
                   ⏳ 처리 중… 승인되면 파이프라인으로 자동 이동합니다.
                 </div>
               )}
+              {fixRunning && <Spinner text="Claude 자동 수정 중…" />}
               {qaRunning && <Spinner text="Gemini QA 검증 중…" />}
-              {error && <div style={{ color: T.red, fontSize: 12, padding: 10, background: T.redDim, borderRadius: 8, marginBottom: 12 }}>{error}</div>}
-              {qaResult && <QAResultView qa={qaResult} />}
+              {error && (
+                <div style={{ color: T.red, fontSize: 12, padding: 10, background: T.redDim, borderRadius: 8, marginBottom: 12 }}>
+                  {error}
+                </div>
+              )}
+              {qaResult && (
+                <QAResultView
+                  qa={qaResult}
+                  onFixRequest={handleFixRequest}
+                />
+              )}
             </Card>
           ) : (
             <Card style={{ padding: 40, textAlign: "center" }}>
@@ -1659,9 +2026,30 @@ function ReviewPage({ project, wps, onUpdate, nav }) {
           )}
         </div>
       </div>
+
+      {/* 수정 미리보기 모달 */}
+      {fixPreview && (
+        <FixPreviewModal
+          original={selected}
+          fixed={fixPreview.fixedContent}
+          onApply={handleApplyFix}
+          onEditItem={handleEditItem}
+          onClose={() => setFixPreview(null)}
+        />
+      )}
+
+      {/* 항목 직접 편집 모달 */}
+      {editingItem && (
+        <ItemEditModal
+          item={editingItem.item}
+          onSave={handleItemSave}
+          onClose={() => setEditingItem(null)}
+        />
+      )}
     </div>
   );
 }
+
 
 // ── 추적성 분석 페이지 ────────────────────────────────────────────────────────
 function TraceabilityPage({ project, wps }) {
