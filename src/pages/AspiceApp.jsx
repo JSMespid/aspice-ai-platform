@@ -879,7 +879,8 @@ function xmlTOC(wps) {
 }
 
 
-function buildDocumentXml(project, wps) {
+function buildDocumentXml(project, wps, diagrams) {
+  diagrams = diagrams || [];
   const date = new Date().toLocaleDateString("ko-KR");
   const sysMap = {};
   wps.forEach(wp => { sysMap[wp.process_id] = wp.content || {}; });
@@ -897,9 +898,32 @@ function buildDocumentXml(project, wps) {
 
   // 각 SYS 장
   const renderers = { "SYS.1": xmlSYS1, "SYS.2": xmlSYS2, "SYS.3": xmlSYS3, "SYS.4": xmlSYS4, "SYS.5": xmlSYS5 };
+  const archDiagram = diagrams.find(d => d.type === "arch");
+  const traceDiagram = diagrams.find(d => d.type === "trace");
+
   orderedIds.forEach((id, i) => {
     if (i > 0) bodyParts.push(pBreak());
     bodyParts.push(renderers[id](sysMap[id], i + 1));
+
+    // SYS.3 다음: 아키텍처 블록 다이어그램 삽입
+    if (id === "SYS.3" && archDiagram) {
+      bodyParts.push(pH2("Architecture Block Diagram"));
+      bodyParts.push(pNormal("아래 다이어그램은 System Elements와 Interfaces의 관계를 나타냅니다.", false, "555555", 18));
+      const diagW = 7315200; // 약 8인치 (EMU)
+      const ratio = (archDiagram.svgH || 400) / (archDiagram.svgW || 900);
+      const diagH = Math.round(diagW * ratio);
+      bodyParts.push(pngToWordDrawing(null, archDiagram.rId, diagW, diagH));
+    }
+
+    // SYS.2 다음: 추적성 매트릭스 다이어그램 삽입
+    if (id === "SYS.2" && traceDiagram) {
+      bodyParts.push(pH2("Requirements Traceability Diagram"));
+      bodyParts.push(pNormal("STK-REQ와 SYS-REQ 간의 추적성 관계를 나타냅니다.", false, "555555", 18));
+      const diagW = 7315200;
+      const ratio2 = (traceDiagram.svgH || 300) / (traceDiagram.svgW || 900);
+      const diagH2 = Math.round(diagW * ratio2);
+      bodyParts.push(pngToWordDrawing(null, traceDiagram.rId, diagW, diagH2));
+    }
   });
 
   // 추적성 가이드라인 (2개 이상 SYS가 있을 때)
@@ -933,16 +957,312 @@ ${sectPr}
 }
 
 // ── DOCX Blob 생성 ────────────────────────────────────────────────────────────
-function createDocxBlob(project, wps) {
-  const docXml = buildDocumentXml(project, wps);
-  const zipData = makeZip([
-    { name: "[Content_Types].xml", data: xmlContentTypes() },
+// ── 다이어그램 생성 (SVG → PNG → Word ImageRun) ────────────────────────────
+
+// SVG 문자열을 PNG Base64로 변환 (Canvas API)
+async function svgToPngBase64(svgStr, width, height) {
+  return new Promise((resolve, reject) => {
+    const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, width, height);
+      ctx.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(url);
+      const dataUrl = canvas.toDataURL('image/png');
+      resolve(dataUrl.split(',')[1]); // base64만
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+// ── SYS.3 아키텍처 블록 다이어그램 SVG 생성 ─────────────────────────────────
+function buildArchDiagramSVG(content) {
+  const elements = content.system_elements || [];
+  const interfaces = content.interfaces || [];
+  if (elements.length === 0) return null;
+
+  const W = 900, PADX = 60, PADY = 60;
+  const BOX_W = 160, BOX_H = 70, GAP_X = 200, GAP_Y = 120;
+
+  // 요소 위치 계산 (격자 배치)
+  const cols = Math.min(4, elements.length);
+  const rows = Math.ceil(elements.length / cols);
+  const H = PADY * 2 + rows * BOX_H + (rows - 1) * GAP_Y + 80;
+
+  const posMap = {};
+  elements.forEach((el, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const totalW = cols * BOX_W + (cols - 1) * (GAP_X - BOX_W);
+    const startX = (W - totalW) / 2;
+    posMap[el.id] = {
+      x: startX + col * GAP_X,
+      y: PADY + 60 + row * (BOX_H + GAP_Y),
+      cx: startX + col * GAP_X + BOX_W / 2,
+      cy: PADY + 60 + row * (BOX_H + GAP_Y) + BOX_H / 2,
+    };
+  });
+
+  // 색상 팔레트
+  const COLORS = ['#3B5BDB','#1098AD','#2F9E44','#E67700','#9C36B5','#C92A2A'];
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="font-family:Arial,sans-serif;">`;
+
+  // 배경
+  svg += `<rect width="${W}" height="${H}" fill="#F8FAFC" rx="12"/>`;
+
+  // 제목
+  svg += `<text x="${W/2}" y="36" text-anchor="middle" font-size="16" font-weight="700" fill="#1E3A6E">System Architecture Diagram</text>`;
+  svg += `<line x1="60" y1="48" x2="${W-60}" y2="48" stroke="#1E3A6E" stroke-width="1.5" opacity="0.3"/>`;
+
+  // 인터페이스 연결선 (먼저 그림 — 박스 아래에 위치)
+  interfaces.forEach((iface, idx) => {
+    const srcPos = posMap[iface.source];
+    const tgtPos = posMap[iface.target];
+    if (!srcPos || !tgtPos) return;
+
+    const x1 = srcPos.cx, y1 = srcPos.cy;
+    const x2 = tgtPos.cx, y2 = tgtPos.cy;
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+
+    // 곡선 화살표
+    const ctrl1x = x1 + (x2 - x1) * 0.3;
+    const ctrl1y = y1 - 30;
+    const ctrl2x = x1 + (x2 - x1) * 0.7;
+    const ctrl2y = y2 - 30;
+
+    svg += `<defs><marker id="arrow${idx}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#6C757D" opacity="0.7"/>
+    </marker></defs>`;
+
+    svg += `<path d="M${x1},${y1} C${ctrl1x},${ctrl1y} ${ctrl2x},${ctrl2y} ${x2},${y2}"
+      fill="none" stroke="#6C757D" stroke-width="1.5" stroke-dasharray="5,3" opacity="0.7"
+      marker-end="url(#arrow${idx})"/>`;
+
+    // 인터페이스 라벨
+    const labelX = (x1 + x2) / 2;
+    const labelY = Math.min(y1, y2) - 20;
+    svg += `<rect x="${labelX - 30}" y="${labelY - 10}" width="60" height="16" rx="4" fill="#E9ECEF" opacity="0.9"/>`;
+    svg += `<text x="${labelX}" y="${labelY + 2}" text-anchor="middle" font-size="9" fill="#495057">${ex(iface.id)}</text>`;
+  });
+
+  // 시스템 요소 박스
+  elements.forEach((el, i) => {
+    const pos = posMap[el.id];
+    if (!pos) return;
+    const color = COLORS[i % COLORS.length];
+    const lightColor = color + '22';
+
+    // 그림자
+    svg += `<rect x="${pos.x+3}" y="${pos.cy - BOX_H/2 + 3}" width="${BOX_W}" height="${BOX_H}" rx="10" fill="rgba(0,0,0,0.08)"/>`;
+    // 박스
+    svg += `<rect x="${pos.x}" y="${pos.cy - BOX_H/2}" width="${BOX_W}" height="${BOX_H}" rx="10" fill="white" stroke="${color}" stroke-width="2"/>`;
+    // 상단 색상 바
+    svg += `<rect x="${pos.x}" y="${pos.cy - BOX_H/2}" width="${BOX_W}" height="20" rx="10" fill="${color}"/>`;
+    svg += `<rect x="${pos.x}" y="${pos.cy - BOX_H/2 + 12}" width="${BOX_W}" height="8" fill="${color}"/>`;
+
+    // ID 텍스트 (상단 색상바 위)
+    svg += `<text x="${pos.cx}" y="${pos.cy - BOX_H/2 + 14}" text-anchor="middle" font-size="10" font-weight="700" fill="white">${ex(el.id)}</text>`;
+
+    // 이름 텍스트
+    const name = (el.name || '').length > 18 ? el.name.slice(0, 16) + '…' : (el.name || '');
+    svg += `<text x="${pos.cx}" y="${pos.cy + 4}" text-anchor="middle" font-size="11" font-weight="600" fill="#1E293B">${ex(name)}</text>`;
+
+    // 타입
+    if (el.type) {
+      svg += `<text x="${pos.cx}" y="${pos.cy + 20}" text-anchor="middle" font-size="9" fill="#6C757D">${ex(el.type)}</text>`;
+    }
+  });
+
+  // 범례
+  const legY = H - 30;
+  svg += `<text x="${PADX}" y="${legY}" font-size="9" fill="#6C757D">■ System Element</text>`;
+  svg += `<line x1="${PADX + 120}" y1="${legY - 4}" x2="${PADX + 160}" y2="${legY - 4}" stroke="#6C757D" stroke-width="1.5" stroke-dasharray="4,2"/>`;
+  svg += `<polygon points="${PADX + 160},${legY - 7} ${PADX + 167},${legY - 4} ${PADX + 160},${legY - 1}" fill="#6C757D"/>`;
+  svg += `<text x="${PADX + 172}" y="${legY}" font-size="9" fill="#6C757D">Interface</text>`;
+
+  svg += `</svg>`;
+  return { svg, width: W, height: H };
+}
+
+// ── SYS.4/SYS.5 추적성 매트릭스 다이어그램 SVG ──────────────────────────────
+function buildTraceDiagramSVG(sys1Content, sys2Content, sys3Content) {
+  const stk = (sys1Content?.requirements || []).slice(0, 6);
+  const sys = (sys2Content?.requirements || []).slice(0, 6);
+  if (stk.length === 0 && sys.length === 0) return null;
+
+  const W = 900, ROW_H = 32, COL_W = 140;
+  const LABEL_W = 180;
+  const H = 80 + Math.max(stk.length, sys.length) * ROW_H + 60;
+
+  let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="font-family:Arial,sans-serif;">`;
+  svg += `<rect width="${W}" height="${H}" fill="#F8FAFC" rx="12"/>`;
+  svg += `<text x="${W/2}" y="32" text-anchor="middle" font-size="16" font-weight="700" fill="#1E3A6E">Traceability Matrix: STK-REQ → SYS-REQ</text>`;
+  svg += `<line x1="60" y1="44" x2="${W-60}" y2="44" stroke="#1E3A6E" stroke-width="1.5" opacity="0.3"/>`;
+
+  const startY = 60;
+  // STK-REQ 열 헤더
+  svg += `<rect x="60" y="${startY}" width="${LABEL_W}" height="28" rx="4" fill="#1E3A6E"/>`;
+  svg += `<text x="${60 + LABEL_W/2}" y="${startY + 18}" text-anchor="middle" font-size="11" font-weight="700" fill="white">STK-REQ</text>`;
+  // SYS-REQ 열 헤더
+  svg += `<rect x="${60 + LABEL_W + 20}" y="${startY}" width="${LABEL_W}" height="28" rx="4" fill="#2C5F8A"/>`;
+  svg += `<text x="${60 + LABEL_W + 20 + LABEL_W/2}" y="${startY + 18}" text-anchor="middle" font-size="11" font-weight="700" fill="white">SYS-REQ</text>`;
+
+  const maxRows = Math.max(stk.length, sys.length);
+  // 행
+  for (let i = 0; i < maxRows; i++) {
+    const ry = startY + 28 + i * ROW_H;
+    const bg = i % 2 === 0 ? '#FFFFFF' : '#F0F4F8';
+    svg += `<rect x="60" y="${ry}" width="${LABEL_W}" height="${ROW_H}" fill="${bg}" stroke="#E2E8F0" stroke-width="1"/>`;
+    svg += `<rect x="${60 + LABEL_W + 20}" y="${ry}" width="${LABEL_W}" height="${ROW_H}" fill="${bg}" stroke="#E2E8F0" stroke-width="1"/>`;
+
+    if (stk[i]) {
+      svg += `<text x="${60 + 8}" y="${ry + ROW_H/2 + 4}" font-size="10" fill="#1E3A6E" font-weight="600">${ex(stk[i].id)}</text>`;
+    }
+    if (sys[i]) {
+      svg += `<text x="${60 + LABEL_W + 28}" y="${ry + ROW_H/2 + 4}" font-size="10" fill="#2C5F8A" font-weight="600">${ex(sys[i].id)}</text>`;
+    }
+
+    // 화살표 연결
+    if (stk[i] && sys[i]) {
+      const x1 = 60 + LABEL_W, y1 = ry + ROW_H/2;
+      const x2 = 60 + LABEL_W + 20, y2 = ry + ROW_H/2;
+      svg += `<defs><marker id="tarrow${i}" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
+        <polygon points="0 0, 6 2.5, 0 5" fill="#10B981"/>
+      </marker></defs>`;
+      svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#10B981" stroke-width="1.5" marker-end="url(#tarrow${i})"/>`;
+    }
+  }
+
+  svg += `</svg>`;
+  return { svg, width: W, height: H };
+}
+
+// ── PNG Base64를 Word XML <w:drawing> 태그로 변환 ────────────────────────────
+function pngToWordDrawing(base64, rId, widthEMU, heightEMU) {
+  // EMU = English Metric Units (914400 = 1 inch)
+  return `<w:p>
+    <w:pPr><w:jc w:val="center"/><w:spacing w:before="200" w:after="200"/></w:pPr>
+    <w:r>
+      <w:rPr/>
+      <w:drawing>
+        <wp:inline xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+                   distT="0" distB="0" distL="0" distR="0">
+          <wp:extent cx="${widthEMU}" cy="${heightEMU}"/>
+          <wp:effectExtent l="0" t="0" r="0" b="0"/>
+          <wp:docPr id="1" name="Architecture Diagram"/>
+          <wp:cNvGraphicFramePr>
+            <a:graphicFrameLocks xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" noChangeAspect="1"/>
+          </wp:cNvGraphicFramePr>
+          <a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+            <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+              <pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+                <pic:nvPicPr>
+                  <pic:cNvPr id="1" name="diagram"/>
+                  <pic:cNvPicPr/>
+                </pic:nvPicPr>
+                <pic:blipFill>
+                  <a:blip r:embed="${rId}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/>
+                  <a:stretch><a:fillRect/></a:stretch>
+                </pic:blipFill>
+                <pic:spPr>
+                  <a:xfrm>
+                    <a:off x="0" y="0"/>
+                    <a:ext cx="${widthEMU}" cy="${heightEMU}"/>
+                  </a:xfrm>
+                  <a:prstGeom prst="rect"><a:avLst/></a:prstGeom>
+                </pic:spPr>
+              </pic:pic>
+            </a:graphicData>
+          </a:graphic>
+        </wp:inline>
+      </w:drawing>
+    </w:r>
+  </w:p>`;
+}
+
+// ── 이미지 포함 Word 관계 XML ─────────────────────────────────────────────────
+function xmlRelsWithImages(imageRIds) {
+  const base = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/numbering" Target="numbering.xml"/>`;
+  const imgRels = imageRIds.map((rId, i) =>
+    `  <Relationship Id="${rId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/diagram${i+1}.png"/>`
+  ).join('\n');
+  return base + '\n' + imgRels + '\n</Relationships>';
+}
+
+// ── 이미지 포함 ContentTypes ──────────────────────────────────────────────────
+function xmlContentTypesWithImages() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+  <Override PartName="/word/numbering.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml"/>
+</Types>`;
+}
+
+async function createDocxBlob(project, wps) {
+  // 다이어그램 이미지 생성
+  const sysMap = {};
+  wps.forEach(wp => { sysMap[wp.process_id] = wp.content || {}; });
+
+  const diagrams = []; // { rId, base64, name }
+
+  // SYS.3 아키텍처 다이어그램
+  if (sysMap["SYS.3"]) {
+    const archResult = buildArchDiagramSVG(sysMap["SYS.3"]);
+    if (archResult) {
+      try {
+        const png = await svgToPngBase64(archResult.svg, archResult.width, archResult.height);
+        diagrams.push({ rId: "rId10", base64: png, name: "diagram1.png", type: "arch", svgW: archResult.width, svgH: archResult.height });
+      } catch(e) { console.warn("아키텍처 다이어그램 생성 실패:", e); }
+    }
+  }
+
+  // 추적성 다이어그램 (SYS.1 + SYS.2 모두 있을 때)
+  if (sysMap["SYS.1"] && sysMap["SYS.2"]) {
+    const traceResult = buildTraceDiagramSVG(sysMap["SYS.1"], sysMap["SYS.2"], sysMap["SYS.3"]);
+    if (traceResult) {
+      try {
+        const png = await svgToPngBase64(traceResult.svg, traceResult.width, traceResult.height);
+        diagrams.push({ rId: "rId11", base64: png, name: "diagram2.png", type: "trace", svgW: traceResult.width, svgH: traceResult.height });
+      } catch(e) { console.warn("추적성 다이어그램 생성 실패:", e); }
+    }
+  }
+
+  // 다이어그램 정보를 buildDocumentXml에 전달
+  const docXml = buildDocumentXml(project, wps, diagrams);
+
+  // PNG 바이너리 변환 (base64 → Uint8Array)
+  function b64ToUint8(b64) {
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    return arr;
+  }
+
+  const files = [
+    { name: "[Content_Types].xml", data: xmlContentTypesWithImages() },
     { name: "_rels/.rels", data: xmlAppRels() },
     { name: "word/document.xml", data: docXml },
     { name: "word/styles.xml", data: xmlStyles() },
     { name: "word/numbering.xml", data: xmlNumbering() },
-    { name: "word/_rels/document.xml.rels", data: xmlRels() },
-  ]);
+    { name: "word/_rels/document.xml.rels", data: xmlRelsWithImages(diagrams.map(d => d.rId)) },
+    ...diagrams.map(d => ({ name: `word/media/${d.name}`, data: b64ToUint8(d.base64) })),
+  ];
+
+  const zipData = makeZip(files);
   return new Blob([zipData], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
 }
 
@@ -969,13 +1289,13 @@ async function downloadWordSingle(wpContent, project, proc, allWorkProducts) {
   const targetWPs = hasCurrentInAll
     ? wpsUpToCurrent
     : [...wpsUpToCurrent, { process_id: proc.id, content: wpContent, status: "초안" }];
-  const blob = createDocxBlob(project, targetWPs);
+  const blob = await createDocxBlob(project, targetWPs);
   triggerDownload(blob, `${project.name}_${proc.id}_누적.docx`);
 }
 
 // 전체: 모든 완성된 산출물 포함
 async function downloadWordAll(workProducts, project) {
-  const blob = createDocxBlob(project, workProducts);
+  const blob = await createDocxBlob(project, workProducts);
   triggerDownload(blob, `${project.name}_ASPICE_전체산출물.docx`);
 }
 
