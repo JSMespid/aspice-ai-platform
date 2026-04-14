@@ -120,7 +120,14 @@ async function runQACheck(workProduct) {
 
 // ── 산출물 생성 프롬프트 ─────────────────────────────────────────────────────
 async function generateWorkProduct(processId, context, projectInfo, prevContents) {
-  const SYS_BASE = `당신은 ASPICE 4.0 전문가입니다. 반드시 유효한 JSON만 응답하세요. 마크다운, 설명 없이 완전한 JSON만 출력하세요.`;
+  // 활성 템플릿 로드 (없으면 기본값 사용)
+  const activeTemplate = await getActiveTemplate(processId);
+  const templateGuide = activeTemplate?.prompt_guide || "";
+
+  const SYS_BASE = `당신은 ASPICE 4.0 전문가입니다. 반드시 유효한 JSON만 응답하세요. 마크다운, 설명 없이 완전한 JSON만 출력하세요.
+${templateGuide ? `
+[문서 템플릿 준수 기준]
+${templateGuide}` : ""}`;
   const prev = (key) => prevContents[key] ? `\n\n[이전 단계 산출물 - ${key}]\n${JSON.stringify(prevContents[key], null, 2)}` : "";
 
   const prompts = {
@@ -201,6 +208,134 @@ function ex(str) {
     .replace(/&/g, "&amp;").replace(/</g, "&lt;")
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+
+// ── 기본 템플릿 (코드 내장) ───────────────────────────────────────────────────
+const DEFAULT_TEMPLATES = [
+  {
+    process_id: "SYS.1",
+    name: "ASPICE 4.0 SYS.1 기본 템플릿",
+    version: "1.0",
+    is_default: true,
+    description: "ASPICE 4.0 기준 Stakeholder Requirements Definition 표준 템플릿",
+    prompt_guide: `ASPICE 4.0 SYS.1 준수 기준:
+- 이해관계자 Needs를 명확히 식별하고 고유 ID(N-xxx) 부여
+- 각 Need를 추적 가능한 Stakeholder Requirement(STK-REQ-xxx)로 변환
+- 요구사항은 단일 의미, 검증 가능, 완전한 문장으로 작성
+- Priority: Critical/High/Medium/Low 중 하나
+- Stability: Stable/Volatile/Under Review 중 하나
+- Acceptance Criteria는 측정 가능한 기준으로 작성
+- 모든 STK-REQ는 최소 1개 이상의 Need를 참조해야 함`,
+    required_fields: ["id","title","description","priority","acceptance_criteria","stability","source_needs"],
+    word_sections: [
+      { id: "needs", title: "Stakeholder Needs", required: true },
+      { id: "requirements", title: "Stakeholder Requirements", required: true },
+      { id: "traceability", title: "Traceability Matrix", required: true },
+    ],
+  },
+  {
+    process_id: "SYS.2",
+    name: "ASPICE 4.0 SYS.2 기본 템플릿",
+    version: "1.0",
+    is_default: true,
+    description: "ASPICE 4.0 기준 System Requirements Analysis 표준 템플릿",
+    prompt_guide: `ASPICE 4.0 SYS.2 준수 기준:
+- STK-REQ를 기능/비기능 System Requirements로 분류
+- 기능 요구사항: SYS-REQ-F-xxx, 비기능: SYS-REQ-NF-xxx
+- 각 SYS-REQ는 최소 1개의 STK-REQ에서 파생되어야 함
+- Verification Method: Test/Inspection/Analysis/Demonstration 중 하나
+- 검증 기준(VC)은 구체적이고 측정 가능하게 작성
+- Allocated To: 할당될 System Element 명시
+- Type: Functional/Performance/Safety/Interface/Constraint 중 하나`,
+    required_fields: ["id","title","description","type","priority","method","source_stk_req","allocated_to"],
+    word_sections: [
+      { id: "requirements_functional", title: "Functional Requirements", required: true },
+      { id: "requirements_nonfunctional", title: "Non-functional Requirements", required: false },
+      { id: "verification_criteria", title: "Verification Criteria", required: true },
+      { id: "traceability", title: "Traceability Matrix", required: true },
+    ],
+  },
+  {
+    process_id: "SYS.3",
+    name: "ASPICE 4.0 SYS.3 기본 템플릿",
+    version: "1.0",
+    is_default: true,
+    description: "ASPICE 4.0 기준 System Architectural Design 표준 템플릿",
+    prompt_guide: `ASPICE 4.0 SYS.3 준수 기준:
+- System Elements(SE-xxx): HW/SW/Mechanical 컴포넌트 식별
+- Interfaces(IF-xxx): Elements 간 데이터/전원/제어 인터페이스 정의
+- 모든 SYS-REQ는 최소 1개의 System Element에 할당되어야 함
+- Interface는 Source/Target/Type/Protocol/Specification 포함
+- Allocation Matrix로 REQ↔Element 할당 관계 명시
+- Integration Strategy: Bottom-up/Top-down/Incremental 중 선택
+- 통합 단계(Phases) 구체적으로 정의`,
+    required_fields: ["id","name","type","description","allocated_requirements","interfaces"],
+    word_sections: [
+      { id: "system_elements", title: "System Elements", required: true },
+      { id: "interfaces", title: "Interfaces", required: true },
+      { id: "allocation_matrix", title: "Allocation Matrix", required: true },
+      { id: "integration_strategy", title: "Integration Strategy", required: true },
+    ],
+  },
+  {
+    process_id: "SYS.4",
+    name: "ASPICE 4.0 SYS.4 기본 템플릿",
+    version: "1.0",
+    is_default: true,
+    description: "ASPICE 4.0 기준 System Integration Test 표준 템플릿",
+    prompt_guide: `ASPICE 4.0 SYS.4 준수 기준:
+- Test Case ID: ITC-xxx (Integration Test Case)
+- Primary Target은 Interface(IF-xxx)여야 함 (직접 검증 대상)
+- Related SYS-REQ는 간접 참조 (해당 Interface/Element가 구현하는 요구사항)
+- 각 Interface는 최소 1개의 Test Case로 검증되어야 함
+- Test Steps는 번호 순서로 구체적으로 작성
+- Precondition: 테스트 실행 전 필요 조건 명시
+- Pass Criteria: 정량적/정성적 합격 기준 명시`,
+    required_fields: ["id","title","objective","primary_target","integrated_elements","related_sys_req","precondition","test_steps","expected_result","pass_criteria"],
+    word_sections: [
+      { id: "integration_strategy", title: "Integration Strategy", required: true },
+      { id: "test_cases", title: "Integration Test Cases", required: true },
+      { id: "traceability", title: "Traceability Matrix", required: true },
+    ],
+  },
+  {
+    process_id: "SYS.5",
+    name: "ASPICE 4.0 SYS.5 기본 템플릿",
+    version: "1.0",
+    is_default: true,
+    description: "ASPICE 4.0 기준 System Qualification Test 표준 템플릿",
+    prompt_guide: `ASPICE 4.0 SYS.5 준수 기준:
+- Test Case ID: QTC-xxx (Qualification Test Case)
+- Primary Target은 SYS-REQ(System Requirements)여야 함
+- Reference STK-REQ는 참조용 (만족도 확인)
+- 모든 SYS-REQ는 최소 1개의 QTC로 검증되어야 함
+- Test Type: Functional/Performance/Safety/Regression 중 하나
+- Test Environment: HIL/SIL/Vehicle/Lab 등 명시
+- Coverage Analysis: 전체 요구사항 대비 검증률 포함`,
+    required_fields: ["id","title","objective","system_requirements","verification_criteria","test_environment","test_type","test_steps","expected_result","pass_criteria"],
+    word_sections: [
+      { id: "test_cases", title: "Qualification Test Cases", required: true },
+      { id: "traceability", title: "Traceability Matrix", required: true },
+      { id: "coverage_analysis", title: "Coverage Analysis", required: true },
+    ],
+  },
+];
+
+// 템플릿 API 호출
+async function fetchTemplates(processId) {
+  try {
+    const url = processId ? `/api/templates?process_id=${processId}` : '/api/templates';
+    const data = await apiCall(url);
+    return Array.isArray(data) && data.length > 0 ? data : DEFAULT_TEMPLATES.filter(t => !processId || t.process_id === processId);
+  } catch {
+    return DEFAULT_TEMPLATES.filter(t => !processId || t.process_id === processId);
+  }
+}
+
+async function getActiveTemplate(processId) {
+  const templates = await fetchTemplates(processId);
+  return templates.find(t => t.is_default) || templates[0] || DEFAULT_TEMPLATES.find(t => t.process_id === processId);
+}
+
 
 // ── ZIP / CRC32 ──────────────────────────────────────────────────────────────
 function crc32(data) {
@@ -1320,6 +1455,309 @@ async function downloadWordAll(workProducts, project) {
   triggerDownload(blob, `${project.name}_ASPICE_전체산출물.docx`);
 }
 
+// ── 관리자 템플릿 관리 페이지 ────────────────────────────────────────────────
+function TemplateAdminPage() {
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null); // 선택된 템플릿
+  const [editMode, setEditMode] = useState(false); // 편집 모드
+  const [editData, setEditData] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [filterProc, setFilterProc] = useState("ALL");
+  const [showNew, setShowNew] = useState(false);
+
+  const PROC_IDS = ["SYS.1","SYS.2","SYS.3","SYS.4","SYS.5"];
+
+  useEffect(() => { loadTemplates(); }, []);
+
+  async function loadTemplates() {
+    setLoading(true);
+    const data = await fetchTemplates();
+    // DB 템플릿 + 기본 템플릿 병합 (DB 우선)
+    const dbIds = new Set(data.map(t => t.process_id + t.name));
+    const merged = [
+      ...data,
+      ...DEFAULT_TEMPLATES.filter(t => !dbIds.has(t.process_id + t.name))
+    ];
+    setTemplates(merged);
+    setLoading(false);
+  }
+
+  const filtered = filterProc === "ALL" ? templates : templates.filter(t => t.process_id === filterProc);
+
+  function startEdit(tmpl) {
+    setSelected(tmpl);
+    setEditData({ ...tmpl,
+      required_fields: Array.isArray(tmpl.required_fields) ? tmpl.required_fields.join(", ") : "",
+      word_sections: JSON.stringify(tmpl.word_sections || [], null, 2),
+    });
+    setEditMode(true);
+    setError(""); setSuccess("");
+  }
+
+  function startNew() {
+    setEditData({
+      process_id: "SYS.1", name: "", version: "1.0", description: "",
+      is_default: false, prompt_guide: "", required_fields: "", word_sections: "[]",
+    });
+    setSelected(null);
+    setEditMode(true);
+    setShowNew(true);
+    setError(""); setSuccess("");
+  }
+
+  async function handleSave() {
+    if (!editData.name.trim()) { setError("템플릿 이름을 입력하세요."); return; }
+    if (!editData.prompt_guide.trim()) { setError("프롬프트 가이드를 입력하세요."); return; }
+    setSaving(true); setError(""); setSuccess("");
+    try {
+      let sections;
+      try { sections = JSON.parse(editData.word_sections); } catch { sections = []; }
+      const payload = {
+        process_id: editData.process_id,
+        name: editData.name,
+        version: editData.version || "1.0",
+        description: editData.description,
+        is_default: !!editData.is_default,
+        prompt_guide: editData.prompt_guide,
+        required_fields: editData.required_fields.split(",").map(s => s.trim()).filter(Boolean),
+        word_sections: sections,
+      };
+      if (selected?.id) {
+        await apiCall(`/api/templates?id=${selected.id}`, "PATCH", payload);
+        setSuccess("템플릿이 수정되었습니다.");
+      } else {
+        await apiCall("/api/templates", "POST", payload);
+        setSuccess("새 템플릿이 등록되었습니다.");
+      }
+      await loadTemplates();
+      setEditMode(false); setShowNew(false);
+    } catch(e) { setError("저장 실패: " + e.message); }
+    setSaving(false);
+  }
+
+  async function handleDelete(tmpl) {
+    if (tmpl.is_default) { setError("기본 템플릿은 삭제할 수 없습니다."); return; }
+    if (!tmpl.id) { setError("코드 내장 템플릿은 삭제할 수 없습니다."); return; }
+    if (!confirm(`"${tmpl.name}" 템플릿을 삭제하시겠습니까?`)) return;
+    try {
+      await apiCall(`/api/templates?id=${tmpl.id}`, "DELETE");
+      setSuccess("삭제되었습니다.");
+      await loadTemplates();
+      if (selected?.id === tmpl.id) { setSelected(null); setEditMode(false); }
+    } catch(e) { setError("삭제 실패: " + e.message); }
+  }
+
+  return (
+    <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 4 }}>📋 문서 템플릿 관리</h1>
+          <p style={{ fontSize: 12, color: "rgba(148,163,184,0.7)" }}>ASPICE 4.0 SYS.1~5 산출물 생성 기준 및 Word 양식 템플릿</p>
+        </div>
+        <Btn onClick={startNew} style={{ background: "linear-gradient(135deg,#4f46e5,#6366f1)", borderColor: "#6366f1" }}>
+          + 새 템플릿 등록
+        </Btn>
+      </div>
+
+      {error && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, color: "#f87171", fontSize: 12, marginBottom: 12 }}>{error}</div>}
+      {success && <div style={{ padding: "10px 14px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 8, color: "#10b981", fontSize: 12, marginBottom: 12 }}>{success}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16 }}>
+        {/* 좌측: 템플릿 목록 */}
+        <div>
+          {/* 프로세스 필터 */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 12 }}>
+            {["ALL", ...PROC_IDS].map(p => (
+              <button key={p} onClick={() => setFilterProc(p)} style={{
+                padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer",
+                background: filterProc === p ? "rgba(99,102,241,0.2)" : "rgba(17,24,39,0.5)",
+                border: `1px solid ${filterProc === p ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.08)"}`,
+                color: filterProc === p ? "#818cf8" : "rgba(148,163,184,0.7)",
+              }}>{p}</button>
+            ))}
+          </div>
+
+          {loading ? <Spinner text="템플릿 로딩 중…" /> : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {filtered.map((tmpl, i) => (
+                <div key={tmpl.id || i} onClick={() => { setSelected(tmpl); setEditMode(false); setShowNew(false); }}
+                  style={{
+                    padding: "12px 14px", borderRadius: 10, cursor: "pointer", transition: "all 0.15s",
+                    background: selected?.name === tmpl.name && selected?.process_id === tmpl.process_id
+                      ? "rgba(99,102,241,0.12)" : "rgba(17,24,39,0.5)",
+                    border: `1px solid ${selected?.name === tmpl.name && selected?.process_id === tmpl.process_id
+                      ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.06)"}`,
+                  }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                        background: "rgba(99,102,241,0.15)", color: "#818cf8", marginBottom: 4, display: "inline-block" }}>
+                        {tmpl.process_id}
+                      </span>
+                      {tmpl.is_default && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: "rgba(16,185,129,0.15)", color: "#10b981", marginLeft: 4 }}>기본</span>}
+                      {!tmpl.id && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: "rgba(245,158,11,0.15)", color: "#f59e0b", marginLeft: 4 }}>내장</span>}
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0", marginTop: 3 }}>{tmpl.name}</div>
+                      <div style={{ fontSize: 10, color: "rgba(148,163,184,0.6)", marginTop: 2 }}>v{tmpl.version}</div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* 우측: 상세보기 / 편집 */}
+        <div>
+          {editMode ? (
+            <Card style={{ padding: 20, background: "linear-gradient(135deg,rgba(13,17,23,0.95),rgba(17,24,39,0.9))", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>
+                {showNew ? "새 템플릿 등록" : "템플릿 수정"}
+              </h2>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>프로세스 *</div>
+                    <Select value={editData.process_id} onChange={e => setEditData(p => ({...p, process_id: e.target.value}))}>
+                      {PROC_IDS.map(p => <option key={p} value={p}>{p}</option>)}
+                    </Select>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>버전</div>
+                    <Input value={editData.version} onChange={e => setEditData(p => ({...p, version: e.target.value}))} placeholder="1.0" />
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>템플릿 이름 *</div>
+                  <Input value={editData.name} onChange={e => setEditData(p => ({...p, name: e.target.value}))} placeholder="예: ASPICE 4.0 SYS.1 커스텀 템플릿" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>설명</div>
+                  <Input value={editData.description} onChange={e => setEditData(p => ({...p, description: e.target.value}))} placeholder="템플릿 용도 설명" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>프롬프트 가이드 * (Claude AI 생성 기준)</div>
+                  <Textarea value={editData.prompt_guide} onChange={e => setEditData(p => ({...p, prompt_guide: e.target.value}))}
+                    placeholder="ASPICE 준수 기준, 필수 항목, 품질 기준 등을 작성하세요..."
+                    style={{ minHeight: 180 }} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>필수 필드 (쉼표로 구분)</div>
+                  <Input value={editData.required_fields} onChange={e => setEditData(p => ({...p, required_fields: e.target.value}))}
+                    placeholder="id, title, description, priority, acceptance_criteria" />
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>Word 섹션 구성 (JSON)</div>
+                  <Textarea value={editData.word_sections} onChange={e => setEditData(p => ({...p, word_sections: e.target.value}))}
+                    placeholder='[{"id":"needs","title":"Stakeholder Needs","required":true}]'
+                    style={{ minHeight: 100, fontFamily: "monospace", fontSize: 11 }} />
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input type="checkbox" checked={!!editData.is_default}
+                    onChange={e => setEditData(p => ({...p, is_default: e.target.checked}))}
+                    style={{ accentColor: "#6366f1" }} />
+                  <span style={{ fontSize: 12 }}>기본 템플릿으로 설정 (산출물 생성 시 자동 사용)</span>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                <Btn onClick={handleSave} disabled={saving} style={{ background: "linear-gradient(135deg,#059669,#10b981)", borderColor: "#10b981" }}>
+                  {saving ? "⏳ 저장 중…" : "💾 저장"}
+                </Btn>
+                <Btn variant="outline" onClick={() => { setEditMode(false); setShowNew(false); }}>취소</Btn>
+              </div>
+            </Card>
+          ) : selected ? (
+            <Card style={{ padding: 20, background: "linear-gradient(135deg,rgba(13,17,23,0.95),rgba(17,24,39,0.9))", border: "1px solid rgba(255,255,255,0.07)" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                <div>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 5,
+                      background: "rgba(99,102,241,0.15)", color: "#818cf8" }}>{selected.process_id}</span>
+                    {selected.is_default && <span style={{ fontSize: 10, padding: "3px 7px", borderRadius: 5, background: "rgba(16,185,129,0.15)", color: "#10b981" }}>기본 템플릿</span>}
+                    {!selected.id && <span style={{ fontSize: 10, padding: "3px 7px", borderRadius: 5, background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>코드 내장</span>}
+                  </div>
+                  <h2 style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em" }}>{selected.name}</h2>
+                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.6)", marginTop: 2 }}>v{selected.version}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <Btn size="sm" onClick={() => startEdit(selected)}>✏️ 수정</Btn>
+                  {!selected.is_default && selected.id && (
+                    <Btn size="sm" variant="danger" onClick={() => handleDelete(selected)}>🗑 삭제</Btn>
+                  )}
+                </div>
+              </div>
+
+              {selected.description && (
+                <p style={{ fontSize: 12, color: "rgba(148,163,184,0.8)", marginBottom: 16, lineHeight: 1.6 }}>{selected.description}</p>
+              )}
+
+              {/* 프롬프트 가이드 */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  📌 AI 생성 프롬프트 가이드
+                </div>
+                <div style={{ padding: "12px 14px", background: "rgba(9,11,15,0.7)", borderRadius: 8,
+                  border: "1px solid rgba(99,102,241,0.2)", fontSize: 12, lineHeight: 1.7,
+                  whiteSpace: "pre-wrap", color: "#e2e8f0", maxHeight: 220, overflowY: "auto" }}>
+                  {selected.prompt_guide}
+                </div>
+              </div>
+
+              {/* 필수 필드 */}
+              {selected.required_fields?.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    ✅ 필수 필드
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {(Array.isArray(selected.required_fields) ? selected.required_fields : []).map(f => (
+                      <span key={f} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5,
+                        background: "rgba(17,24,39,0.7)", border: "1px solid rgba(255,255,255,0.1)", color: "#94a3b8" }}>
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Word 섹션 */}
+              {selected.word_sections?.length > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    📄 Word 문서 섹션 구성
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {(Array.isArray(selected.word_sections) ? selected.word_sections : []).map((sec, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+                        padding: "8px 12px", background: "rgba(17,24,39,0.5)", borderRadius: 7,
+                        border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <span style={{ fontSize: 12, color: "#e2e8f0" }}>{i+1}. {sec.title}</span>
+                        <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4,
+                          background: sec.required ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.05)",
+                          color: sec.required ? "#10b981" : "rgba(148,163,184,0.5)" }}>
+                          {sec.required ? "필수" : "선택"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </Card>
+          ) : (
+            <Card style={{ padding: 40, textAlign: "center", background: "rgba(13,17,23,0.5)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.3 }}>📋</div>
+              <div style={{ color: "rgba(148,163,184,0.6)", fontSize: 13 }}>좌측에서 템플릿을 선택하세요</div>
+            </Card>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 // ── 메인 앱 ───────────────────────────────────────────────────────────────────
 export default function AspiceApp() {
   const [page, setPage] = useState("home");
@@ -1337,6 +1775,7 @@ export default function AspiceApp() {
       { id: "review", label: "HITL 검토", icon: "◎" },
       { id: "traceability", label: "추적성 분석", icon: "⇌" },
     ] : []),
+    { id: "templates", label: "템플릿 관리", icon: "📋" },
   ];
 
   const nav = useCallback((p, proj = undefined) => {
@@ -1532,6 +1971,7 @@ export default function AspiceApp() {
     pipeline: selectedProject ? <PipelinePage project={selectedProject} workProducts={workProducts} onRefresh={onRefreshWPs} nav={nav} /> : null,
     review: selectedProject ? <ReviewPage project={selectedProject} wps={workProducts} onUpdate={onRefreshWPs} nav={nav} /> : null,
     traceability: selectedProject ? <TraceabilityPage project={selectedProject} wps={workProducts} /> : null,
+    templates: <TemplateAdminPage />,
   };
 
   return (
