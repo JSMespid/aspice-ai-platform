@@ -1611,7 +1611,7 @@ function TemplateAdminPage() {
 
         {/* 우측: 상세보기 / 편집 */}
         <div>
-          {editMode ? (
+          {editMode && editData ? (
             <Card style={{ padding: 20, background: "linear-gradient(135deg,rgba(13,17,23,0.95),rgba(17,24,39,0.9))", border: "1px solid rgba(255,255,255,0.07)" }}>
               <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>
                 {showNew ? "새 템플릿 등록" : "템플릿 수정"}
@@ -1620,42 +1620,43 @@ function TemplateAdminPage() {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                   <div>
                     <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>프로세스 *</div>
-                    <Select value={editData.process_id} onChange={e => setEditData(p => ({...p, process_id: e.target.value}))}>
-                      {PROC_IDS.map(p => <option key={p} value={p}>{p}</option>)}
-                    </Select>
+                    <select value={editData.process_id} onChange={e => setEditData(p => ({...p, process_id: e.target.value}))}
+                      style={{ width: "100%", padding: "8px 12px", background: "rgba(9,11,15,0.8)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e2e8f0", fontSize: 13, fontFamily: "inherit" }}>
+                      {PROC_IDS.map(p => <option key={p} value={p} style={{ background: "#1a2235" }}>{p}</option>)}
+                    </select>
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>버전</div>
-                    <Input value={editData.version} onChange={e => setEditData(p => ({...p, version: e.target.value}))} placeholder="1.0" />
+                    <Input value={editData.version || ""} onChange={e => setEditData(p => ({...p, version: e.target.value}))} placeholder="1.0" />
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>템플릿 이름 *</div>
-                  <Input value={editData.name} onChange={e => setEditData(p => ({...p, name: e.target.value}))} placeholder="예: ASPICE 4.0 SYS.1 커스텀 템플릿" />
+                  <Input value={editData.name || ""} onChange={e => setEditData(p => ({...p, name: e.target.value}))} placeholder="예: ASPICE 4.0 SYS.1 커스텀 템플릿" />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>설명</div>
-                  <Input value={editData.description} onChange={e => setEditData(p => ({...p, description: e.target.value}))} placeholder="템플릿 용도 설명" />
+                  <Input value={editData.description || ""} onChange={e => setEditData(p => ({...p, description: e.target.value}))} placeholder="템플릿 용도 설명" />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>프롬프트 가이드 * (Claude AI 생성 기준)</div>
-                  <Textarea value={editData.prompt_guide} onChange={e => setEditData(p => ({...p, prompt_guide: e.target.value}))}
+                  <Textarea value={editData.prompt_guide || ""} onChange={e => setEditData(p => ({...p, prompt_guide: e.target.value}))}
                     placeholder="ASPICE 준수 기준, 필수 항목, 품질 기준 등을 작성하세요..."
                     style={{ minHeight: 180 }} />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>필수 필드 (쉼표로 구분)</div>
-                  <Input value={editData.required_fields} onChange={e => setEditData(p => ({...p, required_fields: e.target.value}))}
+                  <Input value={editData.required_fields || ""} onChange={e => setEditData(p => ({...p, required_fields: e.target.value}))}
                     placeholder="id, title, description, priority, acceptance_criteria" />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>Word 섹션 구성 (JSON)</div>
-                  <Textarea value={editData.word_sections} onChange={e => setEditData(p => ({...p, word_sections: e.target.value}))}
+                  <Textarea value={editData.word_sections || "[]"} onChange={e => setEditData(p => ({...p, word_sections: e.target.value}))}
                     placeholder='[{"id":"needs","title":"Stakeholder Needs","required":true}]'
                     style={{ minHeight: 100, fontFamily: "monospace", fontSize: 11 }} />
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input type="checkbox" checked={!!editData.is_default}
+                  <input type="checkbox" checked={!!(editData && editData.is_default)}
                     onChange={e => setEditData(p => ({...p, is_default: e.target.checked}))}
                     style={{ accentColor: "#6366f1" }} />
                   <span style={{ fontSize: 12 }}>기본 템플릿으로 설정 (산출물 생성 시 자동 사용)</span>
@@ -1668,7 +1669,7 @@ function TemplateAdminPage() {
                 <Btn variant="outline" onClick={() => { setEditMode(false); setShowNew(false); }}>취소</Btn>
               </div>
             </Card>
-          ) : selected ? (
+          ) : !editMode && selected ? (
             <Card style={{ padding: 20, background: "linear-gradient(135deg,rgba(13,17,23,0.95),rgba(17,24,39,0.9))", border: "1px solid rgba(255,255,255,0.07)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
                 <div>
