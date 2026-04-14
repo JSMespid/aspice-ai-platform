@@ -1627,31 +1627,31 @@ function TemplateAdminPage() {
                   </div>
                   <div>
                     <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>버전</div>
-                    <Input value={editData.version || ""} onChange={e => setEditData(p => ({...p, version: e.target.value}))} placeholder="1.0" />
+                    <Input value={editData.version || ""} onChange={v => setEditData(p => ({...p, version: v}))} placeholder="1.0" />
                   </div>
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>템플릿 이름 *</div>
-                  <Input value={editData.name || ""} onChange={e => setEditData(p => ({...p, name: e.target.value}))} placeholder="예: ASPICE 4.0 SYS.1 커스텀 템플릿" />
+                  <Input value={editData.name || ""} onChange={v => setEditData(p => ({...p, name: v}))} placeholder="예: ASPICE 4.0 SYS.1 커스텀 템플릿" />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>설명</div>
-                  <Input value={editData.description || ""} onChange={e => setEditData(p => ({...p, description: e.target.value}))} placeholder="템플릿 용도 설명" />
+                  <Input value={editData.description || ""} onChange={v => setEditData(p => ({...p, description: v}))} placeholder="템플릿 용도 설명" />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>프롬프트 가이드 * (Claude AI 생성 기준)</div>
-                  <Textarea value={editData.prompt_guide || ""} onChange={e => setEditData(p => ({...p, prompt_guide: e.target.value}))}
+                  <Textarea value={editData.prompt_guide || ""} onChange={v => setEditData(p => ({...p, prompt_guide: v}))}
                     placeholder="ASPICE 준수 기준, 필수 항목, 품질 기준 등을 작성하세요..."
                     style={{ minHeight: 180 }} />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>필수 필드 (쉼표로 구분)</div>
-                  <Input value={editData.required_fields || ""} onChange={e => setEditData(p => ({...p, required_fields: e.target.value}))}
+                  <Input value={editData.required_fields || ""} onChange={v => setEditData(p => ({...p, required_fields: v}))}
                     placeholder="id, title, description, priority, acceptance_criteria" />
                 </div>
                 <div>
                   <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>Word 섹션 구성 (JSON)</div>
-                  <Textarea value={editData.word_sections || "[]"} onChange={e => setEditData(p => ({...p, word_sections: e.target.value}))}
+                  <Textarea value={editData.word_sections || "[]"} onChange={v => setEditData(p => ({...p, word_sections: v}))}
                     placeholder='[{"id":"needs","title":"Stakeholder Needs","required":true}]'
                     style={{ minHeight: 100, fontFamily: "monospace", fontSize: 11 }} />
                 </div>
