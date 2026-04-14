@@ -97,7 +97,20 @@ ${JSON.stringify(workProduct, null, 2)}
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  return safeParseJSON(data.text || "");
+  const result = safeParseJSON(data.text || "");
+
+  // overall_score를 세 점수의 평균으로 재계산 (일관성 보장)
+  if (result) {
+    const c = result.completeness?.score ?? 0;
+    const co = result.consistency?.score ?? 0;
+    const t = result.traceability?.score ?? 0;
+    const count = [c, co, t].filter(v => v > 0).length;
+    if (count > 0) {
+      result.overall_score = Math.round((c + co + t) / count);
+    }
+  }
+
+  return result;
 }
 
 // ── QA 검증 함수 ──────────────────────────────────────────────────────────────
