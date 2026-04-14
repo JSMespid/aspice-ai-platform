@@ -640,9 +640,17 @@ function xmlSYS3(c, chapNum) {
   if (c.integration_strategy) {
     parts.push(pH2(`${chapNum}.4 Integration Strategy`));
     const is_ = c.integration_strategy;
+    const phasesText = Array.isArray(is_.phases)
+      ? is_.phases.map((ph, i) => {
+          if (typeof ph === "object" && ph !== null) {
+            return `Phase ${i+1}: ${ph.phase || ph.name || ""} — ${ph.description || ph.elements?.join(", ") || ""}`;
+          }
+          return String(ph);
+        }).join("\n")
+      : String(is_.phases || "");
     parts.push(tbl2col([
       ["Approach", is_.approach],
-      ["Phases", Array.isArray(is_.phases) ? is_.phases.join("\n") : is_.phases],
+      ["Phases", phasesText],
     ].filter(([, v]) => v)));
   }
 
@@ -922,7 +930,7 @@ function buildDocumentXml(project, wps, diagrams) {
     if (id === "SYS.3" && archDiagram) {
       bodyParts.push(pH2("Architecture Block Diagram"));
       bodyParts.push(pNormal("아래 다이어그램은 System Elements와 Interfaces의 관계를 나타냅니다.", false, "555555", 18));
-      const diagW = 7315200; // 약 8인치 (EMU)
+      const diagW = 5943600; // A4 콘텐츠 너비 기준 (약 6.5인치)
       const ratio = (archDiagram.svgH || 400) / (archDiagram.svgW || 900);
       const diagH = Math.round(diagW * ratio);
       bodyParts.push(pngToWordDrawing(null, archDiagram.rId, diagW, diagH));
@@ -932,7 +940,7 @@ function buildDocumentXml(project, wps, diagrams) {
     if (id === "SYS.2" && traceDiagram) {
       bodyParts.push(pH2("Requirements Traceability Diagram"));
       bodyParts.push(pNormal("STK-REQ와 SYS-REQ 간의 추적성 관계를 나타냅니다.", false, "555555", 18));
-      const diagW = 7315200;
+      const diagW = 5943600;
       const ratio2 = (traceDiagram.svgH || 300) / (traceDiagram.svgW || 900);
       const diagH2 = Math.round(diagW * ratio2);
       bodyParts.push(pngToWordDrawing(null, traceDiagram.rId, diagW, diagH2));
