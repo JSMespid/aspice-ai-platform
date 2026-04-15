@@ -1456,17 +1456,225 @@ async function downloadWordAll(workProducts, project) {
 }
 
 // ── 관리자 템플릿 관리 페이지 ────────────────────────────────────────────────
+// ── 필수 필드 태그 에디터 ────────────────────────────────────────────────────
+function FieldTagEditor({ fields, onChange }) {
+  const [inputVal, setInputVal] = useState("");
+  const SUGGESTIONS = [
+    "id","title","description","priority","acceptance_criteria",
+    "stability","source_needs","type","method","source_stk_req",
+    "allocated_to","objective","precondition","test_steps",
+    "expected_result","pass_criteria","test_type","safety_goal",
+    "asil_level","interface_spec","failure_mode","constraint",
+  ];
+  const unused = SUGGESTIONS.filter(s => !fields.includes(s));
+
+  function addField(val) {
+    const v = val.trim().replace(/\s+/g, "_");
+    if (v && !fields.includes(v)) onChange([...fields, v]);
+    setInputVal("");
+  }
+  function removeField(f) { onChange(fields.filter(x => x !== f)); }
+  function onKeyDown(e) {
+    if ((e.key === "Enter" || e.key === ",") && inputVal.trim()) {
+      e.preventDefault(); addField(inputVal);
+    }
+    if (e.key === "Backspace" && !inputVal && fields.length > 0) {
+      onChange(fields.slice(0, -1));
+    }
+  }
+
+  return (
+    <div>
+      {/* 태그 입력 박스 */}
+      <div style={{
+        display: "flex", flexWrap: "wrap", gap: 6, padding: "8px 10px",
+        background: "rgba(9,11,15,0.8)", border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 8, minHeight: 42, cursor: "text",
+      }} onClick={e => e.currentTarget.querySelector("input")?.focus()}>
+        {fields.map(f => (
+          <span key={f} style={{
+            display: "inline-flex", alignItems: "center", gap: 4,
+            padding: "2px 8px", borderRadius: 5, fontSize: 11, fontWeight: 600,
+            background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)",
+            color: "#818cf8",
+          }}>
+            {f}
+            <button onClick={() => removeField(f)} style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: "rgba(129,140,248,0.6)", fontSize: 13, lineHeight: 1,
+              padding: 0, display: "flex", alignItems: "center",
+            }}>×</button>
+          </span>
+        ))}
+        <input
+          value={inputVal}
+          onChange={e => setInputVal(e.target.value)}
+          onKeyDown={onKeyDown}
+          onBlur={() => inputVal.trim() && addField(inputVal)}
+          placeholder={fields.length === 0 ? "필드명 입력 후 Enter…" : ""}
+          style={{
+            background: "none", border: "none", outline: "none",
+            color: "#e2e8f0", fontSize: 12, minWidth: 120, flexGrow: 1,
+            fontFamily: "inherit",
+          }}
+        />
+      </div>
+      {/* 빠른 추가 추천 칩 */}
+      {unused.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 10, color: "rgba(148,163,184,0.5)", marginBottom: 5 }}>
+            + 빠른 추가 (클릭하면 바로 추가됩니다)
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+            {unused.map(s => (
+              <button key={s} onClick={() => addField(s)} style={{
+                padding: "2px 8px", borderRadius: 5, fontSize: 11, cursor: "pointer",
+                background: "rgba(17,24,39,0.7)", border: "1px solid rgba(255,255,255,0.08)",
+                color: "rgba(148,163,184,0.7)", fontFamily: "inherit",
+                transition: "all 0.1s",
+              }}>{s}</button>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Word 섹션 비주얼 에디터 ──────────────────────────────────────────────────
+function SectionEditor({ sections, onChange }) {
+  const [newTitle, setNewTitle] = useState("");
+  const [newRequired, setNewRequired] = useState(true);
+
+  function addSection() {
+    const t = newTitle.trim();
+    if (!t) return;
+    const id = t.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    onChange([...sections, { id, title: t, required: newRequired }]);
+    setNewTitle(""); setNewRequired(true);
+  }
+  function removeSection(i) { onChange(sections.filter((_, idx) => idx !== i)); }
+  function toggleRequired(i) {
+    onChange(sections.map((s, idx) => idx === i ? { ...s, required: !s.required } : s));
+  }
+  function moveUp(i) {
+    if (i === 0) return;
+    const arr = [...sections];
+    [arr[i-1], arr[i]] = [arr[i], arr[i-1]];
+    onChange(arr);
+  }
+  function moveDown(i) {
+    if (i === sections.length - 1) return;
+    const arr = [...sections];
+    [arr[i], arr[i+1]] = [arr[i+1], arr[i]];
+    onChange(arr);
+  }
+
+  return (
+    <div>
+      {/* 섹션 행 목록 */}
+      {sections.length === 0 && (
+        <div style={{ padding: "16px", textAlign: "center", color: "rgba(148,163,184,0.4)",
+          fontSize: 12, border: "1px dashed rgba(255,255,255,0.08)", borderRadius: 8, marginBottom: 8 }}>
+          아래에서 섹션을 추가하세요
+        </div>
+      )}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
+        {sections.map((sec, i) => (
+          <div key={i} style={{
+            display: "flex", alignItems: "center", gap: 8,
+            padding: "8px 10px", borderRadius: 8,
+            background: "rgba(17,24,39,0.6)", border: "1px solid rgba(255,255,255,0.07)",
+          }}>
+            {/* 순서 번호 */}
+            <span style={{ fontSize: 11, color: "rgba(148,163,184,0.4)", minWidth: 18, textAlign: "right" }}>{i+1}</span>
+            {/* 위/아래 이동 */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              <button onClick={() => moveUp(i)} disabled={i===0} style={{
+                background: "none", border: "none", cursor: i===0?"not-allowed":"pointer",
+                color: i===0?"rgba(148,163,184,0.2)":"rgba(148,163,184,0.5)",
+                fontSize: 10, padding: 0, lineHeight: 1,
+              }}>▲</button>
+              <button onClick={() => moveDown(i)} disabled={i===sections.length-1} style={{
+                background: "none", border: "none", cursor: i===sections.length-1?"not-allowed":"pointer",
+                color: i===sections.length-1?"rgba(148,163,184,0.2)":"rgba(148,163,184,0.5)",
+                fontSize: 10, padding: 0, lineHeight: 1,
+              }}>▼</button>
+            </div>
+            {/* 섹션 제목 */}
+            <span style={{ flex: 1, fontSize: 12, color: "#e2e8f0" }}>{sec.title}</span>
+            {/* 필수/선택 토글 */}
+            <button onClick={() => toggleRequired(i)} style={{
+              padding: "2px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer",
+              fontFamily: "inherit", fontWeight: 600, border: "1px solid",
+              background: sec.required ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.04)",
+              borderColor: sec.required ? "rgba(16,185,129,0.4)" : "rgba(255,255,255,0.1)",
+              color: sec.required ? "#10b981" : "rgba(148,163,184,0.5)",
+              transition: "all 0.15s",
+            }}>
+              {sec.required ? "✓ 필수" : "선택"}
+            </button>
+            {/* 삭제 */}
+            <button onClick={() => removeSection(i)} style={{
+              background: "none", border: "none", cursor: "pointer",
+              color: "rgba(239,68,68,0.5)", fontSize: 15, padding: "0 2px",
+              lineHeight: 1, transition: "color 0.1s",
+            }}>×</button>
+          </div>
+        ))}
+      </div>
+      {/* 새 섹션 추가 행 */}
+      <div style={{
+        display: "flex", gap: 6, alignItems: "center",
+        padding: "8px 10px", borderRadius: 8,
+        background: "rgba(99,102,241,0.05)", border: "1px dashed rgba(99,102,241,0.25)",
+      }}>
+        <input
+          value={newTitle}
+          onChange={e => setNewTitle(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && addSection()}
+          placeholder="새 섹션 이름 입력 후 Enter 또는 + 클릭"
+          style={{
+            flex: 1, background: "none", border: "none", outline: "none",
+            color: "#e2e8f0", fontSize: 12, fontFamily: "inherit",
+          }}
+        />
+        <button onClick={() => setNewRequired(r => !r)} style={{
+          padding: "3px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer",
+          fontFamily: "inherit", fontWeight: 600, border: "1px solid", whiteSpace: "nowrap",
+          background: newRequired ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.04)",
+          borderColor: newRequired ? "rgba(16,185,129,0.4)" : "rgba(255,255,255,0.1)",
+          color: newRequired ? "#10b981" : "rgba(148,163,184,0.5)",
+        }}>
+          {newRequired ? "✓ 필수" : "선택"}
+        </button>
+        <button onClick={addSection} style={{
+          padding: "4px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer",
+          background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)",
+          color: "#818cf8", fontFamily: "inherit", fontWeight: 600,
+        }}>+ 추가</button>
+      </div>
+    </div>
+  );
+}
+
+// ── 템플릿 관리 페이지 ────────────────────────────────────────────────────────
 function TemplateAdminPage() {
   const [templates, setTemplates] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selected, setSelected] = useState(null); // 선택된 템플릿
-  const [editMode, setEditMode] = useState(false); // 편집 모드
+  const [selected, setSelected] = useState(null);
+  const [editMode, setEditMode] = useState(false);
   const [editData, setEditData] = useState(null);
+  // 필수 필드: 배열로 직접 관리
+  const [fieldTags, setFieldTags] = useState([]);
+  // Word 섹션: 배열로 직접 관리
+  const [sections, setSections] = useState([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [filterProc, setFilterProc] = useState("ALL");
   const [showNew, setShowNew] = useState(false);
+  const [activeTab, setActiveTab] = useState("basic"); // basic | prompt | fields | sections
 
   const PROC_IDS = ["SYS.1","SYS.2","SYS.3","SYS.4","SYS.5"];
 
@@ -1475,7 +1683,6 @@ function TemplateAdminPage() {
   async function loadTemplates() {
     setLoading(true);
     const data = await fetchTemplates();
-    // DB 템플릿 + 기본 템플릿 병합 (DB 우선)
     const dbIds = new Set(data.map(t => t.process_id + t.name));
     const merged = [
       ...data,
@@ -1489,40 +1696,38 @@ function TemplateAdminPage() {
 
   function startEdit(tmpl) {
     setSelected(tmpl);
-    setEditData({ ...tmpl,
-      required_fields: Array.isArray(tmpl.required_fields) ? tmpl.required_fields.join(", ") : "",
-      word_sections: JSON.stringify(tmpl.word_sections || [], null, 2),
-    });
+    setEditData({ ...tmpl });
+    setFieldTags(Array.isArray(tmpl.required_fields) ? tmpl.required_fields : []);
+    setSections(Array.isArray(tmpl.word_sections) ? tmpl.word_sections : []);
     setEditMode(true);
+    setActiveTab("basic");
     setError(""); setSuccess("");
   }
 
   function startNew() {
-    setEditData({
-      process_id: "SYS.1", name: "", version: "1.0", description: "",
-      is_default: false, prompt_guide: "", required_fields: "", word_sections: "[]",
-    });
+    setEditData({ process_id: "SYS.1", name: "", version: "1.0", description: "", is_default: false, prompt_guide: "" });
+    setFieldTags([]);
+    setSections([]);
     setSelected(null);
     setEditMode(true);
     setShowNew(true);
+    setActiveTab("basic");
     setError(""); setSuccess("");
   }
 
   async function handleSave() {
-    if (!editData.name.trim()) { setError("템플릿 이름을 입력하세요."); return; }
-    if (!editData.prompt_guide.trim()) { setError("프롬프트 가이드를 입력하세요."); return; }
+    if (!editData.name.trim()) { setError("템플릿 이름을 입력하세요."); setActiveTab("basic"); return; }
+    if (!editData.prompt_guide?.trim()) { setError("프롬프트 가이드를 입력하세요."); setActiveTab("prompt"); return; }
     setSaving(true); setError(""); setSuccess("");
     try {
-      let sections;
-      try { sections = JSON.parse(editData.word_sections); } catch { sections = []; }
       const payload = {
         process_id: editData.process_id,
         name: editData.name,
         version: editData.version || "1.0",
-        description: editData.description,
+        description: editData.description || "",
         is_default: !!editData.is_default,
         prompt_guide: editData.prompt_guide,
-        required_fields: editData.required_fields.split(",").map(s => s.trim()).filter(Boolean),
+        required_fields: fieldTags,
         word_sections: sections,
       };
       if (selected?.id) {
@@ -1550,8 +1755,26 @@ function TemplateAdminPage() {
     } catch(e) { setError("삭제 실패: " + e.message); }
   }
 
+  // 탭 스타일 헬퍼
+  const tabStyle = (key) => ({
+    padding: "7px 14px", borderRadius: "7px 7px 0 0", fontSize: 12, fontWeight: 600,
+    cursor: "pointer", border: "none", fontFamily: "inherit", transition: "all 0.15s",
+    background: activeTab === key ? "rgba(99,102,241,0.15)" : "transparent",
+    color: activeTab === key ? "#818cf8" : "rgba(148,163,184,0.55)",
+    borderBottom: activeTab === key ? "2px solid #6366f1" : "2px solid transparent",
+  });
+
+  // 탭별 완료 체크
+  const tabDone = {
+    basic: !!(editData?.name?.trim()),
+    prompt: !!(editData?.prompt_guide?.trim()),
+    fields: fieldTags.length > 0,
+    sections: sections.length > 0,
+  };
+
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      {/* 헤더 */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 4 }}>📋 문서 템플릿 관리</h1>
@@ -1566,9 +1789,8 @@ function TemplateAdminPage() {
       {success && <div style={{ padding: "10px 14px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 8, color: "#10b981", fontSize: 12, marginBottom: 12 }}>{success}</div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16 }}>
-        {/* 좌측: 템플릿 목록 */}
+        {/* ── 좌측: 템플릿 목록 ── */}
         <div>
-          {/* 프로세스 필터 */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 12 }}>
             {["ALL", ...PROC_IDS].map(p => (
               <button key={p} onClick={() => setFilterProc(p)} style={{
@@ -1579,11 +1801,11 @@ function TemplateAdminPage() {
               }}>{p}</button>
             ))}
           </div>
-
           {loading ? <Spinner text="템플릿 로딩 중…" /> : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {filtered.map((tmpl, i) => (
-                <div key={tmpl.id || i} onClick={() => { setSelected(tmpl); setEditMode(false); setShowNew(false); }}
+                <div key={tmpl.id || i}
+                  onClick={() => { setSelected(tmpl); setEditMode(false); setShowNew(false); setError(""); setSuccess(""); }}
                   style={{
                     padding: "12px 14px", borderRadius: 10, cursor: "pointer", transition: "all 0.15s",
                     background: selected?.name === tmpl.name && selected?.process_id === tmpl.process_id
@@ -1591,17 +1813,15 @@ function TemplateAdminPage() {
                     border: `1px solid ${selected?.name === tmpl.name && selected?.process_id === tmpl.process_id
                       ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.06)"}`,
                   }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
-                      <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
-                        background: "rgba(99,102,241,0.15)", color: "#818cf8", marginBottom: 4, display: "inline-block" }}>
-                        {tmpl.process_id}
-                      </span>
-                      {tmpl.is_default && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: "rgba(16,185,129,0.15)", color: "#10b981", marginLeft: 4 }}>기본</span>}
-                      {!tmpl.id && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: "rgba(245,158,11,0.15)", color: "#f59e0b", marginLeft: 4 }}>내장</span>}
-                      <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0", marginTop: 3 }}>{tmpl.name}</div>
-                      <div style={{ fontSize: 10, color: "rgba(148,163,184,0.6)", marginTop: 2 }}>v{tmpl.version}</div>
-                    </div>
+                  <div>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
+                      background: "rgba(99,102,241,0.15)", color: "#818cf8", display: "inline-block" }}>
+                      {tmpl.process_id}
+                    </span>
+                    {tmpl.is_default && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: "rgba(16,185,129,0.15)", color: "#10b981", marginLeft: 4 }}>기본</span>}
+                    {!tmpl.id && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: "rgba(245,158,11,0.15)", color: "#f59e0b", marginLeft: 4 }}>내장</span>}
+                    <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0", marginTop: 4 }}>{tmpl.name}</div>
+                    <div style={{ fontSize: 10, color: "rgba(148,163,184,0.5)", marginTop: 2 }}>v{tmpl.version}</div>
                   </div>
                 </div>
               ))}
@@ -1609,67 +1829,169 @@ function TemplateAdminPage() {
           )}
         </div>
 
-        {/* 우측: 상세보기 / 편집 */}
+        {/* ── 우측: 편집 / 상세보기 ── */}
         <div>
           {editMode && editData ? (
-            <Card style={{ padding: 20, background: "linear-gradient(135deg,rgba(13,17,23,0.95),rgba(17,24,39,0.9))", border: "1px solid rgba(255,255,255,0.07)" }}>
-              <h2 style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>
-                {showNew ? "새 템플릿 등록" : "템플릿 수정"}
-              </h2>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <div>
-                    <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>프로세스 *</div>
-                    <select value={editData.process_id} onChange={e => setEditData(p => ({...p, process_id: e.target.value}))}
-                      style={{ width: "100%", padding: "8px 12px", background: "rgba(9,11,15,0.8)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e2e8f0", fontSize: 13, fontFamily: "inherit" }}>
-                      {PROC_IDS.map(p => <option key={p} value={p} style={{ background: "#1a2235" }}>{p}</option>)}
-                    </select>
+            <Card style={{ padding: 0, background: "linear-gradient(135deg,rgba(13,17,23,0.95),rgba(17,24,39,0.9))", border: "1px solid rgba(255,255,255,0.07)", overflow: "hidden" }}>
+
+              {/* 편집 헤더 */}
+              <div style={{ padding: "16px 20px 0", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <h2 style={{ fontSize: 14, fontWeight: 700 }}>
+                    {showNew ? "✨ 새 템플릿 등록" : "✏️ 템플릿 수정"}
+                  </h2>
+                  {/* 진행 상태 인디케이터 */}
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {[
+                      { key:"basic", label:"기본 정보" },
+                      { key:"prompt", label:"AI 가이드" },
+                      { key:"fields", label:"필수 필드" },
+                      { key:"sections", label:"Word 섹션" },
+                    ].map(t => (
+                      <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10,
+                        color: tabDone[t.key] ? "#10b981" : "rgba(148,163,184,0.4)" }}>
+                        <span style={{ fontSize: 12 }}>{tabDone[t.key] ? "✓" : "○"}</span>
+                        {t.label}
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>버전</div>
-                    <Input value={editData.version || ""} onChange={v => setEditData(p => ({...p, version: v}))} placeholder="1.0" />
-                  </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>템플릿 이름 *</div>
-                  <Input value={editData.name || ""} onChange={v => setEditData(p => ({...p, name: v}))} placeholder="예: ASPICE 4.0 SYS.1 커스텀 템플릿" />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>설명</div>
-                  <Input value={editData.description || ""} onChange={v => setEditData(p => ({...p, description: v}))} placeholder="템플릿 용도 설명" />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>프롬프트 가이드 * (Claude AI 생성 기준)</div>
-                  <Textarea value={editData.prompt_guide || ""} onChange={v => setEditData(p => ({...p, prompt_guide: v}))}
-                    placeholder="ASPICE 준수 기준, 필수 항목, 품질 기준 등을 작성하세요..."
-                    style={{ minHeight: 180 }} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>필수 필드 (쉼표로 구분)</div>
-                  <Input value={editData.required_fields || ""} onChange={v => setEditData(p => ({...p, required_fields: v}))}
-                    placeholder="id, title, description, priority, acceptance_criteria" />
-                </div>
-                <div>
-                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 4 }}>Word 섹션 구성 (JSON)</div>
-                  <Textarea value={editData.word_sections || "[]"} onChange={v => setEditData(p => ({...p, word_sections: v}))}
-                    placeholder='[{"id":"needs","title":"Stakeholder Needs","required":true}]'
-                    style={{ minHeight: 100, fontFamily: "monospace", fontSize: 11 }} />
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input type="checkbox" checked={!!(editData && editData.is_default)}
-                    onChange={e => setEditData(p => ({...p, is_default: e.target.checked}))}
-                    style={{ accentColor: "#6366f1" }} />
-                  <span style={{ fontSize: 12 }}>기본 템플릿으로 설정 (산출물 생성 시 자동 사용)</span>
+                {/* 탭 */}
+                <div style={{ display: "flex", gap: 2 }}>
+                  {[
+                    { key:"basic",    label:"① 기본 정보",   icon:"📝" },
+                    { key:"prompt",   label:"② AI 프롬프트 가이드", icon:"🤖" },
+                    { key:"fields",   label:"③ 필수 필드",   icon:"🏷️" },
+                    { key:"sections", label:"④ Word 섹션",   icon:"📄" },
+                  ].map(t => (
+                    <button key={t.key} onClick={() => setActiveTab(t.key)} style={tabStyle(t.key)}>
+                      {t.icon} {t.label}
+                      {tabDone[t.key] && <span style={{ marginLeft: 4, color: "#10b981", fontSize: 10 }}>✓</span>}
+                    </button>
+                  ))}
                 </div>
               </div>
-              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-                <Btn onClick={handleSave} disabled={saving} style={{ background: "linear-gradient(135deg,#059669,#10b981)", borderColor: "#10b981" }}>
+
+              {/* 탭 콘텐츠 */}
+              <div style={{ padding: "20px 20px 16px" }}>
+
+                {/* ① 기본 정보 */}
+                {activeTab === "basic" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 5 }}>프로세스 <span style={{color:"#f87171"}}>*</span></div>
+                        <select value={editData.process_id} onChange={e => setEditData(p => ({...p, process_id: e.target.value}))}
+                          style={{ width: "100%", padding: "9px 12px", background: "rgba(9,11,15,0.8)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e2e8f0", fontSize: 13, fontFamily: "inherit" }}>
+                          {PROC_IDS.map(p => <option key={p} value={p} style={{ background: "#1a2235" }}>{p}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 5 }}>버전</div>
+                        <Input value={editData.version || ""} onChange={v => setEditData(p => ({...p, version: v}))} placeholder="1.0" />
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 5 }}>템플릿 이름 <span style={{color:"#f87171"}}>*</span></div>
+                      <Input value={editData.name || ""} onChange={v => setEditData(p => ({...p, name: v}))} placeholder="예: SYS.2 기능안전 포함 템플릿" />
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 5 }}>설명 <span style={{ fontSize: 10, color: "rgba(148,163,184,0.4)" }}>(선택)</span></div>
+                      <Input value={editData.description || ""} onChange={v => setEditData(p => ({...p, description: v}))} placeholder="이 템플릿의 용도와 특징을 간략히 입력하세요" />
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
+                      background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 8 }}>
+                      <input type="checkbox" checked={!!(editData.is_default)}
+                        onChange={e => setEditData(p => ({...p, is_default: e.target.checked}))}
+                        style={{ accentColor: "#6366f1", width: 15, height: 15, cursor: "pointer" }} />
+                      <div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0" }}>기본 템플릿으로 설정</div>
+                        <div style={{ fontSize: 11, color: "rgba(148,163,184,0.55)", marginTop: 1 }}>체크하면 산출물 생성 시 이 템플릿이 자동으로 사용됩니다</div>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <Btn onClick={() => setActiveTab("prompt")} style={{ background: "rgba(99,102,241,0.2)", borderColor: "rgba(99,102,241,0.4)", color: "#818cf8" }}>
+                        다음: AI 프롬프트 가이드 →
+                      </Btn>
+                    </div>
+                  </div>
+                )}
+
+                {/* ② AI 프롬프트 가이드 */}
+                {activeTab === "prompt" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 8, fontSize: 11, color: "rgba(148,163,184,0.8)", lineHeight: 1.6 }}>
+                      💡 Claude AI가 산출물을 생성할 때 이 가이드를 참고합니다. <strong style={{color:"#818cf8"}}>작성 기준, 필수 항목, 품질 조건</strong>을 자유롭게 한국어로 작성하세요. 많이 쓸수록 더 정확한 산출물이 생성됩니다.
+                    </div>
+                    <Textarea
+                      value={editData.prompt_guide || ""}
+                      onChange={v => setEditData(p => ({...p, prompt_guide: v}))}
+                      placeholder={"예시:\n- 각 요구사항에 고유 ID(SYS-REQ-xxx)를 부여할 것\n- 기능안전목표(Safety Goal)를 반드시 포함할 것\n- ASIL 등급을 명시하고, 등급별 상세도를 달리 적용할 것\n- 요구사항은 '시스템은 ~해야 한다(shall)' 형식으로 작성\n- 모호한 표현 금지: 수치로 대체할 것"}
+                      style={{ minHeight: 280, fontSize: 12, lineHeight: 1.7 }}
+                    />
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <Btn variant="outline" onClick={() => setActiveTab("basic")}>← 이전</Btn>
+                      <Btn onClick={() => setActiveTab("fields")} style={{ background: "rgba(99,102,241,0.2)", borderColor: "rgba(99,102,241,0.4)", color: "#818cf8" }}>
+                        다음: 필수 필드 →
+                      </Btn>
+                    </div>
+                  </div>
+                )}
+
+                {/* ③ 필수 필드 */}
+                {activeTab === "fields" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 8, fontSize: 11, color: "rgba(148,163,184,0.8)", lineHeight: 1.6 }}>
+                      💡 산출물 각 항목이 반드시 포함해야 하는 필드입니다. 아래 추천 필드를 클릭하거나, 직접 입력 후 <strong style={{color:"#818cf8"}}>Enter</strong>를 누르세요.
+                    </div>
+                    <FieldTagEditor fields={fieldTags} onChange={setFieldTags} />
+                    {fieldTags.length > 0 && (
+                      <div style={{ fontSize: 11, color: "rgba(148,163,184,0.5)", padding: "6px 10px",
+                        background: "rgba(17,24,39,0.4)", borderRadius: 6 }}>
+                        현재 {fieldTags.length}개 필드 설정됨 — 태그의 × 버튼으로 삭제, Backspace로 마지막 항목 삭제
+                      </div>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <Btn variant="outline" onClick={() => setActiveTab("prompt")}>← 이전</Btn>
+                      <Btn onClick={() => setActiveTab("sections")} style={{ background: "rgba(99,102,241,0.2)", borderColor: "rgba(99,102,241,0.4)", color: "#818cf8" }}>
+                        다음: Word 섹션 →
+                      </Btn>
+                    </div>
+                  </div>
+                )}
+
+                {/* ④ Word 섹션 */}
+                {activeTab === "sections" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                    <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 8, fontSize: 11, color: "rgba(148,163,184,0.8)", lineHeight: 1.6 }}>
+                      💡 Word 문서로 다운로드할 때 생성되는 섹션 목록입니다. 섹션 이름을 입력하고 <strong style={{color:"#818cf8"}}>+ 추가</strong>를 누르세요. ▲▼ 버튼으로 순서를 바꾸고, <strong style={{color:"#10b981"}}>필수/선택</strong> 버튼으로 필수 여부를 설정하세요.
+                    </div>
+                    <SectionEditor sections={sections} onChange={setSections} />
+                    {sections.length > 0 && (
+                      <div style={{ fontSize: 11, color: "rgba(148,163,184,0.5)", padding: "6px 10px",
+                        background: "rgba(17,24,39,0.4)", borderRadius: 6 }}>
+                        현재 {sections.length}개 섹션 ({sections.filter(s=>s.required).length}개 필수, {sections.filter(s=>!s.required).length}개 선택)
+                      </div>
+                    )}
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <Btn variant="outline" onClick={() => setActiveTab("fields")}>← 이전</Btn>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 저장/취소 버튼 (항상 하단 고정) */}
+              <div style={{ padding: "12px 20px 16px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                <Btn variant="outline" onClick={() => { setEditMode(false); setShowNew(false); setError(""); }}>취소</Btn>
+                <Btn onClick={handleSave} disabled={saving}
+                  style={{ background: "linear-gradient(135deg,#059669,#10b981)", borderColor: "#10b981", minWidth: 90 }}>
                   {saving ? "⏳ 저장 중…" : "💾 저장"}
                 </Btn>
-                <Btn variant="outline" onClick={() => { setEditMode(false); setShowNew(false); }}>취소</Btn>
               </div>
             </Card>
+
           ) : !editMode && selected ? (
+            /* ── 상세보기 ── */
             <Card style={{ padding: 20, background: "linear-gradient(135deg,rgba(13,17,23,0.95),rgba(17,24,39,0.9))", border: "1px solid rgba(255,255,255,0.07)" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
                 <div>
@@ -1689,29 +2011,20 @@ function TemplateAdminPage() {
                   )}
                 </div>
               </div>
-
               {selected.description && (
                 <p style={{ fontSize: 12, color: "rgba(148,163,184,0.8)", marginBottom: 16, lineHeight: 1.6 }}>{selected.description}</p>
               )}
-
-              {/* 프롬프트 가이드 */}
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  📌 AI 생성 프롬프트 가이드
-                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>📌 AI 생성 프롬프트 가이드</div>
                 <div style={{ padding: "12px 14px", background: "rgba(9,11,15,0.7)", borderRadius: 8,
                   border: "1px solid rgba(99,102,241,0.2)", fontSize: 12, lineHeight: 1.7,
                   whiteSpace: "pre-wrap", color: "#e2e8f0", maxHeight: 220, overflowY: "auto" }}>
                   {selected.prompt_guide}
                 </div>
               </div>
-
-              {/* 필수 필드 */}
               {selected.required_fields?.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                    ✅ 필수 필드
-                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>✅ 필수 필드</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {(Array.isArray(selected.required_fields) ? selected.required_fields : []).map(f => (
                       <span key={f} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5,
@@ -1722,14 +2035,10 @@ function TemplateAdminPage() {
                   </div>
                 </div>
               )}
-
-              {/* Word 섹션 */}
               {selected.word_sections?.length > 0 && (
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                    📄 Word 문서 섹션 구성
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>📄 Word 문서 섹션 구성</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     {(Array.isArray(selected.word_sections) ? selected.word_sections : []).map((sec, i) => (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
                         padding: "8px 12px", background: "rgba(17,24,39,0.5)", borderRadius: 7,
@@ -1746,6 +2055,7 @@ function TemplateAdminPage() {
                 </div>
               )}
             </Card>
+
           ) : (
             <Card style={{ padding: 40, textAlign: "center", background: "rgba(13,17,23,0.5)", border: "1px solid rgba(255,255,255,0.06)" }}>
               <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.3 }}>📋</div>
