@@ -2157,20 +2157,20 @@ export default function AspiceApp() {
     <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: T.bg, color: T.text }}>
       <style>{GLOBAL_CSS}</style>
 
-      {/* 모바일 헤더 */}
-      <div className="mob-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: T.surface, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0, zIndex: 100 }}>
-        <Logo onClick={() => nav("home", null)} />
+      {/* 모바일 헤더 — 다크 톤 */}
+      <div className="mob-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: "#1F1F1F", borderBottom: "none", position: "sticky", top: 0, zIndex: 100 }}>
+        <Logo onClick={() => nav("home", null)} dark />
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setShowGuide(true)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 7, color: T.muted, fontSize: 12, cursor: "pointer", padding: "4px 10px" }}>?</button>
-          <button onClick={() => setMenuOpen(!menuOpen)} style={{ background: "none", border: "none", color: T.text, fontSize: 20, cursor: "pointer" }}>{menuOpen ? "✕" : "☰"}</button>
+          <button onClick={() => setShowGuide(true)} style={{ background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 7, color: "rgba(255,255,255,0.5)", fontSize: 12, cursor: "pointer", padding: "4px 10px" }}>?</button>
+          <button onClick={() => setMenuOpen(!menuOpen)} style={{ background: "none", border: "none", color: "#FFFFFF", fontSize: 20, cursor: "pointer" }}>{menuOpen ? "✕" : "☰"}</button>
         </div>
       </div>
 
       {menuOpen && (
-        <div className="mob-menu" style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "8px 12px", zIndex: 99 }}>
+        <div className="mob-menu" style={{ background: "#1F1F1F", borderBottom: "1px solid rgba(255,255,255,0.08)", padding: "8px 12px", zIndex: 99 }}>
           {navItems.map(item => (
             <button key={item.id} onClick={() => nav(item.id)}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, width: "100%", background: page === item.id ? T.accentDim : "transparent", color: page === item.id ? T.accent : T.textSecondary, border: "none", cursor: "pointer", fontSize: 14, fontWeight: page === item.id ? 600 : 400, marginBottom: 2, fontFamily: "inherit" }}>
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, width: "100%", background: page === item.id ? "rgba(255,255,255,0.1)" : "transparent", color: page === item.id ? "#FFFFFF" : "rgba(255,255,255,0.55)", border: "none", cursor: "pointer", fontSize: 14, fontWeight: page === item.id ? 600 : 400, marginBottom: 2, fontFamily: "inherit" }}>
               <span>{item.icon}</span> {item.label}
             </button>
           ))}
@@ -2178,27 +2178,27 @@ export default function AspiceApp() {
       )}
 
       <div style={{ display: "flex", flex: 1 }}>
-        {/* PC 사이드바 */}
-        <aside className="sidebar" style={{ display: "none", width: 240, background: T.surface2, borderRight: `1px solid ${T.border}`, flexDirection: "column", padding: "20px 0", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
-          <div style={{ padding: "0 16px 16px", borderBottom: `1px solid ${T.border}` }}>
-            <Logo onClick={() => nav("home", null)} />
+        {/* PC 사이드바 — 다크 투톤 */}
+        <aside className="sidebar" style={{ display: "none", width: 240, background: "#1F1F1F", borderRight: "none", flexDirection: "column", padding: "20px 0", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
+          <div style={{ padding: "0 16px 16px", borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+            <Logo onClick={() => nav("home", null)} dark />
           </div>
           {selectedProject && (
-            <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}`, background: T.accentDim }}>
-              <div style={{ fontSize: 11, color: T.muted, marginBottom: 2 }}>현재 프로젝트</div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: T.accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedProject.name}</div>
+            <div style={{ padding: "10px 16px", borderBottom: "1px solid rgba(255,255,255,0.08)", background: "rgba(255,255,255,0.04)" }}>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginBottom: 2 }}>현재 프로젝트</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#93C5FD", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedProject.name}</div>
             </div>
           )}
           <nav style={{ padding: "10px 8px", flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
             {navItems.map(item => (
               <button key={item.id} onClick={() => nav(item.id)}
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 7, background: page === item.id ? T.accentDim : "transparent", color: page === item.id ? T.accent : T.textSecondary, border: page === item.id ? `1px solid ${T.accent}30` : "1px solid transparent", cursor: "pointer", fontSize: 13, fontWeight: page === item.id ? 600 : 400, fontFamily: "inherit", textAlign: "left", width: "100%", transition: "all .12s" }}>
-                <span style={{ fontSize: 15, opacity: 0.8 }}>{item.icon}</span> {item.label}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 7, background: page === item.id ? "rgba(255,255,255,0.1)" : "transparent", color: page === item.id ? "#FFFFFF" : "rgba(255,255,255,0.55)", border: "1px solid transparent", cursor: "pointer", fontSize: 13, fontWeight: page === item.id ? 600 : 400, fontFamily: "inherit", textAlign: "left", width: "100%", transition: "all .12s" }}>
+                <span style={{ fontSize: 15, opacity: 0.7 }}>{item.icon}</span> {item.label}
               </button>
             ))}
           </nav>
-          <div style={{ padding: "12px 16px", borderTop: `1px solid ${T.border}` }}>
-            <button onClick={() => setShowGuide(true)} style={{ width: "100%", padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 7, color: T.textSecondary, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}>
+          <div style={{ padding: "12px 16px", borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+            <button onClick={() => setShowGuide(true)} style={{ width: "100%", padding: "8px 10px", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 7, color: "rgba(255,255,255,0.5)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}>
               📖 사용 가이드
             </button>
           </div>
@@ -2214,18 +2214,18 @@ export default function AspiceApp() {
   );
 }
 
-function Logo({ onClick }) {
+function Logo({ onClick, dark = false }) {
   return (
     <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
       <div style={{
         width: 30, height: 30,
-        background: T.accent,
+        background: dark ? "#3B82F6" : T.accent,
         borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center",
         fontSize: 13, fontWeight: 700, color: "#fff",
       }}>A</div>
       <div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: T.text, letterSpacing: "-0.02em", lineHeight: 1.2 }}>ASPICE AI</div>
-        <div style={{ fontSize: 10, color: T.muted, letterSpacing: "0.02em", marginTop: 1 }}>SYS.1~SYS.5 Platform</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: dark ? "#FFFFFF" : T.text, letterSpacing: "-0.02em", lineHeight: 1.2 }}>ASPICE AI</div>
+        <div style={{ fontSize: 10, color: dark ? "rgba(255,255,255,0.45)" : T.muted, letterSpacing: "0.02em", marginTop: 1 }}>SYS.1~SYS.5 Platform</div>
       </div>
     </div>
   );
