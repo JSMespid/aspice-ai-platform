@@ -1275,8 +1275,8 @@ function buildTraceDiagramSVG(sys1Content, sys2Content, sys3Content) {
   for (let i = 0; i < maxRows; i++) {
     const ry = startY + 28 + i * ROW_H;
     const bg = i % 2 === 0 ? '#FFFFFF' : '#F0F4F8';
-    svg += `<rect x="60" y="${ry}" width="${LABEL_W}" height="${ROW_H}" fill="${bg}" stroke="#E2E8F0" stroke-width="1"/>`;
-    svg += `<rect x="${60 + LABEL_W + 20}" y="${ry}" width="${LABEL_W}" height="${ROW_H}" fill="${bg}" stroke="#E2E8F0" stroke-width="1"/>`;
+    svg += `<rect x="60" y="${ry}" width="${LABEL_W}" height="${ROW_H}" fill="${bg}" stroke=T.text stroke-width="1"/>`;
+    svg += `<rect x="${60 + LABEL_W + 20}" y="${ry}" width="${LABEL_W}" height="${ROW_H}" fill="${bg}" stroke=T.text stroke-width="1"/>`;
 
     if (stk[i]) {
       svg += `<text x="${60 + 8}" y="${ry + ROW_H/2 + 4}" font-size="10" fill="#1E3A6E" font-weight="600">${ex(stk[i].id)}</text>`;
@@ -1290,9 +1290,9 @@ function buildTraceDiagramSVG(sys1Content, sys2Content, sys3Content) {
       const x1 = 60 + LABEL_W, y1 = ry + ROW_H/2;
       const x2 = 60 + LABEL_W + 20, y2 = ry + ROW_H/2;
       svg += `<defs><marker id="tarrow${i}" markerWidth="6" markerHeight="5" refX="5" refY="2.5" orient="auto">
-        <polygon points="0 0, 6 2.5, 0 5" fill="#10B981"/>
+        <polygon points="0 0, 6 2.5, 0 5" fill=T.green/>
       </marker></defs>`;
-      svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#10B981" stroke-width="1.5" marker-end="url(#tarrow${i})"/>`;
+      svg += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke=T.green stroke-width="1.5" marker-end="url(#tarrow${i})"/>`;
     }
   }
 
@@ -1488,20 +1488,20 @@ function FieldTagEditor({ fields, onChange }) {
       {/* 태그 입력 박스 */}
       <div style={{
         display: "flex", flexWrap: "wrap", gap: 6, padding: "8px 10px",
-        background: "rgba(9,11,15,0.8)", border: "1px solid rgba(255,255,255,0.1)",
+        background: T.surface2, border: `1px solid ${T.border}`,
         borderRadius: 8, minHeight: 42, cursor: "text",
       }} onClick={e => e.currentTarget.querySelector("input")?.focus()}>
         {fields.map(f => (
           <span key={f} style={{
             display: "inline-flex", alignItems: "center", gap: 4,
             padding: "2px 8px", borderRadius: 5, fontSize: 11, fontWeight: 600,
-            background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)",
-            color: "#818cf8",
+            background: T.accentDim, border: `1px solid ${T.accent}35`,
+            color: T.accent,
           }}>
             {f}
             <button onClick={() => removeField(f)} style={{
               background: "none", border: "none", cursor: "pointer",
-              color: "rgba(129,140,248,0.6)", fontSize: 13, lineHeight: 1,
+              color: T.muted, fontSize: 13, lineHeight: 1,
               padding: 0, display: "flex", alignItems: "center",
             }}>×</button>
           </span>
@@ -1514,7 +1514,7 @@ function FieldTagEditor({ fields, onChange }) {
           placeholder={fields.length === 0 ? "필드명 입력 후 Enter…" : ""}
           style={{
             background: "none", border: "none", outline: "none",
-            color: "#e2e8f0", fontSize: 12, minWidth: 120, flexGrow: 1,
+            color: T.text, fontSize: 12, minWidth: 120, flexGrow: 1,
             fontFamily: "inherit",
           }}
         />
@@ -1522,15 +1522,15 @@ function FieldTagEditor({ fields, onChange }) {
       {/* 빠른 추가 추천 칩 */}
       {unused.length > 0 && (
         <div style={{ marginTop: 8 }}>
-          <div style={{ fontSize: 10, color: "rgba(148,163,184,0.5)", marginBottom: 5 }}>
+          <div style={{ fontSize: 10, color: T.muted, marginBottom: 5 }}>
             + 빠른 추가 (클릭하면 바로 추가됩니다)
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
             {unused.map(s => (
               <button key={s} onClick={() => addField(s)} style={{
                 padding: "2px 8px", borderRadius: 5, fontSize: 11, cursor: "pointer",
-                background: "rgba(17,24,39,0.7)", border: "1px solid rgba(255,255,255,0.08)",
-                color: "rgba(148,163,184,0.7)", fontFamily: "inherit",
+                background: T.surface2, border: `1px solid ${T.border}`,
+                color: T.textSecondary, fontFamily: "inherit",
                 transition: "all 0.1s",
               }}>{s}</button>
             ))}
@@ -1574,8 +1574,8 @@ function SectionEditor({ sections, onChange }) {
     <div>
       {/* 섹션 행 목록 */}
       {sections.length === 0 && (
-        <div style={{ padding: "16px", textAlign: "center", color: "rgba(148,163,184,0.4)",
-          fontSize: 12, border: "1px dashed rgba(255,255,255,0.08)", borderRadius: 8, marginBottom: 8 }}>
+        <div style={{ padding: "16px", textAlign: "center", color: T.muted,
+          fontSize: 12, border: `1px dashed ${T.border}`, borderRadius: 8, marginBottom: 8 }}>
           아래에서 섹션을 추가하세요
         </div>
       )}
@@ -1584,32 +1584,32 @@ function SectionEditor({ sections, onChange }) {
           <div key={i} style={{
             display: "flex", alignItems: "center", gap: 8,
             padding: "8px 10px", borderRadius: 8,
-            background: "rgba(17,24,39,0.6)", border: "1px solid rgba(255,255,255,0.07)",
+            background: T.surface2, border: `1px solid ${T.border}`,
           }}>
             {/* 순서 번호 */}
-            <span style={{ fontSize: 11, color: "rgba(148,163,184,0.4)", minWidth: 18, textAlign: "right" }}>{i+1}</span>
+            <span style={{ fontSize: 11, color: T.muted, minWidth: 18, textAlign: "right" }}>{i+1}</span>
             {/* 위/아래 이동 */}
             <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
               <button onClick={() => moveUp(i)} disabled={i===0} style={{
                 background: "none", border: "none", cursor: i===0?"not-allowed":"pointer",
-                color: i===0?"rgba(148,163,184,0.2)":"rgba(148,163,184,0.5)",
+                color: i===0?T.border:T.muted,
                 fontSize: 10, padding: 0, lineHeight: 1,
               }}>▲</button>
               <button onClick={() => moveDown(i)} disabled={i===sections.length-1} style={{
                 background: "none", border: "none", cursor: i===sections.length-1?"not-allowed":"pointer",
-                color: i===sections.length-1?"rgba(148,163,184,0.2)":"rgba(148,163,184,0.5)",
+                color: i===sections.length-1?T.border:T.muted,
                 fontSize: 10, padding: 0, lineHeight: 1,
               }}>▼</button>
             </div>
             {/* 섹션 제목 */}
-            <span style={{ flex: 1, fontSize: 12, color: "#e2e8f0" }}>{sec.title}</span>
+            <span style={{ flex: 1, fontSize: 12, color: T.text }}>{sec.title}</span>
             {/* 필수/선택 토글 */}
             <button onClick={() => toggleRequired(i)} style={{
               padding: "2px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer",
               fontFamily: "inherit", fontWeight: 600, border: "1px solid",
-              background: sec.required ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.04)",
-              borderColor: sec.required ? "rgba(16,185,129,0.4)" : "rgba(255,255,255,0.1)",
-              color: sec.required ? "#10b981" : "rgba(148,163,184,0.5)",
+              background: sec.required ? T.greenDim : T.border,
+              borderColor: sec.required ? `${T.green}50` : T.border,
+              color: sec.required ? T.green : T.muted,
               transition: "all 0.15s",
             }}>
               {sec.required ? "✓ 필수" : "선택"}
@@ -1617,7 +1617,7 @@ function SectionEditor({ sections, onChange }) {
             {/* 삭제 */}
             <button onClick={() => removeSection(i)} style={{
               background: "none", border: "none", cursor: "pointer",
-              color: "rgba(239,68,68,0.5)", fontSize: 15, padding: "0 2px",
+              color: `${T.red}60`, fontSize: 15, padding: "0 2px",
               lineHeight: 1, transition: "color 0.1s",
             }}>×</button>
           </div>
@@ -1627,7 +1627,7 @@ function SectionEditor({ sections, onChange }) {
       <div style={{
         display: "flex", gap: 6, alignItems: "center",
         padding: "8px 10px", borderRadius: 8,
-        background: "rgba(99,102,241,0.05)", border: "1px dashed rgba(99,102,241,0.25)",
+        background: T.accentGlow, border: `1px dashed ${T.accent}40`,
       }}>
         <input
           value={newTitle}
@@ -1636,22 +1636,22 @@ function SectionEditor({ sections, onChange }) {
           placeholder="새 섹션 이름 입력 후 Enter 또는 + 클릭"
           style={{
             flex: 1, background: "none", border: "none", outline: "none",
-            color: "#e2e8f0", fontSize: 12, fontFamily: "inherit",
+            color: T.text, fontSize: 12, fontFamily: "inherit",
           }}
         />
         <button onClick={() => setNewRequired(r => !r)} style={{
           padding: "3px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer",
           fontFamily: "inherit", fontWeight: 600, border: "1px solid", whiteSpace: "nowrap",
-          background: newRequired ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.04)",
-          borderColor: newRequired ? "rgba(16,185,129,0.4)" : "rgba(255,255,255,0.1)",
-          color: newRequired ? "#10b981" : "rgba(148,163,184,0.5)",
+          background: newRequired ? T.greenDim : T.border,
+          borderColor: newRequired ? `${T.green}50` : T.border,
+          color: newRequired ? T.green : T.muted,
         }}>
           {newRequired ? "✓ 필수" : "선택"}
         </button>
         <button onClick={addSection} style={{
           padding: "4px 12px", borderRadius: 6, fontSize: 12, cursor: "pointer",
-          background: "rgba(99,102,241,0.2)", border: "1px solid rgba(99,102,241,0.4)",
-          color: "#818cf8", fontFamily: "inherit", fontWeight: 600,
+          background: T.accentDim, border: `1px solid ${T.accent}35`,
+          color: T.accent, fontFamily: "inherit", fontWeight: 600,
         }}>+ 추가</button>
       </div>
     </div>
@@ -1759,8 +1759,8 @@ function TemplateAdminPage() {
   const tabStyle = (key) => ({
     padding: "7px 14px", borderRadius: "7px 7px 0 0", fontSize: 12, fontWeight: 600,
     cursor: "pointer", border: "none", fontFamily: "inherit", transition: "all 0.15s",
-    background: activeTab === key ? "rgba(99,102,241,0.15)" : "transparent",
-    color: activeTab === key ? "#818cf8" : "rgba(148,163,184,0.55)",
+    background: activeTab === key ? T.accentDim : "transparent",
+    color: activeTab === key ? T.accent : T.muted,
     borderBottom: activeTab === key ? "2px solid #6366f1" : "2px solid transparent",
   });
 
@@ -1778,15 +1778,15 @@ function TemplateAdminPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
           <h1 style={{ fontSize: 20, fontWeight: 700, letterSpacing: "-0.02em", marginBottom: 4 }}>📋 문서 템플릿 관리</h1>
-          <p style={{ fontSize: 12, color: "rgba(148,163,184,0.7)" }}>ASPICE 4.0 SYS.1~5 산출물 생성 기준 및 Word 양식 템플릿</p>
+          <p style={{ fontSize: 12, color: T.textSecondary }}>ASPICE 4.0 SYS.1~5 산출물 생성 기준 및 Word 양식 템플릿</p>
         </div>
-        <Btn onClick={startNew} style={{ background: "linear-gradient(135deg,#4f46e5,#6366f1)", borderColor: "#6366f1" }}>
+        <Btn onClick={startNew} style={{ background: T.accent, borderColor: T.accent }}>
           + 새 템플릿 등록
         </Btn>
       </div>
 
-      {error && <div style={{ padding: "10px 14px", background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, color: "#f87171", fontSize: 12, marginBottom: 12 }}>{error}</div>}
-      {success && <div style={{ padding: "10px 14px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 8, color: "#10b981", fontSize: 12, marginBottom: 12 }}>{success}</div>}
+      {error && <div style={{ padding: "10px 14px", background: T.redDim, border: "1px solid rgba(239,68,68,0.3)", borderRadius: 8, color: T.red, fontSize: 12, marginBottom: 12 }}>{error}</div>}
+      {success && <div style={{ padding: "10px 14px", background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.3)", borderRadius: 8, color: T.green, fontSize: 12, marginBottom: 12 }}>{success}</div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", gap: 16 }}>
         {/* ── 좌측: 템플릿 목록 ── */}
@@ -1795,9 +1795,9 @@ function TemplateAdminPage() {
             {["ALL", ...PROC_IDS].map(p => (
               <button key={p} onClick={() => setFilterProc(p)} style={{
                 padding: "4px 10px", borderRadius: 6, fontSize: 11, fontWeight: 600, cursor: "pointer",
-                background: filterProc === p ? "rgba(99,102,241,0.2)" : "rgba(17,24,39,0.5)",
-                border: `1px solid ${filterProc === p ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.08)"}`,
-                color: filterProc === p ? "#818cf8" : "rgba(148,163,184,0.7)",
+                background: filterProc === p ? T.accentDim : T.surface2,
+                border: `1px solid ${filterProc === p ? `${T.accent}60` : T.border}`,
+                color: filterProc === p ? T.accent : T.textSecondary,
               }}>{p}</button>
             ))}
           </div>
@@ -1809,19 +1809,19 @@ function TemplateAdminPage() {
                   style={{
                     padding: "12px 14px", borderRadius: 10, cursor: "pointer", transition: "all 0.15s",
                     background: selected?.name === tmpl.name && selected?.process_id === tmpl.process_id
-                      ? "rgba(99,102,241,0.12)" : "rgba(17,24,39,0.5)",
+                      ? T.accentGlow : T.surface2,
                     border: `1px solid ${selected?.name === tmpl.name && selected?.process_id === tmpl.process_id
-                      ? "rgba(99,102,241,0.4)" : "rgba(255,255,255,0.06)"}`,
+                      ? `${T.accent}50` : T.border}`,
                   }}>
                   <div>
                     <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4,
-                      background: "rgba(99,102,241,0.15)", color: "#818cf8", display: "inline-block" }}>
+                      background: T.accentDim, color: T.accent, display: "inline-block" }}>
                       {tmpl.process_id}
                     </span>
-                    {tmpl.is_default && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: "rgba(16,185,129,0.15)", color: "#10b981", marginLeft: 4 }}>기본</span>}
-                    {!tmpl.id && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: "rgba(245,158,11,0.15)", color: "#f59e0b", marginLeft: 4 }}>내장</span>}
-                    <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0", marginTop: 4 }}>{tmpl.name}</div>
-                    <div style={{ fontSize: 10, color: "rgba(148,163,184,0.5)", marginTop: 2 }}>v{tmpl.version}</div>
+                    {tmpl.is_default && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: T.greenDim, color: T.green, marginLeft: 4 }}>기본</span>}
+                    {!tmpl.id && <span style={{ fontSize: 9, padding: "2px 5px", borderRadius: 4, background: T.amberDim, color: T.amber, marginLeft: 4 }}>내장</span>}
+                    <div style={{ fontSize: 12, fontWeight: 600, color: T.text, marginTop: 4 }}>{tmpl.name}</div>
+                    <div style={{ fontSize: 10, color: T.muted, marginTop: 2 }}>v{tmpl.version}</div>
                   </div>
                 </div>
               ))}
@@ -1832,10 +1832,10 @@ function TemplateAdminPage() {
         {/* ── 우측: 편집 / 상세보기 ── */}
         <div>
           {editMode && editData ? (
-            <Card style={{ padding: 0, background: "linear-gradient(135deg,rgba(13,17,23,0.95),rgba(17,24,39,0.9))", border: "1px solid rgba(255,255,255,0.07)", overflow: "hidden" }}>
+            <Card style={{ padding: 0, background: T.surface, border: `1px solid ${T.border}`, overflow: "hidden" }}>
 
               {/* 편집 헤더 */}
-              <div style={{ padding: "16px 20px 0", borderBottom: "1px solid rgba(255,255,255,0.07)" }}>
+              <div style={{ padding: "16px 20px 0", borderBottom: `1px solid ${T.border}` }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                   <h2 style={{ fontSize: 14, fontWeight: 700 }}>
                     {showNew ? "✨ 새 템플릿 등록" : "✏️ 템플릿 수정"}
@@ -1849,7 +1849,7 @@ function TemplateAdminPage() {
                       { key:"sections", label:"Word 섹션" },
                     ].map(t => (
                       <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10,
-                        color: tabDone[t.key] ? "#10b981" : "rgba(148,163,184,0.4)" }}>
+                        color: tabDone[t.key] ? T.green : T.muted }}>
                         <span style={{ fontSize: 12 }}>{tabDone[t.key] ? "✓" : "○"}</span>
                         {t.label}
                       </div>
@@ -1866,7 +1866,7 @@ function TemplateAdminPage() {
                   ].map(t => (
                     <button key={t.key} onClick={() => setActiveTab(t.key)} style={tabStyle(t.key)}>
                       {t.icon} {t.label}
-                      {tabDone[t.key] && <span style={{ marginLeft: 4, color: "#10b981", fontSize: 10 }}>✓</span>}
+                      {tabDone[t.key] && <span style={{ marginLeft: 4, color: T.green, fontSize: 10 }}>✓</span>}
                     </button>
                   ))}
                 </div>
@@ -1880,37 +1880,37 @@ function TemplateAdminPage() {
                   <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                       <div>
-                        <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 5 }}>프로세스 <span style={{color:"#f87171"}}>*</span></div>
+                        <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 5 }}>프로세스 <span style={{color:T.red}}>*</span></div>
                         <select value={editData.process_id} onChange={e => setEditData(p => ({...p, process_id: e.target.value}))}
-                          style={{ width: "100%", padding: "9px 12px", background: "rgba(9,11,15,0.8)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#e2e8f0", fontSize: 13, fontFamily: "inherit" }}>
-                          {PROC_IDS.map(p => <option key={p} value={p} style={{ background: "#1a2235" }}>{p}</option>)}
+                          style={{ width: "100%", padding: "9px 12px", background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: "inherit" }}>
+                          {PROC_IDS.map(p => <option key={p} value={p} style={{ background: T.surface }}>{p}</option>)}
                         </select>
                       </div>
                       <div>
-                        <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 5 }}>버전</div>
+                        <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 5 }}>버전</div>
                         <Input value={editData.version || ""} onChange={v => setEditData(p => ({...p, version: v}))} placeholder="1.0" />
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 5 }}>템플릿 이름 <span style={{color:"#f87171"}}>*</span></div>
+                      <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 5 }}>템플릿 이름 <span style={{color:T.red}}>*</span></div>
                       <Input value={editData.name || ""} onChange={v => setEditData(p => ({...p, name: v}))} placeholder="예: SYS.2 기능안전 포함 템플릿" />
                     </div>
                     <div>
-                      <div style={{ fontSize: 11, color: "rgba(148,163,184,0.7)", marginBottom: 5 }}>설명 <span style={{ fontSize: 10, color: "rgba(148,163,184,0.4)" }}>(선택)</span></div>
+                      <div style={{ fontSize: 11, color: T.textSecondary, marginBottom: 5 }}>설명 <span style={{ fontSize: 10, color: T.muted }}>(선택)</span></div>
                       <Input value={editData.description || ""} onChange={v => setEditData(p => ({...p, description: v}))} placeholder="이 템플릿의 용도와 특징을 간략히 입력하세요" />
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px",
-                      background: "rgba(99,102,241,0.06)", border: "1px solid rgba(99,102,241,0.15)", borderRadius: 8 }}>
+                      background: T.accentGlow, border: "1px solid rgba(99,102,241,0.15)", borderRadius: 8 }}>
                       <input type="checkbox" checked={!!(editData.is_default)}
                         onChange={e => setEditData(p => ({...p, is_default: e.target.checked}))}
-                        style={{ accentColor: "#6366f1", width: 15, height: 15, cursor: "pointer" }} />
+                        style={{ accentColor: "#2383E2", width: 15, height: 15, cursor: "pointer" }} />
                       <div>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: "#e2e8f0" }}>기본 템플릿으로 설정</div>
-                        <div style={{ fontSize: 11, color: "rgba(148,163,184,0.55)", marginTop: 1 }}>체크하면 산출물 생성 시 이 템플릿이 자동으로 사용됩니다</div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: T.text }}>기본 템플릿으로 설정</div>
+                        <div style={{ fontSize: 11, color: T.muted, marginTop: 1 }}>체크하면 산출물 생성 시 이 템플릿이 자동으로 사용됩니다</div>
                       </div>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <Btn onClick={() => setActiveTab("prompt")} style={{ background: "rgba(99,102,241,0.2)", borderColor: "rgba(99,102,241,0.4)", color: "#818cf8" }}>
+                      <Btn onClick={() => setActiveTab("prompt")} style={{ background: T.accentDim, borderColor: `${T.accent}50`, color: T.accent }}>
                         다음: AI 프롬프트 가이드 →
                       </Btn>
                     </div>
@@ -1920,8 +1920,8 @@ function TemplateAdminPage() {
                 {/* ② AI 프롬프트 가이드 */}
                 {activeTab === "prompt" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 8, fontSize: 11, color: "rgba(148,163,184,0.8)", lineHeight: 1.6 }}>
-                      💡 Claude AI가 산출물을 생성할 때 이 가이드를 참고합니다. <strong style={{color:"#818cf8"}}>작성 기준, 필수 항목, 품질 조건</strong>을 자유롭게 한국어로 작성하세요. 많이 쓸수록 더 정확한 산출물이 생성됩니다.
+                    <div style={{ padding: "10px 12px", background: T.accentGlow, border: "1px solid rgba(99,102,241,0.18)", borderRadius: 8, fontSize: 11, color: T.textSecondary, lineHeight: 1.6 }}>
+                      💡 Claude AI가 산출물을 생성할 때 이 가이드를 참고합니다. <strong style={{color:T.accent}}>작성 기준, 필수 항목, 품질 조건</strong>을 자유롭게 한국어로 작성하세요. 많이 쓸수록 더 정확한 산출물이 생성됩니다.
                     </div>
                     <Textarea
                       value={editData.prompt_guide || ""}
@@ -1931,7 +1931,7 @@ function TemplateAdminPage() {
                     />
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <Btn variant="outline" onClick={() => setActiveTab("basic")}>← 이전</Btn>
-                      <Btn onClick={() => setActiveTab("fields")} style={{ background: "rgba(99,102,241,0.2)", borderColor: "rgba(99,102,241,0.4)", color: "#818cf8" }}>
+                      <Btn onClick={() => setActiveTab("fields")} style={{ background: T.accentDim, borderColor: `${T.accent}50`, color: T.accent }}>
                         다음: 필수 필드 →
                       </Btn>
                     </div>
@@ -1941,19 +1941,19 @@ function TemplateAdminPage() {
                 {/* ③ 필수 필드 */}
                 {activeTab === "fields" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 8, fontSize: 11, color: "rgba(148,163,184,0.8)", lineHeight: 1.6 }}>
-                      💡 산출물 각 항목이 반드시 포함해야 하는 필드입니다. 아래 추천 필드를 클릭하거나, 직접 입력 후 <strong style={{color:"#818cf8"}}>Enter</strong>를 누르세요.
+                    <div style={{ padding: "10px 12px", background: T.accentGlow, border: "1px solid rgba(99,102,241,0.18)", borderRadius: 8, fontSize: 11, color: T.textSecondary, lineHeight: 1.6 }}>
+                      💡 산출물 각 항목이 반드시 포함해야 하는 필드입니다. 아래 추천 필드를 클릭하거나, 직접 입력 후 <strong style={{color:T.accent}}>Enter</strong>를 누르세요.
                     </div>
                     <FieldTagEditor fields={fieldTags} onChange={setFieldTags} />
                     {fieldTags.length > 0 && (
-                      <div style={{ fontSize: 11, color: "rgba(148,163,184,0.5)", padding: "6px 10px",
-                        background: "rgba(17,24,39,0.4)", borderRadius: 6 }}>
+                      <div style={{ fontSize: 11, color: T.muted, padding: "6px 10px",
+                        background: T.surface2, borderRadius: 6 }}>
                         현재 {fieldTags.length}개 필드 설정됨 — 태그의 × 버튼으로 삭제, Backspace로 마지막 항목 삭제
                       </div>
                     )}
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <Btn variant="outline" onClick={() => setActiveTab("prompt")}>← 이전</Btn>
-                      <Btn onClick={() => setActiveTab("sections")} style={{ background: "rgba(99,102,241,0.2)", borderColor: "rgba(99,102,241,0.4)", color: "#818cf8" }}>
+                      <Btn onClick={() => setActiveTab("sections")} style={{ background: T.accentDim, borderColor: `${T.accent}50`, color: T.accent }}>
                         다음: Word 섹션 →
                       </Btn>
                     </div>
@@ -1963,13 +1963,13 @@ function TemplateAdminPage() {
                 {/* ④ Word 섹션 */}
                 {activeTab === "sections" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    <div style={{ padding: "10px 12px", background: "rgba(99,102,241,0.07)", border: "1px solid rgba(99,102,241,0.18)", borderRadius: 8, fontSize: 11, color: "rgba(148,163,184,0.8)", lineHeight: 1.6 }}>
-                      💡 Word 문서로 다운로드할 때 생성되는 섹션 목록입니다. 섹션 이름을 입력하고 <strong style={{color:"#818cf8"}}>+ 추가</strong>를 누르세요. ▲▼ 버튼으로 순서를 바꾸고, <strong style={{color:"#10b981"}}>필수/선택</strong> 버튼으로 필수 여부를 설정하세요.
+                    <div style={{ padding: "10px 12px", background: T.accentGlow, border: "1px solid rgba(99,102,241,0.18)", borderRadius: 8, fontSize: 11, color: T.textSecondary, lineHeight: 1.6 }}>
+                      💡 Word 문서로 다운로드할 때 생성되는 섹션 목록입니다. 섹션 이름을 입력하고 <strong style={{color:T.accent}}>+ 추가</strong>를 누르세요. ▲▼ 버튼으로 순서를 바꾸고, <strong style={{color:T.green}}>필수/선택</strong> 버튼으로 필수 여부를 설정하세요.
                     </div>
                     <SectionEditor sections={sections} onChange={setSections} />
                     {sections.length > 0 && (
-                      <div style={{ fontSize: 11, color: "rgba(148,163,184,0.5)", padding: "6px 10px",
-                        background: "rgba(17,24,39,0.4)", borderRadius: 6 }}>
+                      <div style={{ fontSize: 11, color: T.muted, padding: "6px 10px",
+                        background: T.surface2, borderRadius: 6 }}>
                         현재 {sections.length}개 섹션 ({sections.filter(s=>s.required).length}개 필수, {sections.filter(s=>!s.required).length}개 선택)
                       </div>
                     )}
@@ -1981,10 +1981,10 @@ function TemplateAdminPage() {
               </div>
 
               {/* 저장/취소 버튼 (항상 하단 고정) */}
-              <div style={{ padding: "12px 20px 16px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <div style={{ padding: "12px 20px 16px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8, justifyContent: "flex-end" }}>
                 <Btn variant="outline" onClick={() => { setEditMode(false); setShowNew(false); setError(""); }}>취소</Btn>
                 <Btn onClick={handleSave} disabled={saving}
-                  style={{ background: "linear-gradient(135deg,#059669,#10b981)", borderColor: "#10b981", minWidth: 90 }}>
+                  style={{ background: T.green, borderColor: T.green, minWidth: 90 }}>
                   {saving ? "⏳ 저장 중…" : "💾 저장"}
                 </Btn>
               </div>
@@ -1992,17 +1992,17 @@ function TemplateAdminPage() {
 
           ) : !editMode && selected ? (
             /* ── 상세보기 ── */
-            <Card style={{ padding: 20, background: "linear-gradient(135deg,rgba(13,17,23,0.95),rgba(17,24,39,0.9))", border: "1px solid rgba(255,255,255,0.07)" }}>
+            <Card style={{ padding: 20, background: T.surface, border: `1px solid ${T.border}` }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
                 <div>
                   <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
                     <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 8px", borderRadius: 5,
-                      background: "rgba(99,102,241,0.15)", color: "#818cf8" }}>{selected.process_id}</span>
-                    {selected.is_default && <span style={{ fontSize: 10, padding: "3px 7px", borderRadius: 5, background: "rgba(16,185,129,0.15)", color: "#10b981" }}>기본 템플릿</span>}
-                    {!selected.id && <span style={{ fontSize: 10, padding: "3px 7px", borderRadius: 5, background: "rgba(245,158,11,0.15)", color: "#f59e0b" }}>코드 내장</span>}
+                      background: T.accentDim, color: T.accent }}>{selected.process_id}</span>
+                    {selected.is_default && <span style={{ fontSize: 10, padding: "3px 7px", borderRadius: 5, background: T.greenDim, color: T.green }}>기본 템플릿</span>}
+                    {!selected.id && <span style={{ fontSize: 10, padding: "3px 7px", borderRadius: 5, background: T.amberDim, color: T.amber }}>코드 내장</span>}
                   </div>
                   <h2 style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.01em" }}>{selected.name}</h2>
-                  <div style={{ fontSize: 11, color: "rgba(148,163,184,0.6)", marginTop: 2 }}>v{selected.version}</div>
+                  <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>v{selected.version}</div>
                 </div>
                 <div style={{ display: "flex", gap: 6 }}>
                   <Btn size="sm" onClick={() => startEdit(selected)}>✏️ 수정</Btn>
@@ -2012,23 +2012,23 @@ function TemplateAdminPage() {
                 </div>
               </div>
               {selected.description && (
-                <p style={{ fontSize: 12, color: "rgba(148,163,184,0.8)", marginBottom: 16, lineHeight: 1.6 }}>{selected.description}</p>
+                <p style={{ fontSize: 12, color: T.textSecondary, marginBottom: 16, lineHeight: 1.6 }}>{selected.description}</p>
               )}
               <div style={{ marginBottom: 16 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>📌 AI 생성 프롬프트 가이드</div>
-                <div style={{ padding: "12px 14px", background: "rgba(9,11,15,0.7)", borderRadius: 8,
+                <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>📌 AI 생성 프롬프트 가이드</div>
+                <div style={{ padding: "12px 14px", background: T.surface2, borderRadius: 8,
                   border: "1px solid rgba(99,102,241,0.2)", fontSize: 12, lineHeight: 1.7,
-                  whiteSpace: "pre-wrap", color: "#e2e8f0", maxHeight: 220, overflowY: "auto" }}>
+                  whiteSpace: "pre-wrap", color: T.text, maxHeight: 220, overflowY: "auto" }}>
                   {selected.prompt_guide}
                 </div>
               </div>
               {selected.required_fields?.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>✅ 필수 필드</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>✅ 필수 필드</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                     {(Array.isArray(selected.required_fields) ? selected.required_fields : []).map(f => (
                       <span key={f} style={{ fontSize: 11, padding: "3px 8px", borderRadius: 5,
-                        background: "rgba(17,24,39,0.7)", border: "1px solid rgba(255,255,255,0.1)", color: "#94a3b8" }}>
+                        background: T.surface2, border: `1px solid ${T.border}`, color: "#94a3b8" }}>
                         {f}
                       </span>
                     ))}
@@ -2037,16 +2037,16 @@ function TemplateAdminPage() {
               )}
               {selected.word_sections?.length > 0 && (
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#818cf8", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>📄 Word 문서 섹션 구성</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.accent, marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.04em" }}>📄 Word 문서 섹션 구성</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                     {(Array.isArray(selected.word_sections) ? selected.word_sections : []).map((sec, i) => (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-                        padding: "8px 12px", background: "rgba(17,24,39,0.5)", borderRadius: 7,
-                        border: "1px solid rgba(255,255,255,0.06)" }}>
-                        <span style={{ fontSize: 12, color: "#e2e8f0" }}>{i+1}. {sec.title}</span>
+                        padding: "8px 12px", background: T.surface2, borderRadius: 7,
+                        border: `1px solid ${T.border}` }}>
+                        <span style={{ fontSize: 12, color: T.text }}>{i+1}. {sec.title}</span>
                         <span style={{ fontSize: 10, padding: "2px 6px", borderRadius: 4,
-                          background: sec.required ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.05)",
-                          color: sec.required ? "#10b981" : "rgba(148,163,184,0.5)" }}>
+                          background: sec.required ? T.greenDim : T.border,
+                          color: sec.required ? T.green : T.muted }}>
                           {sec.required ? "필수" : "선택"}
                         </span>
                       </div>
@@ -2057,9 +2057,9 @@ function TemplateAdminPage() {
             </Card>
 
           ) : (
-            <Card style={{ padding: 40, textAlign: "center", background: "rgba(13,17,23,0.5)", border: "1px solid rgba(255,255,255,0.06)" }}>
+            <Card style={{ padding: 40, textAlign: "center", background: T.surface2, border: `1px solid ${T.border}` }}>
               <div style={{ fontSize: 32, marginBottom: 12, opacity: 0.3 }}>📋</div>
-              <div style={{ color: "rgba(148,163,184,0.6)", fontSize: 13 }}>좌측에서 템플릿을 선택하세요</div>
+              <div style={{ color: T.muted, fontSize: 13 }}>좌측에서 템플릿을 선택하세요</div>
             </Card>
           )}
         </div>
@@ -2098,157 +2098,25 @@ export default function AspiceApp() {
   useEffect(() => { fetchProjects(); }, []);
   useEffect(() => { if (selectedProject) fetchWorkProducts(selectedProject.id); }, [selectedProject]);
 
-  // 글로벌 디자인 개선 CSS 주입
+  // 글로벌 디자인 CSS 주입 (Notion/Figma 라이트 테마)
   useEffect(() => {
     const style = document.createElement("style");
     style.id = "aspice-design-override";
     style.textContent = `
-      @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
       * { box-sizing: border-box; }
       body {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
-        background: #090b0f !important;
-        color: #e2e8f0 !important;
+        font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif !important;
+        background: #FFFFFF !important;
+        color: #37352F !important;
         -webkit-font-smoothing: antialiased;
       }
-
-      /* 사이드바 */
-      .sidebar {
-        background: linear-gradient(180deg, #0d1117 0%, #111827 100%) !important;
-        border-right: 1px solid rgba(255,255,255,0.05) !important;
-        box-shadow: 4px 0 32px rgba(0,0,0,0.4) !important;
-      }
-
-      /* 카드 */
-      .aspice-card {
-        background: rgba(17,24,39,0.8) !important;
-        border: 1px solid rgba(255,255,255,0.07) !important;
-        border-radius: 14px !important;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.05) !important;
-        backdrop-filter: blur(12px) !important;
-      }
-
-      /* 버튼 기본 */
-      button {
-        font-family: 'Inter', sans-serif !important;
-        letter-spacing: -0.01em !important;
-        transition: all 0.15s ease !important;
-      }
-      button:hover { filter: brightness(1.1); transform: translateY(-1px); }
-      button:active { transform: translateY(0); }
-
-      /* 네비 버튼 */
-      .nav-btn {
-        border-radius: 8px !important;
-        transition: all 0.15s ease !important;
-      }
-      .nav-btn:hover { background: rgba(99,102,241,0.12) !important; }
-
-      /* 파이프라인 스텝 */
-      .pipeline-step {
-        background: rgba(17,24,39,0.9) !important;
-        border: 1px solid rgba(255,255,255,0.07) !important;
-        border-radius: 14px !important;
-        transition: all 0.2s ease !important;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.2) !important;
-      }
-      .pipeline-step:hover { border-color: rgba(99,102,241,0.3) !important; box-shadow: 0 4px 20px rgba(99,102,241,0.1) !important; }
-
-      /* 배지 */
-      .aspice-badge {
-        font-size: 10px !important;
-        font-weight: 600 !important;
-        letter-spacing: 0.04em !important;
-        border-radius: 6px !important;
-        padding: 3px 8px !important;
-      }
-
-      /* 입력창 */
-      input, textarea, select {
-        font-family: 'Inter', sans-serif !important;
-        transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
-      }
-      input:focus, textarea:focus {
+      h1, h2, h3 { letter-spacing: -0.02em; color: #37352F; }
+      button { transition: all 0.12s ease !important; }
+      button:active { transform: scale(0.98); }
+      input:focus, textarea:focus, select:focus {
         outline: none !important;
-        border-color: rgba(99,102,241,0.6) !important;
-        box-shadow: 0 0 0 3px rgba(99,102,241,0.15) !important;
-      }
-
-      /* 스크롤바 */
-      ::-webkit-scrollbar { width: 4px; height: 4px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
-      ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
-
-      /* 텍스트 */
-      h1, h2, h3 { letter-spacing: -0.02em; }
-
-      /* 모달 배경 */
-      .modal-overlay {
-        backdrop-filter: blur(8px) !important;
-        background: rgba(0,0,0,0.7) !important;
-      }
-
-      /* 상태 배지 */
-      .status-approved { background: rgba(16,185,129,0.15) !important; color: #10b981 !important; border: 1px solid rgba(16,185,129,0.3) !important; }
-      .status-draft { background: rgba(99,102,241,0.15) !important; color: #818cf8 !important; border: 1px solid rgba(99,102,241,0.3) !important; }
-      .status-rejected { background: rgba(239,68,68,0.15) !important; color: #f87171 !important; border: 1px solid rgba(239,68,68,0.3) !important; }
-
-      /* QA 점수 카드 */
-      .qa-score-card {
-        background: linear-gradient(135deg, rgba(17,24,39,0.9), rgba(30,41,59,0.9)) !important;
-        border: 1px solid rgba(255,255,255,0.08) !important;
-        border-radius: 12px !important;
-      }
-
-      /* 이슈 카드 */
-      .issue-card {
-        border-radius: 10px !important;
-        border: 1px solid rgba(255,255,255,0.06) !important;
-        transition: all 0.2s ease !important;
-      }
-      .issue-card:hover { border-color: rgba(99,102,241,0.2) !important; }
-
-      /* CRITICAL 배지 */
-      .severity-critical { background: rgba(239,68,68,0.2) !important; color: #fca5a5 !important; border: 1px solid rgba(239,68,68,0.4) !important; }
-      .severity-major { background: rgba(245,158,11,0.2) !important; color: #fcd34d !important; border: 1px solid rgba(245,158,11,0.4) !important; }
-      .severity-minor { background: rgba(99,102,241,0.2) !important; color: #a5b4fc !important; border: 1px solid rgba(99,102,241,0.3) !important; }
-      .severity-info { background: rgba(20,184,166,0.15) !important; color: #5eead4 !important; border: 1px solid rgba(20,184,166,0.3) !important; }
-
-      /* 프로젝트 카드 hover */
-      .project-card {
-        transition: all 0.2s ease !important;
-        border-radius: 14px !important;
-      }
-      .project-card:hover {
-        transform: translateY(-2px) !important;
-        box-shadow: 0 8px 32px rgba(99,102,241,0.15) !important;
-        border-color: rgba(99,102,241,0.3) !important;
-      }
-
-      /* 로고 */
-      .aspice-logo { letter-spacing: -0.03em !important; }
-
-      /* 파이프라인 연결선 */
-      .pipeline-arrow {
-        opacity: 0.5 !important;
-        font-size: 18px !important;
-      }
-
-      /* 버튼 스타일 강화 */
-      .btn-primary {
-        background: linear-gradient(135deg, #4f46e5, #6366f1) !important;
-        box-shadow: 0 2px 12px rgba(99,102,241,0.35) !important;
-        border: 1px solid rgba(99,102,241,0.5) !important;
-      }
-      .btn-success {
-        background: linear-gradient(135deg, #059669, #10b981) !important;
-        box-shadow: 0 2px 12px rgba(16,185,129,0.3) !important;
-      }
-      .btn-danger {
-        background: linear-gradient(135deg, #dc2626, #ef4444) !important;
-        box-shadow: 0 2px 12px rgba(239,68,68,0.25) !important;
+        border-color: #2383E2 !important;
+        box-shadow: 0 0 0 3px rgba(35,131,226,0.08) !important;
       }
     `;
     document.head.appendChild(style);
@@ -2286,23 +2154,23 @@ export default function AspiceApp() {
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "linear-gradient(135deg,#090b0f 0%,#0d1117 60%,#0a0f1a 100%)", color: T.text }}>
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: T.bg, color: T.text }}>
       <style>{GLOBAL_CSS}</style>
 
       {/* 모바일 헤더 */}
-      <div className="mob-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", background: "rgba(13,17,23,0.9)", borderBottom: `1px solid rgba(255,255,255,0.07)`, position: "sticky", top: 0, zIndex: 100 }}>
+      <div className="mob-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: T.surface, borderBottom: `1px solid ${T.border}`, position: "sticky", top: 0, zIndex: 100 }}>
         <Logo onClick={() => nav("home", null)} />
         <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => setShowGuide(true)} style={{ background: "none", border: `1px solid rgba(255,255,255,0.07)`, borderRadius: 8, color: T.muted, fontSize: 12, cursor: "pointer", padding: "4px 10px" }}>?</button>
-          <button onClick={() => setMenuOpen(!menuOpen)} style={{ background: "none", border: "none", color: T.text, fontSize: 22, cursor: "pointer" }}>{menuOpen ? "✕" : "☰"}</button>
+          <button onClick={() => setShowGuide(true)} style={{ background: "none", border: `1px solid ${T.border}`, borderRadius: 7, color: T.muted, fontSize: 12, cursor: "pointer", padding: "4px 10px" }}>?</button>
+          <button onClick={() => setMenuOpen(!menuOpen)} style={{ background: "none", border: "none", color: T.text, fontSize: 20, cursor: "pointer" }}>{menuOpen ? "✕" : "☰"}</button>
         </div>
       </div>
 
       {menuOpen && (
-        <div className="mob-menu" style={{ background: "rgba(13,17,23,0.9)", borderBottom: `1px solid rgba(255,255,255,0.07)`, padding: "8px 12px", zIndex: 99 }}>
+        <div className="mob-menu" style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, padding: "8px 12px", zIndex: 99 }}>
           {navItems.map(item => (
             <button key={item.id} onClick={() => nav(item.id)}
-              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 10, width: "100%", background: page === item.id ? T.accentGlow : "transparent", color: page === item.id ? T.accent : T.muted, border: "none", cursor: "pointer", fontSize: 14, fontWeight: page === item.id ? 600 : 400, marginBottom: 4, fontFamily: "inherit" }}>
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 8, width: "100%", background: page === item.id ? T.accentDim : "transparent", color: page === item.id ? T.accent : T.textSecondary, border: "none", cursor: "pointer", fontSize: 14, fontWeight: page === item.id ? 600 : 400, marginBottom: 2, fontFamily: "inherit" }}>
               <span>{item.icon}</span> {item.label}
             </button>
           ))}
@@ -2311,32 +2179,32 @@ export default function AspiceApp() {
 
       <div style={{ display: "flex", flex: 1 }}>
         {/* PC 사이드바 */}
-        <aside className="sidebar" style={{ display: "none", width: 230, background: "rgba(13,17,23,0.9)", borderRight: `1px solid rgba(255,255,255,0.07)`, flexDirection: "column", padding: "24px 0", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
-          <div style={{ padding: "0 20px 20px", borderBottom: `1px solid rgba(255,255,255,0.07)` }}>
+        <aside className="sidebar" style={{ display: "none", width: 240, background: T.surface2, borderRight: `1px solid ${T.border}`, flexDirection: "column", padding: "20px 0", flexShrink: 0, position: "sticky", top: 0, height: "100vh" }}>
+          <div style={{ padding: "0 16px 16px", borderBottom: `1px solid ${T.border}` }}>
             <Logo onClick={() => nav("home", null)} />
           </div>
           {selectedProject && (
-            <div style={{ padding: "12px 20px", borderBottom: `1px solid rgba(255,255,255,0.07)`, background: "rgba(99,102,241,0.08)", borderLeft: "2px solid rgba(99,102,241,0.5)" }}>
-              <div style={{ fontSize: 10, color: "rgba(148,163,184,0.6)", marginBottom: 3 }}>현재 프로젝트</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: T.accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedProject.name}</div>
+            <div style={{ padding: "10px 16px", borderBottom: `1px solid ${T.border}`, background: T.accentDim }}>
+              <div style={{ fontSize: 11, color: T.muted, marginBottom: 2 }}>현재 프로젝트</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: T.accent, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedProject.name}</div>
             </div>
           )}
-          <nav style={{ padding: "14px 10px", flex: 1, display: "flex", flexDirection: "column", gap: 2 }}>
+          <nav style={{ padding: "10px 8px", flex: 1, display: "flex", flexDirection: "column", gap: 1 }}>
             {navItems.map(item => (
               <button key={item.id} onClick={() => nav(item.id)}
-                style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", borderRadius: 10, background: page === item.id ? "rgba(99,102,241,0.15)" : "transparent", color: page === item.id ? "#818cf8" : "rgba(148,163,184,0.7)", border: page === item.id ? "1px solid rgba(99,102,241,0.3)" : "1px solid transparent", boxShadow: page === item.id ? "0 0 12px rgba(99,102,241,0.15)" : "none", cursor: "pointer", fontSize: 13, fontWeight: page === item.id ? 600 : 400, fontFamily: "inherit", textAlign: "left", width: "100%", transition: "all .15s" }}>
-                <span style={{ fontSize: 15 }}>{item.icon}</span> {item.label}
+                style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderRadius: 7, background: page === item.id ? T.accentDim : "transparent", color: page === item.id ? T.accent : T.textSecondary, border: page === item.id ? `1px solid ${T.accent}30` : "1px solid transparent", cursor: "pointer", fontSize: 13, fontWeight: page === item.id ? 600 : 400, fontFamily: "inherit", textAlign: "left", width: "100%", transition: "all .12s" }}>
+                <span style={{ fontSize: 15, opacity: 0.8 }}>{item.icon}</span> {item.label}
               </button>
             ))}
           </nav>
-          <div style={{ padding: "14px 20px", borderTop: `1px solid rgba(255,255,255,0.07)` }}>
-            <button onClick={() => setShowGuide(true)} style={{ width: "100%", padding: "8px 12px", background: "rgba(17,24,39,0.5)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, color: "rgba(148,163,184,0.7)", fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}>
+          <div style={{ padding: "12px 16px", borderTop: `1px solid ${T.border}` }}>
+            <button onClick={() => setShowGuide(true)} style={{ width: "100%", padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 7, color: T.textSecondary, fontSize: 12, cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }}>
               📖 사용 가이드
             </button>
           </div>
         </aside>
 
-        <main className="main-pad" style={{ flex: 1, overflow: "auto", padding: "20px 16px", animation: "fadeIn .3s ease" }}>
+        <main className="main-pad" style={{ flex: 1, overflow: "auto", padding: "20px 16px", animation: "fadeIn .25s ease", background: T.bg }}>
           {pages[page] || pages.home}
         </main>
       </div>
@@ -2350,15 +2218,14 @@ function Logo({ onClick }) {
   return (
     <div onClick={onClick} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
       <div style={{
-        width: 32, height: 32,
-        background: "linear-gradient(135deg, #4f46e5 0%, #818cf8 100%)",
-        borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 14, fontWeight: 800, color: "#fff",
-        boxShadow: "0 2px 12px rgba(99,102,241,0.4), inset 0 1px 0 rgba(255,255,255,0.2)"
+        width: 30, height: 30,
+        background: T.accent,
+        borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: 13, fontWeight: 700, color: "#fff",
       }}>A</div>
       <div>
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", letterSpacing: "-0.02em", lineHeight: 1.2 }}>ASPICE AI</div>
-        <div style={{ fontSize: 9, color: "rgba(148,163,184,0.6)", letterSpacing: "0.06em", marginTop: 1 }}>v2.0 · SYS.1~SYS.5 Pipeline</div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: T.text, letterSpacing: "-0.02em", lineHeight: 1.2 }}>ASPICE AI</div>
+        <div style={{ fontSize: 10, color: T.muted, letterSpacing: "0.02em", marginTop: 1 }}>SYS.1~SYS.5 Platform</div>
       </div>
     </div>
   );
@@ -2371,33 +2238,33 @@ function GuideModal({ onClose }) {
     { icon: "②", color: T.purple, title: "SYS.1 생성 (파이프라인 시작)", desc: "파이프라인 탭에서 SYS.1 카드의 [생성] 버튼을 누릅니다. 프로젝트 배경과 이해관계자 니즈를 입력하면 AI가 자동 생성합니다." },
     { icon: "③", color: T.teal, title: "SYS.2~5 순차 생성 (IN→OUT→IN→OUT)", desc: "이전 단계 산출물이 자동으로 다음 단계에 주입됩니다. 각 단계에서 [생성] 버튼만 누르면 됩니다." },
     { icon: "④", color: T.amber, title: "QA 검증 & 승인 (Gemini)", desc: "HITL 검토 탭에서 산출물 선택 → [QA 검증 실행]으로 Gemini AI가 품질을 점검합니다. 검토 후 [승인] 또는 [거부]를 결정합니다." },
-    { icon: "⑤", color: T.green, title: "다운로드", desc: "각 산출물의 [⬇ MD] 또는 [JSON] 버튼으로 개별 저장, 상단 [⬇ 전체 다운로드]로 모든 산출물을 한 번에 내보낼 수 있습니다." },
+    { icon: "⑤", color: T.green, title: "다운로드", desc: "각 산출물의 [⬇ Word] 버튼으로 개별 저장, 상단 [⬇ 전체 다운로드]로 모든 산출물을 한 번에 내보낼 수 있습니다." },
   ];
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "rgba(13,17,23,0.9)", border: `1px solid rgba(255,255,255,0.07)`, borderRadius: 18, padding: 32, maxWidth: 580, width: "100%", maxHeight: "90vh", overflowY: "auto", animation: "fadeIn .25s ease" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(4px)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, padding: 28, maxWidth: 560, width: "100%", maxHeight: "90vh", overflowY: "auto", animation: "fadeIn .2s ease", boxShadow: "0 16px 48px rgba(0,0,0,0.12)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
           <div>
-            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>📖 사용 가이드</h2>
-            <p style={{ fontSize: 12, color: T.muted }}>ASPICE AI Platform — 5단계로 완성하는 ASPICE 산출물</p>
+            <h2 style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>사용 가이드</h2>
+            <p style={{ fontSize: 13, color: T.muted }}>5단계로 완성하는 ASPICE 산출물</p>
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
+          <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 18, cursor: "pointer" }}>✕</button>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14, marginBottom: 24 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 20 }}>
           {steps.map((s, i) => (
-            <div key={i} style={{ display: "flex", gap: 14, padding: "14px 16px", background: "rgba(17,24,39,0.6)", borderRadius: 12, border: "1px solid rgba(255,255,255,0.07)" }}>
-              <div style={{ width: 36, height: 36, borderRadius: 10, background: s.color + "20", border: `1px solid ${s.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, color: s.color, fontWeight: 800, flexShrink: 0 }}>{s.icon}</div>
+            <div key={i} style={{ display: "flex", gap: 12, padding: "12px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
+              <div style={{ width: 32, height: 32, borderRadius: 8, background: s.color + "15", border: `1px solid ${s.color}30`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: s.color, fontWeight: 700, flexShrink: 0 }}>{s.icon}</div>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4, color: s.color }}>{s.title}</div>
-                <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.7 }}>{s.desc}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 3, color: s.color }}>{s.title}</div>
+                <div style={{ fontSize: 12, color: T.textSecondary, lineHeight: 1.7 }}>{s.desc}</div>
               </div>
             </div>
           ))}
         </div>
-        <div style={{ padding: "14px 16px", background: T.accentGlow, border: `1px solid ${T.accentDim}`, borderRadius: 12, marginBottom: 20 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: T.accent, marginBottom: 6 }}>💡 파이프라인 핵심 원리</div>
-          <div style={{ fontSize: 12, color: T.muted, lineHeight: 1.8 }}>
-            <span style={{ color: T.accent }}>SYS.1 OUT</span> → <span style={{ color: T.purple }}>SYS.2 IN</span> → <span style={{ color: T.purple }}>SYS.2 OUT</span> → <span style={{ color: T.teal }}>SYS.3 IN</span> → <span style={{ color: T.teal }}>SYS.3 OUT</span> → <span style={{ color: T.amber }}>SYS.4 IN</span><br />
+        <div style={{ padding: "12px 14px", background: T.accentDim, border: `1px solid ${T.accent}25`, borderRadius: 10, marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: T.accent, marginBottom: 5 }}>파이프라인 핵심 원리</div>
+          <div style={{ fontSize: 12, color: T.textSecondary, lineHeight: 1.8 }}>
+            <span style={{ color: T.accent, fontWeight: 600 }}>SYS.1 OUT</span> → <span style={{ color: T.purple, fontWeight: 600 }}>SYS.2 IN</span> → <span style={{ color: T.purple, fontWeight: 600 }}>SYS.2 OUT</span> → <span style={{ color: T.teal, fontWeight: 600 }}>SYS.3 IN</span> → …<br />
             각 단계 산출물이 자동으로 다음 단계의 입력이 됩니다.
           </div>
         </div>
@@ -2479,30 +2346,28 @@ function ProjectCard({ project, onClick, onDelete }) {
   return (
     <div onClick={onClick} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       style={{
-        padding: "20px 22px",
-        background: hov
-          ? "linear-gradient(135deg,rgba(17,24,39,0.95),rgba(30,41,59,0.9))"
-          : "linear-gradient(135deg,rgba(13,17,23,0.9),rgba(17,24,39,0.85))",
-        border: `1px solid ${hov ? "rgba(99,102,241,0.35)" : "rgba(255,255,255,0.07)"}`,
-        borderRadius: 14, cursor: "pointer", position: "relative",
-        transition: "all 0.2s ease",
-        transform: hov ? "translateY(-2px)" : "none",
-        boxShadow: hov ? "0 8px 32px rgba(99,102,241,0.12)" : "0 2px 8px rgba(0,0,0,0.2)"
+        padding: "18px 20px",
+        background: T.surface,
+        border: `1px solid ${hov ? T.accent + "40" : T.border}`,
+        borderRadius: 10, cursor: "pointer", position: "relative",
+        transition: "all 0.15s ease",
+        transform: hov ? "translateY(-1px)" : "none",
+        boxShadow: hov ? "0 4px 16px rgba(35,131,226,0.08)" : "0 1px 3px rgba(0,0,0,0.04)"
       }}>
       {onDelete && (
         <button onClick={e => { e.stopPropagation(); onDelete(project.id); }}
-          style={{ position: "absolute", top: 12, right: 12, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.2)", borderRadius: 6, width: 24, height: 24, color: "rgba(248,113,113,0.7)", cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}>✕</button>
+          style={{ position: "absolute", top: 12, right: 12, background: T.redDim, border: `1px solid ${T.redBorder}`, borderRadius: 5, width: 24, height: 24, color: T.red, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.12s" }}>✕</button>
       )}
       <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: "#e2e8f0", marginBottom: 4, letterSpacing: "-0.01em" }}>{project.name}</div>
-        <div style={{ fontSize: 12, color: "rgba(148,163,184,0.7)", lineHeight: 1.5 }}>{project.description}</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 4, letterSpacing: "-0.01em" }}>{project.name}</div>
+        <div style={{ fontSize: 13, color: T.textSecondary, lineHeight: 1.5 }}>{project.description}</div>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
-        <span style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", background: "rgba(99,102,241,0.15)", color: "#818cf8", borderRadius: 5, border: "1px solid rgba(99,102,241,0.25)", letterSpacing: "0.03em" }}>{project.domain}</span>
-        <span style={{ fontSize: 10, color: "rgba(148,163,184,0.4)" }}>{project.created_at ? new Date(project.created_at).toLocaleDateString("ko-KR") : ""}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
+        <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", background: T.accentDim, color: T.accent, borderRadius: 5, border: `1px solid ${T.accent}20` }}>{project.domain}</span>
+        <span style={{ fontSize: 11, color: T.muted }}>{project.created_at ? new Date(project.created_at).toLocaleDateString("ko-KR") : ""}</span>
       </div>
-      <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid rgba(255,255,255,0.05)" }}>
-        <span style={{ fontSize: 11, color: hov ? "#818cf8" : "rgba(99,102,241,0.6)", fontWeight: 600, transition: "color 0.2s" }}>파이프라인 열기 →</span>
+      <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.border}` }}>
+        <span style={{ fontSize: 12, color: hov ? T.accent : T.muted, fontWeight: 500, transition: "color 0.15s" }}>파이프라인 열기 →</span>
       </div>
     </div>
   );
@@ -2587,8 +2452,8 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
                   const procWPs = wpByProcess[proc.id] || [];
                   const isApproved = procWPs.some(w => w.status === "승인됨");
                   const hasDraft = procWPs.length > 0;
-                  const bg = isApproved ? proc.color : hasDraft ? "transparent" : "rgba(13,17,23,0.9)";
-                  const border = isApproved ? proc.color : hasDraft ? proc.color : "rgba(255,255,255,0.15)";
+                  const bg = isApproved ? proc.color : hasDraft ? "transparent" : T.surface;
+                  const border = isApproved ? proc.color : hasDraft ? proc.color : T.border;
                   const iconColor = isApproved ? "#fff" : hasDraft ? proc.color : T.muted;
                   const icon = isApproved ? "✓" : hasDraft ? "⏳" : proc.icon;
                   return (
@@ -2604,7 +2469,7 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
               </div>
               {idx < PROCESSES.length - 1 && (
                 <div style={{ width: 32, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-                  <div style={{ width: "100%", height: 2, background: wpByProcess[proc.id]?.length > 0 ? proc.color : "rgba(255,255,255,0.15)" }} />
+                  <div style={{ width: "100%", height: 2, background: wpByProcess[proc.id]?.length > 0 ? proc.color : T.border }} />
                   <div style={{ fontSize: 9, color: T.muted }}>OUT→IN</div>
                 </div>
               )}
@@ -2627,9 +2492,9 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
           const isGenerating = generatingId === proc.id;
 
           return (
-            <Card key={proc.id} className="pipeline-step" style={{ padding: 0, overflow: "hidden", border: `1px solid ${wps?.length ? proc.color + "44" : "rgba(255,255,255,0.08)"}` }}>
-              <div style={{ padding: "16px 20px", background: wps?.length ? proc.color + "0D" : "transparent", borderBottom: `1px solid rgba(255,255,255,0.07)`, display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 36, height: 36, borderRadius: 10, background: proc.color + "20", border: `1px solid ${proc.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: proc.color, flexShrink: 0 }}>{proc.icon}</div>
+            <Card key={proc.id} className="pipeline-step" style={{ padding: 0, overflow: "hidden", border: `1px solid ${wps?.length ? proc.color + "25" : T.border}` }}>
+              <div style={{ padding: "16px 20px", background: wps?.length ? proc.color + "10" : "transparent", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: proc.color + "15", border: `1px solid ${proc.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, fontWeight: 700, color: proc.color, flexShrink: 0 }}>{proc.icon}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: proc.color }}>{proc.label}</div>
                   <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{proc.desc}</div>
@@ -2641,9 +2506,9 @@ function PipelinePage({ project, workProducts, onRefresh, nav }) {
               </div>
 
               {wps?.length > 0 && (
-                <div style={{ padding: "12px 20px", borderBottom: `1px solid rgba(255,255,255,0.07)` }}>
+                <div style={{ padding: "12px 20px", borderBottom: `1px solid ${T.border}` }}>
                   {wps.map(wp => (
-                    <div key={wp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "rgba(17,24,39,0.5)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 8 }}>
+                    <div key={wp.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 12, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{wp.content?.title || proc.label}</div>
                         <div style={{ fontSize: 11, color: T.muted, marginTop: 2 }}>{proc.outputSummary(wp.content)}</div>
@@ -2718,9 +2583,9 @@ function WPDetailModal({ wpData, project, allWorkProducts, onClose }) {
   const { wp, proc } = wpData;
   const [tab, setTab] = useState("content");
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{ background: "rgba(13,17,23,0.9)", border: `1px solid rgba(255,255,255,0.07)`, borderRadius: 18, width: "100%", maxWidth: 780, maxHeight: "92vh", display: "flex", flexDirection: "column", animation: "fadeIn .25s ease" }}>
-        <div style={{ padding: "18px 24px", borderBottom: `1px solid rgba(255,255,255,0.07)`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 14, width: "100%", maxWidth: 780, maxHeight: "92vh", display: "flex", flexDirection: "column", animation: "fadeIn .25s ease" }}>
+        <div style={{ padding: "18px 24px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center", flexShrink: 0 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <Badge color={proc.color}>{proc.id}</Badge>
             <span style={{ fontSize: 14, fontWeight: 700 }}>{wp.content?.title || proc.label}</span>
@@ -2732,10 +2597,10 @@ function WPDetailModal({ wpData, project, allWorkProducts, onClose }) {
             <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, cursor: "pointer", fontSize: 20 }}>✕</button>
           </div>
         </div>
-        <div style={{ display: "flex", gap: 2, padding: "10px 24px 0", flexShrink: 0, borderBottom: `1px solid rgba(255,255,255,0.07)` }}>
+        <div style={{ display: "flex", gap: 2, padding: "10px 24px 0", flexShrink: 0, borderBottom: `1px solid ${T.border}` }}>
           {[["content", "산출물 내용"], ["raw", "Raw JSON"]].map(([id, label]) => (
             <button key={id} onClick={() => setTab(id)}
-              style={{ padding: "7px 16px", borderRadius: "8px 8px 0 0", fontSize: 12, fontWeight: tab === id ? 700 : 400, background: tab === id ? "rgba(9,11,15,0.8)" : "transparent", color: tab === id ? T.text : T.muted, border: `1px solid ${tab === id ? "rgba(255,255,255,0.1)" : "transparent"}`, borderBottom: "none", cursor: "pointer", fontFamily: "inherit" }}>
+              style={{ padding: "7px 16px", borderRadius: "8px 8px 0 0", fontSize: 12, fontWeight: tab === id ? 700 : 400, background: tab === id ? T.surface2 : "transparent", color: tab === id ? T.text : T.muted, border: `1px solid ${tab === id ? T.border : "transparent"}`, borderBottom: "none", cursor: "pointer", fontFamily: "inherit" }}>
               {label}
             </button>
           ))}
@@ -2760,7 +2625,7 @@ function WPResultViewer({ wp, process: proc }) {
   const renderArray = (arr, fields) => {
     if (!arr?.length) return <div style={{ color: T.muted, fontSize: 12, padding: "8px 0" }}>데이터 없음</div>;
     return arr.map((item, i) => (
-      <div key={i} style={{ padding: "12px 14px", background: "rgba(17,24,39,0.5)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)", marginBottom: 8 }}>
+      <div key={i} style={{ padding: "12px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
         {fields.map(f => item[f] !== undefined && (
           <div key={f} style={{ marginBottom: 5, display: "flex", gap: 8, alignItems: "flex-start" }}>
             <span style={{ fontSize: 10, color: T.muted, fontWeight: 700, textTransform: "uppercase", minWidth: 80, flexShrink: 0, paddingTop: 1 }}>{f}:</span>
@@ -2849,7 +2714,7 @@ function QAResultView({ qa, onFixRequest }) {
           ["일관성", qa.consistency?.score, T.purple],
           ["추적성", qa.traceability?.score, T.teal]
         ].map(([label, val, color]) => (
-          <div key={label} style={{ padding: "12px 14px", background: "linear-gradient(135deg, rgba(17,24,39,0.9), rgba(30,41,59,0.8))", borderRadius: 12, border: "1px solid rgba(255,255,255,0.08)", textAlign: "center", boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
+          <div key={label} style={{ padding: "12px 14px", background: T.surface2, borderRadius: 12, border: `1px solid ${T.border}`, textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
             <div style={{ fontSize: 10, color: T.muted, marginBottom: 4 }}>{label}</div>
             <div style={{ fontSize: 22, fontWeight: 700, color }}>{val ?? "—"}</div>
           </div>
@@ -2866,8 +2731,8 @@ function QAResultView({ qa, onFixRequest }) {
             const st = issueStates[i] || {};
             return (
               <div key={i} style={{
-                padding: "12px 14px", background: st.skip ? "rgba(17,24,39,0.5)" : st.checked ? "rgba(99,102,241,0.08)" : "rgba(17,24,39,0.7)",
-                borderRadius: 10, border: `1px solid ${st.checked ? "rgba(99,102,241,0.4)" : st.skip ? "rgba(255,255,255,0.03)" : "rgba(255,255,255,0.06)"}`,
+                padding: "12px 14px", background: st.skip ? T.surface2 : st.checked ? T.accentGlow : T.surface2,
+                borderRadius: 10, border: `1px solid ${st.checked ? `${T.accent}50` : st.skip ? T.border : T.border}`,
                 marginBottom: 10, opacity: st.skip ? 0.5 : 1, transition: "all .2s"
               }}>
                 {/* 이슈 헤더 */}
@@ -2875,7 +2740,7 @@ function QAResultView({ qa, onFixRequest }) {
                   {/* 수정 체크박스 */}
                   <input type="checkbox" checked={!!st.checked} disabled={st.skip}
                     onChange={() => toggleCheck(i)}
-                    style={{ marginTop: 2, cursor: "pointer", width: 15, height: 15, accentColor: "#6366f1" }} />
+                    style={{ marginTop: 2, cursor: "pointer", width: 15, height: 15, accentColor: "#2383E2" }} />
                   <div style={{ flex: 1 }}>
                     <div style={{ display: "flex", gap: 6, marginBottom: 4, flexWrap: "wrap" }}>
                       <SeverityBadge severity={issue.severity} />
@@ -2890,8 +2755,8 @@ function QAResultView({ qa, onFixRequest }) {
                   </div>
                   {/* 수정 안 함 토글 */}
                   <button onClick={() => toggleSkip(i)} style={{
-                    background: st.skip ? "rgba(245,158,11,0.15)" : "rgba(255,255,255,0.04)",
-                    border: `1px solid ${st.skip ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.1)"}`,
+                    background: st.skip ? T.amberDim : T.border,
+                    border: `1px solid ${st.skip ? "rgba(245,158,11,0.4)" : T.border}`,
                     borderRadius: 6, padding: "3px 8px", fontSize: 10,
                     color: st.skip ? T.amber : T.muted, cursor: "pointer", whiteSpace: "nowrap"
                   }}>
@@ -2901,7 +2766,7 @@ function QAResultView({ qa, onFixRequest }) {
 
                 {/* 지시사항 입력창 — 체크된 항목만 표시 */}
                 {st.checked && !st.skip && (
-                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid rgba(255,255,255,0.07)` }}>
+                  <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${T.border}` }}>
                     <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>
                       수정 지시사항 (비워두면 QA 권장사항 기반으로 Claude가 판단)
                     </div>
@@ -2911,8 +2776,8 @@ function QAResultView({ qa, onFixRequest }) {
                       placeholder={`예: "${issue.recommendation || "구체적인 수정 내용을 입력하세요"}"`}
                       style={{
                         width: "100%", minHeight: 60, padding: "8px 10px",
-                        background: "rgba(9,11,15,0.8)", border: "1px solid rgba(99,102,241,0.4)",
-                        borderRadius: 8, color: "#e2e8f0", fontSize: 12, resize: "vertical",
+                        background: T.surface2, border: `1px solid ${T.accent}35`,
+                        borderRadius: 8, color: T.text, fontSize: 12, resize: "vertical",
                         fontFamily: "inherit", boxSizing: "border-box"
                       }}
                     />
@@ -2934,7 +2799,7 @@ function QAResultView({ qa, onFixRequest }) {
       )}
 
       {/* Gemini 권장 */}
-      <div style={{ padding: "10px 14px", background: "rgba(17,24,39,0.6)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.06)" }}>
+      <div style={{ padding: "10px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
         <span style={{ fontSize: 11, color: T.muted, marginRight: 8 }}>Gemini 권장:</span>
         <span style={{ fontSize: 13, fontWeight: 700, color: qa.recommendation?.includes("승인") ? T.green : T.amber }}>
           {qa.recommendation}
@@ -2983,15 +2848,15 @@ ${instruction}`;
   }
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 9999, backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "linear-gradient(135deg, #111827, #1a2235)", borderRadius: 16, padding: 24, width: "min(600px,95vw)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", maxHeight: "85vh", overflowY: "auto", border: `1px solid rgba(255,255,255,0.07)` }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 9999, backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: T.surface, borderRadius: 12, padding: 24, width: "min(600px,95vw)", border: `1px solid ${T.border}`, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", maxHeight: "85vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>✦ Claude에게 수정 요청</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
         </div>
 
         {/* 현재 항목 요약 */}
-        <div style={{ padding: "10px 12px", background: "rgba(9,11,15,0.8)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.07)", marginBottom: 14, fontSize: 12 }}>
+        <div style={{ padding: "10px 12px", background: T.surface2, borderRadius: 8, border: `1px solid ${T.border}`, marginBottom: 14, fontSize: 12 }}>
           <div style={{ fontWeight: 700, color: T.accent, marginBottom: 4 }}>{item.id || fieldLabel}</div>
           {item.title && <div style={{ marginBottom: 2 }}>{item.title}</div>}
           {item.description && <div style={{ color: T.muted, fontSize: 11 }}>{String(item.description).slice(0, 120)}...</div>}
@@ -3004,8 +2869,8 @@ ${instruction}`;
             value={instruction}
             onChange={e => setInstruction(e.target.value)}
             placeholder="예: description에 온도 범위 -40°C~85°C 조건을 추가해주세요"
-            style={{ width: "100%", minHeight: 80, padding: "10px 12px", background: "rgba(9,11,15,0.8)",
-              border: "1px solid rgba(99,102,241,0.4)", borderRadius: 8, color: "#e2e8f0", fontSize: 13,
+            style={{ width: "100%", minHeight: 80, padding: "10px 12px", background: T.surface2,
+              border: `1px solid ${T.accent}35`, borderRadius: 8, color: T.text, fontSize: 13,
               resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
           />
         </div>
@@ -3026,9 +2891,9 @@ ${instruction}`;
               const origV = item[k];
               const changed = JSON.stringify(v) !== JSON.stringify(origV);
               return (
-                <div key={k} style={{ marginBottom: 8, padding: "8px 10px", background: changed ? "rgba(16,185,129,0.1)" : "rgba(9,11,15,0.7)", borderRadius: 6, border: `1px solid ${changed ? "rgba(16,185,129,0.3)" : "rgba(255,255,255,0.06)"}` }}>
+                <div key={k} style={{ marginBottom: 8, padding: "8px 10px", background: changed ? "rgba(16,185,129,0.1)" : T.surface2, borderRadius: 6, border: `1px solid ${changed ? `${T.green}40` : T.border}` }}>
                   <div style={{ fontSize: 10, color: T.muted, marginBottom: 2 }}>{k} {changed && <span style={{ color: T.green }}>● 수정됨</span>}</div>
-                  {changed && <div style={{ fontSize: 11, color: T.red + "cc", textDecoration: "line-through", marginBottom: 2 }}>{String(origV ?? "")}</div>}
+                  {changed && <div style={{ fontSize: 11, color: T.red, textDecoration: "line-through", marginBottom: 2 }}>{String(origV ?? "")}</div>}
                   <div style={{ fontSize: 12 }}>{typeof v === "object" ? JSON.stringify(v) : String(v ?? "")}</div>
                 </div>
               );
@@ -3068,8 +2933,8 @@ function ItemEditModal({ item, onSave, onClose }) {
   const skipKeys = ["id"];
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 9999, backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "linear-gradient(135deg, #111827, #1a2235)", borderRadius: 16, padding: 24, width: "min(600px,95vw)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", maxHeight: "85vh", overflowY: "auto", border: `1px solid rgba(255,255,255,0.07)` }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 9999, backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: T.surface, borderRadius: 12, padding: 24, width: "min(600px,95vw)", border: `1px solid ${T.border}`, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", maxHeight: "85vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>항목 직접 편집</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
@@ -3080,8 +2945,8 @@ function ItemEditModal({ item, onSave, onClose }) {
               <div style={{ fontSize: 11, color: T.muted, marginBottom: 4, textTransform: "uppercase" }}>{k}</div>
               <textarea value={v} onChange={e => setField(k, e.target.value)}
                 style={{ width: "100%", minHeight: v.length > 100 ? 100 : 44, padding: "8px 10px",
-                  background: "rgba(9,11,15,0.7)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8,
-                  color: "#e2e8f0", fontSize: 12, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
+                  background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 8,
+                  color: T.text, fontSize: 12, resize: "vertical", fontFamily: "inherit", boxSizing: "border-box" }}
               />
             </div>
           ))}
@@ -3125,8 +2990,8 @@ function FixPreviewModal({ original, fixed, onApply, onEditItem, onClose }) {
   const changes = findChangedItems();
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)", zIndex: 9998, backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: "linear-gradient(135deg, #111827, #1a2235)", borderRadius: 16, padding: 24, width: "min(700px,95vw)", border: "1px solid rgba(255,255,255,0.08)", boxShadow: "0 24px 64px rgba(0,0,0,0.5)", maxHeight: "88vh", overflowY: "auto", border: `1px solid rgba(255,255,255,0.07)` }}>
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 9998, backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ background: T.surface, borderRadius: 12, padding: 24, width: "min(700px,95vw)", border: `1px solid ${T.border}`, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", maxHeight: "88vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>✦ Claude 수정 결과 미리보기</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
@@ -3140,7 +3005,7 @@ function FixPreviewModal({ original, fixed, onApply, onEditItem, onClose }) {
               총 {changes.length}개 항목이 수정되었습니다. 확인 후 적용하세요.
             </div>
             {changes.map((ch, i) => (
-              <div key={i} style={{ background: "rgba(9,11,15,0.7)", borderRadius: 10, border: "1px solid rgba(99,102,241,0.2)", padding: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.2)" }}>
+              <div key={i} style={{ background: T.surface2, borderRadius: 10, border: "1px solid rgba(99,102,241,0.2)", padding: 14, boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: T.accent }}>
                     [{ch.field}] {ch.fixed?.id || `항목 ${ch.index + 1}`}
@@ -3156,7 +3021,7 @@ function FixPreviewModal({ original, fixed, onApply, onEditItem, onClose }) {
                   return (
                     <div key={k} style={{ marginBottom: 6 }}>
                       <div style={{ fontSize: 10, color: T.muted, marginBottom: 2 }}>{k}</div>
-                      <div style={{ fontSize: 11, color: T.red + "cc", textDecoration: "line-through", marginBottom: 2 }}>
+                      <div style={{ fontSize: 11, color: T.red, textDecoration: "line-through", marginBottom: 2 }}>
                         {String(origV ?? "")}
                       </div>
                       <div style={{ fontSize: 11, color: T.green }}>
@@ -3395,7 +3260,7 @@ ${fixInstructions}
             const proc = PROCESSES.find(p => p.id === wp.process_id);
             return (
               <div key={wp.id} onClick={() => selectWP(wp)}
-                style={{ padding: "12px 14px", borderRadius: 10, border: `1px solid ${selected?.id === wp.id ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.06)"}`, background: selected?.id === wp.id ? "rgba(99,102,241,0.1)" : "rgba(17,24,39,0.5)", cursor: "pointer", transition: "all .2s", marginBottom: 8 }}>
+                style={{ padding: "12px 14px", borderRadius: 10, border: `1px solid ${selected?.id === wp.id ? `${T.accent}60` : T.border}`, background: selected?.id === wp.id ? T.accentGlow : T.surface2, cursor: "pointer", transition: "all .2s", marginBottom: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
                   <span style={{ fontWeight: 600, fontSize: 13 }}>{wp.content?.title || wp.process_id}</span>
                   <StatusBadge status={wp.status} />
@@ -3450,7 +3315,7 @@ ${fixInstructions}
 
               {/* 산출물 항목 직접 수정 섹션 */}
               {selected && (
-                <div style={{ marginTop: 16, borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 16 }}>
+                <div style={{ marginTop: 16, borderTop: `1px solid ${T.border}`, paddingTop: 16 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>
                       📋 산출물 항목 직접 수정
@@ -3477,8 +3342,8 @@ ${fixInstructions}
                             </div>
                           )}
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-                            padding: "8px 12px", background: "rgba(17,24,39,0.6)", borderRadius: 8,
-                            border: "1px solid rgba(255,255,255,0.06)", transition: "all 0.15s ease", marginBottom: 6 }}>
+                            padding: "8px 12px", background: T.surface2, borderRadius: 8,
+                            border: `1px solid ${T.border}`, transition: "all 0.15s ease", marginBottom: 6 }}>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <span style={{ fontSize: 12, fontWeight: 600, color: T.accent }}>
                                 {item.id || `${label} ${index + 1}`}
@@ -3598,7 +3463,7 @@ function TraceabilityPage({ project, wps }) {
             <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>커버리지</h2>
             <div className="grid3" style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
               {Object.entries(result.coverage || {}).map(([k, v]) => (
-                <div key={k} style={{ padding: "10px 14px", background: "rgba(9,11,15,0.7)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.07)" }}>
+                <div key={k} style={{ padding: "10px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}` }}>
                   <div style={{ fontSize: 11, color: T.muted, marginBottom: 4 }}>{k.replace(/_/g, " ").toUpperCase()}</div>
                   <div style={{ fontSize: 13, fontWeight: 600, color: String(v).includes("100%") ? T.green : T.amber }}>{v}</div>
                 </div>
@@ -3611,7 +3476,7 @@ function TraceabilityPage({ project, wps }) {
               {(result.forward_chain || []).map((link, i) => {
                 const relColor = { SATISFIES: T.accent, REFINES: T.purple, DERIVES: T.purple, ALLOCATED_TO: T.teal, VERIFIED_BY: T.green, TESTED_BY: T.amber }[link.relation] || T.muted;
                 return (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(9,11,15,0.7)", borderRadius: 8, border: "1px solid rgba(255,255,255,0.06)", fontSize: 12 }}>
+                  <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: T.surface2, borderRadius: 8, border: `1px solid ${T.border}`, fontSize: 12 }}>
                     <span style={{ color: T.accent, fontFamily: "JetBrains Mono, monospace", fontWeight: 600 }}>{link.from}</span>
                     <span style={{ color: T.muted }}>→</span>
                     <Badge color={relColor}>{link.relation}</Badge>
@@ -3624,7 +3489,7 @@ function TraceabilityPage({ project, wps }) {
           <Card style={{ padding: 20 }}>
             <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 14 }}>V-Model 매핑</h2>
             {(result.v_model_mapping || []).map((m, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: "rgba(9,11,15,0.7)", borderRadius: 10, border: "1px solid rgba(255,255,255,0.07)", marginBottom: 8 }}>
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: T.surface2, borderRadius: 10, border: `1px solid ${T.border}`, marginBottom: 8 }}>
                 <span style={{ fontSize: 12, color: T.accent, fontWeight: 600, flex: 1 }}>{m.left}</span>
                 <span style={{ color: T.muted, fontSize: 14 }}>{m.relation}</span>
                 <span style={{ fontSize: 12, color: T.accent, fontWeight: 600, flex: 1, textAlign: "right" }}>{m.right}</span>
