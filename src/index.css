@@ -1,0 +1,126 @@
+/* ─────────────────────────────────────────────────────────────
+   ASPICE AI Platform — Global Styles
+   화면설계서 v2.4 디자인 토큰 기반
+   ───────────────────────────────────────────────────────────── */
+
+:root {
+  /* Brand Colors */
+  --c-navy-deep: #1E2761;
+  --c-navy-dark: #0F1838;
+  --c-navy-mid: #3A4B8C;
+  --c-blue-light: #5A6FB3;
+  --c-blue-pale: #7D8FC9;
+  --c-ice: #CADCFC;
+  --c-coral: #F96167;
+
+  /* Surfaces */
+  --c-bg: #FFFFFF;
+  --c-bg-soft: #F7F9FC;
+  --c-bg-mid: #E5E9F0;
+  --c-bg-strong: #D5DCE8;
+
+  /* Text */
+  --c-text: #1A1A2E;
+  --c-text-soft: #4B5563;
+  --c-text-muted: #6B7280;
+
+  /* Borders */
+  --c-border: #E5E9F0;
+  --c-border-strong: #D5DCE8;
+
+  /* Process Colors (per process domain) */
+  --c-sys: #1E2761;
+  --c-swe: #6940A5;
+
+  /* Status colors */
+  --c-status-gen: #2383E2;
+  --c-status-qa: #F59E0B;
+  --c-status-approved: #10B981;
+  --c-status-rejected: #DC2626;
+
+  /* Severity */
+  --c-sev-critical: #DC2626;
+  --c-sev-major: #F59E0B;
+  --c-sev-minor: #FBBF24;
+  --c-sev-info: #60A5FA;
+
+  /* Typography */
+  --font-sans: "Noto Sans KR", "맑은 고딕", "Malgun Gothic", -apple-system,
+               BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+
+  /* Layout */
+  --shell-header-h: 56px;
+  --shell-sidebar-w: 240px;
+  --shell-topbar-h: 60px;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  /* Shadow */
+  --shadow-sm: 0 1px 2px rgba(15, 24, 56, 0.04);
+  --shadow-md: 0 2px 8px rgba(15, 24, 56, 0.06);
+  --shadow-lg: 0 8px 24px rgba(15, 24, 56, 0.10);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: var(--font-sans);
+  color: var(--c-text);
+  background: var(--c-bg-soft);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+a {
+  color: var(--c-status-gen);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* Loading spinner */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--c-bg-strong);
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--c-text-muted);
+}
