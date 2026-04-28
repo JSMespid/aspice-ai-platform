@@ -1,0 +1,80 @@
+{
+  "id": "v-model-tracing-sys5-001",
+  "process": "SYS.5",
+  "memo": "★ 대표님 정정 사항 ★ — SYS.5 적격성 테스트는 SYS-REQ를 primary로 추적, STK-REQ는 reference만",
+
+  "input": {
+    "project": {"name": "헤드램프 빔 제어", "domain": "자동차 부품"},
+    "context": "최종 검증 환경: 정부 공인 시험소, ECE R48 인증",
+    "prev_contents": {
+      "SYS.2": {
+        "process": "SYS.2",
+        "title": "Headlamp System Requirements",
+        "requirements": [
+          {"id": "SYS-REQ-F-001", "title": "전방 차량 감지 (100m)",
+           "type": "Functional", "source_stk_req": ["STK-REQ-001"],
+           "priority": "High", "relation_type": "REFINES",
+           "description": "The system shall detect oncoming vehicles within 100m range using camera input."},
+          {"id": "SYS-REQ-F-002", "title": "빔 전환 응답시간 (0.5s)",
+           "type": "Functional", "source_stk_req": ["STK-REQ-001"],
+           "priority": "High", "relation_type": "REFINES",
+           "description": "The system shall switch from high beam to low beam within 0.5 seconds when an oncoming vehicle is detected."}
+        ],
+        "verification_criteria": [
+          {"id": "VC-001", "req_id": "SYS-REQ-F-001",
+           "method": "Test", "acceptance_criteria": "100m 거리 차량 감지율 > 95%"},
+          {"id": "VC-002", "req_id": "SYS-REQ-F-002",
+           "method": "Test", "acceptance_criteria": "응답시간 < 500ms"}
+        ]
+      },
+      "SYS.3": {
+        "process": "SYS.3",
+        "system_elements": [
+          {"id": "SE-001", "name": "Camera ECU"},
+          {"id": "SE-002", "name": "Beam Controller"}
+        ]
+      }
+    }
+  },
+
+  "expected_invariants": {
+    "structural": {
+      "min_test_cases": 2,
+      "id_patterns": {"test_cases": "^STC-\\d{3}$"}
+    },
+    "v_model_tracing": {
+      "system_requirements_must_be_present": true,
+      "system_requirements_id_pattern": "^SYS-REQ-(F|NF)-\\d{3}$",
+      "verification_criteria_must_be_present": true,
+      "verification_criteria_id_pattern": "^VC-\\d{3}$",
+      "reference_stk_req_optional_but_pattern_if_present": "^STK-REQ-\\d{3}$",
+      "every_sys_req_must_be_tested": true
+    }
+  },
+
+  "adversarial_tests": [
+    {
+      "name": "primary_trace_is_sys_req",
+      "description": "★ 가장 중요 ★ test_cases[].system_requirements[]가 SYS-REQ-* 패턴이어야 함",
+      "severity": "Critical",
+      "memo": "kennylee 대표님 2026-03-31 지적"
+    },
+    {
+      "name": "stk_req_only_as_reference",
+      "description": "STK-REQ-*는 reference_stk_req 필드에만 등장 가능, 다른 곳에 등장하면 위반",
+      "severity": "Critical"
+    },
+    {
+      "name": "vc_must_exist",
+      "description": "모든 verification_criteria의 VC-xxx가 SYS.2 산출물에 실제로 존재해야 함",
+      "severity": "Critical"
+    },
+    {
+      "name": "complete_coverage",
+      "description": "SYS.2 requirements의 모든 항목이 최소 1개 테스트로 커버되어야 함",
+      "severity": "Major"
+    }
+  ],
+
+  "minimum_score": 1.0
+}

@@ -1,0 +1,72 @@
+{
+  "id": "v-model-tracing-sys4-001",
+  "process": "SYS.4",
+  "memo": "★ 대표님 정정 사항 ★ — SYS.4 통합 테스트는 Interface를 직접 추적해야 함 (STK-REQ 직접 추적 금지)",
+
+  "input": {
+    "project": {
+      "name": "헤드램프 빔 제어",
+      "domain": "자동차 부품"
+    },
+    "context": "통합 테스트 환경: HIL 시뮬레이터 + 실차 시험",
+    "prev_contents": {
+      "SYS.3": {
+        "process": "SYS.3",
+        "title": "Headlamp System Architecture",
+        "system_elements": [
+          {"id": "SE-001", "name": "Camera ECU", "type": "HW",
+           "allocated_requirements": ["SYS-REQ-F-001"]},
+          {"id": "SE-002", "name": "Beam Controller", "type": "SW",
+           "allocated_requirements": ["SYS-REQ-F-002"]},
+          {"id": "SE-003", "name": "Headlamp Module", "type": "Mechanical",
+           "allocated_requirements": ["SYS-REQ-F-003"]}
+        ],
+        "interfaces": [
+          {"id": "IF-001", "name": "Vehicle Detection Signal",
+           "source": "SE-001", "target": "SE-002", "type": "Data",
+           "specification": "CAN 프로토콜, 100ms 주기"},
+          {"id": "IF-002", "name": "Beam Switch Command",
+           "source": "SE-002", "target": "SE-003", "type": "Control",
+           "specification": "PWM 신호, 0~100%"}
+        ]
+      }
+    }
+  },
+
+  "expected_invariants": {
+    "structural": {
+      "min_test_cases": 2,
+      "id_patterns": {
+        "test_cases": "^ITC-\\d{3}$"
+      }
+    },
+    "v_model_tracing": {
+      "primary_target_must_be_interface": true,
+      "primary_target_id_pattern": "^IF-\\d{3}$",
+      "must_NOT_directly_trace_to_stk_req": true,
+      "must_NOT_directly_trace_to_sys_req": true,
+      "integrated_elements_must_exist": true
+    }
+  },
+
+  "adversarial_tests": [
+    {
+      "name": "interface_primary_target",
+      "description": "★ 가장 중요 ★ test_cases[].primary_target.interface_id 가 IF-* 패턴이어야 함",
+      "severity": "Critical",
+      "memo": "kennylee 대표님 2026-03-31 지적 — V-Model 정정 사항"
+    },
+    {
+      "name": "no_direct_stk_req_trace",
+      "description": "통합 테스트 결과에 stk_req 또는 stakeholder_req 필드가 직접 등장하면 안 됨",
+      "severity": "Critical"
+    },
+    {
+      "name": "elements_must_be_real",
+      "description": "integrated_elements의 모든 SE-xxx가 실제 SYS.3에 존재해야 함",
+      "severity": "Critical"
+    }
+  ],
+
+  "minimum_score": 1.0
+}

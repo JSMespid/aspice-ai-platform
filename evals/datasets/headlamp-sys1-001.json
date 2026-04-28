@@ -1,0 +1,54 @@
+{
+  "id": "headlamp-sys1-001",
+  "process": "SYS.1",
+  "memo": "대표님채팅 헤드램프 시나리오 — 환각 방지 기준 검증용",
+
+  "input": {
+    "project": {
+      "name": "헤드램프 빔 제어",
+      "domain": "자동차 부품"
+    },
+    "context": "전방 카메라 기반 자동 하이빔 제어 시스템.\n이해관계자: 운전자, OEM, ECE R48 법규 기관.\n주요 요구: 야간 가시성 확보, 마주오는 차량 눈부심 방지, 코너링 대응.",
+    "prev_contents": {}
+  },
+
+  "expected_invariants": {
+    "structural": {
+      "min_needs": 3,
+      "max_needs": 5,
+      "min_requirements": 4,
+      "max_requirements": 6,
+      "id_patterns": {
+        "needs": "^N-\\d{3}$",
+        "requirements": "^STK-REQ-\\d{3}$"
+      }
+    },
+    "domain": {
+      "forbidden_terms_zero_count": ["fast", "good", "many", "some", "appropriate"],
+      "shall_keyword_required_in": "requirements.description",
+      "automotive_terms_present": ["빔", "헤드램프", "운전자", "차량"]
+    },
+    "traceability": {
+      "every_requirement_traces_to_need": true,
+      "no_orphan_needs": true,
+      "no_broken_references": true
+    },
+    "semantic": {
+      "needs_must_be_distinct": true,
+      "no_duplicate_ids": true,
+      "no_AND_OR_in_single_requirement": true
+    }
+  },
+
+  "minimum_score": 0.85,
+  "adversarial_tests": [
+    {
+      "name": "no_vague_timing",
+      "description": "타이밍을 '빠르게' 같은 모호한 표현으로 정의하면 안 됨"
+    },
+    {
+      "name": "no_combined_requirements",
+      "description": "한 요구사항이 두 개 책임을 결합하면 안 됨 (atomicity)"
+    }
+  ]
+}
