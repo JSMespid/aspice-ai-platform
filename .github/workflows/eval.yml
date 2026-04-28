@@ -1,0 +1,106 @@
+name: ASPICE Eval Harness
+
+# 환각 방지 축 — Regression Gate
+# PR이 환각 방지 가드레일을 약화시키면 자동으로 차단합니다.
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'api/**'
+      - 'evals/**'
+  workflow_dispatch:  # 수동 실행 허용
+
+jobs:
+  eval-harness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (smoke test)
+        run: npm run build
+
+      - name: Start dev server
+        run: |
+          npm run dev > server.log 2>&1 &
+          echo "SERVER_PID=$!" >> $GITHUB_ENV
+          # Wait for server to be ready
+          for i in {1..30}; do
+            if curl -s http://localhost:3000 > /dev/null; then
+              echo "Server ready"
+              break
+            fi
+            sleep 1
+          done
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Run Eval Harness
+        id: eval
+        run: |
+          set +e
+          node evals/runner.js
+          EVAL_EXIT=$?
+          echo "EVAL_EXIT=$EVAL_EXIT" >> $GITHUB_ENV
+          exit $EVAL_EXIT
+        env:
+          API_BASE_URL: http://localhost:3000
+
+      - name: Stop server
+        if: always()
+        run: kill $SERVER_PID || true
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: evals/results/
+          retention-days: 30
+
+      - name: Comment on PR with results
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const dir = 'evals/results';
+            if (!fs.existsSync(dir)) return;
+            const files = fs.readdirSync(dir).filter(f => f.endsWith('.json')).sort();
+            if (files.length === 0) return;
+            const latest = JSON.parse(fs.readFileSync(path.join(dir, files[files.length - 1])));
+            const summary = latest.summary;
+            const emoji = summary.passed === summary.total ? '✅' : '❌';
+            const body = `## ${emoji} Eval Harness Results
+
+            **${summary.passed}/${summary.total}** datasets passed
+            **Average score:** ${(summary.avg_score * 100).toFixed(1)}점
+            **Duration:** ${summary.duration_sec}s
+
+            ${latest.results.map(r =>
+              `- ${r.passed ? '✅' : '❌'} \`${r.dataset_id}\` (${r.process}) — ${(r.score * 100).toFixed(0)}점`
+            ).join('\n')}
+
+            ---
+            ${summary.passed === summary.total
+              ? '환각 방지 가드레일이 모두 정상 작동합니다.'
+              : '⚠️ 환각 방지 가드레일이 약화되었습니다. 머지를 차단합니다.'}`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
