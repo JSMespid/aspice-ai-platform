@@ -15,10 +15,11 @@ const SYS_PROCESSES = {
     desc: "이해관계자 니즈를 수집하여 요구사항으로 정의합니다.",
     inputLabel: "프로젝트 배경 / 이해관계자 니즈",
     inputPlaceholder: "예: 전방 카메라 기반 자동 하이빔 제어\n이해관계자: 운전자, OEM, 법규 기관\n주요 요구: 야간 가시성 확보, 눈부심 방지",
+    // 화면설계서 v2.4 슬라이드 12, 15 명시: SW 요구사항 / HW 요구사항 / SOW
     items: [
-      { key: "stk_req",  label: "이해관계자 요구사항", required: true,  inputType: "File+Text" },
-      { key: "use_case", label: "Use Case",         required: false, inputType: "File+Text" },
-      { key: "context",  label: "운영 맥락",         required: false, inputType: "Text" },
+      { key: "sw_req", label: "SW 요구사항", required: true,  inputType: "File+Text" },
+      { key: "hw_req", label: "HW 요구사항", required: true,  inputType: "File+Text" },
+      { key: "sow",    label: "SOW",         required: true,  inputType: "File+Text" },
     ],
     dependencies: [],
     outputSchema: {
@@ -109,11 +110,9 @@ const SYS_PROCESSES = {
     desc: "STK-REQ를 시스템 요구사항과 검증 기준으로 변환합니다.",
     inputLabel: "이전 단계 산출물 자동 주입 + 추가 기술 맥락",
     inputPlaceholder: "SYS.1 산출물이 자동으로 주입됩니다.\n추가 기술 제약이 있으면 입력하세요.",
-    items: [
-      { key: "sys_req_f",   label: "기능 요구사항",   required: true,  inputType: "File+Text" },
-      { key: "sys_req_nf",  label: "비기능 요구사항", required: true,  inputType: "File+Text" },
-      { key: "constraints", label: "제약사항",       required: false, inputType: "Text" },
-    ],
+    // 화면설계서 v2.4 슬라이드 17: "4개" 정의되어 있으나 구체 항목명 미명시
+    // → Phase 3 SCR-06 설정 화면에서 대표님 검토 후 정의
+    items: [],
     dependencies: ["SYS.1"],
     outputSchema: {
       type: "object",
@@ -214,11 +213,8 @@ const SYS_PROCESSES = {
     desc: "SYS-REQ를 시스템 요소에 할당하고 아키텍처를 설계합니다.",
     inputLabel: "이전 단계 산출물 자동 주입 + 아키텍처 제약",
     inputPlaceholder: "SYS.2 산출물이 자동으로 주입됩니다.\n하드웨어 제약, 플랫폼 정보 등을 입력하세요.",
-    items: [
-      { key: "elements",   label: "시스템 요소",     required: true, inputType: "File+Text" },
-      { key: "interfaces", label: "인터페이스 정의", required: true, inputType: "File+Text" },
-      { key: "allocation", label: "할당 매트릭스",   required: false, inputType: "Text" },
-    ],
+    // 화면설계서 v2.4 슬라이드 17: "5개" 정의되어 있으나 구체 항목명 미명시
+    items: [],
     dependencies: ["SYS.2"],
     outputSchema: {
       type: "object",
@@ -311,11 +307,8 @@ const SYS_PROCESSES = {
     desc: "★ V-Model 정정사항 ★ — Interface를 직접 추적합니다.",
     inputLabel: "이전 단계 산출물 자동 주입 + 테스트 환경",
     inputPlaceholder: "SYS.3 산출물이 자동으로 주입됩니다.\n테스트 환경, 장비 정보를 입력하세요.",
-    items: [
-      { key: "test_plan",  label: "통합 테스트 계획", required: true, inputType: "File+Text" },
-      { key: "test_cases", label: "테스트 케이스",     required: true, inputType: "File+Text" },
-      { key: "test_env",   label: "테스트 환경",       required: false, inputType: "Text" },
-    ],
+    // 화면설계서 v2.4 슬라이드 17: "2개" 정의되어 있으나 구체 항목명 미명시
+    items: [],
     dependencies: ["SYS.3"],
     outputSchema: {
       type: "object",
@@ -400,11 +393,8 @@ const SYS_PROCESSES = {
     desc: "★ V-Model 정정사항 ★ — SYS-REQ를 primary로 추적합니다.",
     inputLabel: "이전 단계 산출물 자동 주입 + 검증 기준",
     inputPlaceholder: "SYS.2, SYS.3 산출물이 자동으로 주입됩니다.\n검증 환경, 법규 기준을 입력하세요.",
-    items: [
-      { key: "qual_plan",  label: "적격성 시험 계획",   required: true, inputType: "File+Text" },
-      { key: "qual_cases", label: "적격성 시험 케이스", required: true, inputType: "File+Text" },
-      { key: "regulation", label: "법규/표준",          required: false, inputType: "Text" },
-    ],
+    // 화면설계서 v2.4 슬라이드 17: "0개" — 미정의
+    items: [],
     dependencies: ["SYS.2", "SYS.3"],
     outputSchema: {
       type: "object",
@@ -498,24 +488,30 @@ function makeSWE(id, label, fullLabel, deps, items) {
 }
 
 const SWE_PROCESSES = {
+  // 화면설계서 v2.4 슬라이드 16 명시: 기능 / 비기능 / 인터페이스 / 제약사항
   "SWE.1": makeSWE("SWE.1", "SW 요구사항 분석", "Software Requirements", ["SYS.3"],
-    [{ key: "sw_req",      label: "SW 요구사항", required: true, inputType: "File+Text" },
-     { key: "sw_arch_req", label: "SW 아키텍처 요구",  required: false, inputType: "Text" }]),
-  "SWE.2": makeSWE("SWE.2", "SW 구조설계", "Software Architecture", ["SWE.1"],
-    [{ key: "sw_arch",     label: "SW 아키텍처",       required: true, inputType: "File+Text" },
-     { key: "sw_dyn",      label: "동적 구조",         required: false, inputType: "Text" }]),
-  "SWE.3": makeSWE("SWE.3", "상세설계 · 유닛", "Detailed Design", ["SWE.2"],
-    [{ key: "sw_unit",     label: "SW 유닛 설계",      required: true, inputType: "File+Text" },
-     { key: "sw_unit_int", label: "유닛 인터페이스",   required: false, inputType: "Text" }]),
-  "SWE.4": makeSWE("SWE.4", "SW 유닛 검증", "Unit Verification", ["SWE.3"],
-    [{ key: "unit_test",   label: "유닛 테스트",       required: true, inputType: "File+Text" },
-     { key: "unit_result", label: "검증 결과",         required: false, inputType: "Text" }]),
+    [{ key: "func_req",       label: "기능 요구사항",       required: true,  inputType: "File+Text" },
+     { key: "nonfunc_req",    label: "비기능 요구사항",     required: true,  inputType: "File+Text" },
+     { key: "interface_req",  label: "인터페이스 요구사항", required: true,  inputType: "File+Text" },
+     { key: "constraints",    label: "제약사항",            required: true,  inputType: "File+Text" }]),
+
+  // 화면설계서 v2.4 슬라이드 17: "0개" — 미정의 (Phase 3에서 정의)
+  "SWE.2": makeSWE("SWE.2", "SW 구조설계", "Software Architecture", ["SWE.1"], []),
+
+  // 화면설계서 미명시 — 미정의
+  "SWE.3": makeSWE("SWE.3", "상세설계 · 유닛", "Detailed Design", ["SWE.2"], []),
+
+  // 화면설계서 미명시 — 미정의
+  "SWE.4": makeSWE("SWE.4", "SW 유닛 검증", "Unit Verification", ["SWE.3"], []),
+
+  // 화면설계서 v2.4 슬라이드 16 명시: 통합테스트 계획서 / 테스트 케이스 / 테스트 결과 보고서
   "SWE.5": makeSWE("SWE.5", "컴포넌트 · 통합", "SW Integration", ["SWE.4"],
-    [{ key: "comp_int",    label: "컴포넌트 통합",     required: true, inputType: "File+Text" },
-     { key: "int_test",    label: "통합 테스트",       required: true, inputType: "File+Text" }]),
-  "SWE.6": makeSWE("SWE.6", "SW 적격성 확인 테스트", "SW Qualification", ["SWE.1", "SWE.5"],
-    [{ key: "sw_qual",     label: "SW 적격성 시험",    required: true, inputType: "File+Text" },
-     { key: "sw_qual_res", label: "시험 결과",         required: false, inputType: "Text" }]),
+    [{ key: "int_test_plan",   label: "통합테스트 계획서",  required: true, inputType: "File+Text" },
+     { key: "int_test_cases",  label: "테스트 케이스",       required: true, inputType: "File+Text" },
+     { key: "int_test_report", label: "테스트 결과 보고서", required: true, inputType: "File+Text" }]),
+
+  // 화면설계서 미명시 — 미정의
+  "SWE.6": makeSWE("SWE.6", "SW 적격성 확인 테스트", "SW Qualification", ["SWE.1", "SWE.5"], []),
 };
 
 // ──────────────────────────────────────────────────

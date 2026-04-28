@@ -1,13 +1,29 @@
 // SCR-05 — V-Model 프로세스 화면 (Data-Driven 동적 렌더링)
-// 화면설계서 슬라이드 12, 15, 16:
-//   설정에서 정의한 항목들이 동적으로 렌더링됨
-//   각 항목 행: [라벨] [내용 미리보기] [산출물등록] [직접입력]
+// 화면설계서 슬라이드 12, 15, 16
 //
-// Phase 1: 셸 + 항목 행 표시 (산출물 등록/직접 입력 모달은 Phase 2에서 추가)
+// Phase 2-1 (현재):
+//   - 산출물 등록 모달 + 직접 입력 모달 연결
+//   - Supabase work_products 저장 (item.key 단위로 누적)
+// Phase 2-2~5 (다음):
+//   - AI 생성, 5-Phase QA, Rationale Report
 
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { PROCESSES, getPreviousProcessIds } from "../config/processes.js";
+import WorkProductRegisterModal from "../components/WorkProductRegisterModal.jsx";
+import WorkProductDirectInputModal from "../components/WorkProductDirectInputModal.jsx";
+
+async function apiCall(path, method = "GET", body = null) {
+  const res = await fetch(path, {
+    method, headers: { "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : null,
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+  return res.json();
+}
 
 export default function ProcessScreen({ project, workProducts, onWorkProductChange, onStateChange }) {
   const { processId } = useParams();
@@ -16,12 +32,18 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   const wp = workProducts.find(w => w.process_id === processId);
   const [state, setState] = useState(wp?.state || "INITIAL");
 
-  // 부모(AppShell)의 TopBar에 현재 상태 전달
+  // 모달 상태
+  const [registerModal, setRegisterModal] = useState({ open: false, item: null });
+  const [directModal, setDirectModal] = useState({ open: false, item: null });
+
+  useEffect(() => {
+    setState(wp?.state || "INITIAL");
+  }, [wp?.state]);
+
   useEffect(() => {
     if (onStateChange) onStateChange(state);
   }, [state, onStateChange]);
 
-  // 이전 단계 의존성 체크
   const deps = getPreviousProcessIds(processId);
   const missingDeps = deps.filter(depId => {
     const depWp = workProducts.find(w => w.process_id === depId);
@@ -35,6 +57,47 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
       </div>
     );
   }
+
+  // ── 산출물/직접입력 저장 ─────────────────────────
+  async function handleItemSave(itemKey, newValue) {
+    const existingContent = wp?.content || {};
+    const updatedContent = {
+      ...existingContent,
+      [itemKey]: newValue,
+    };
+
+    if (wp) {
+      await apiCall(
+        `/api/projects?resource=work_products&id=${wp.id}`,
+        "PATCH",
+        { content: updatedContent }
+      );
+    } else {
+      await apiCall(
+        `/api/projects?resource=work_products`,
+        "POST",
+        {
+          project_id: project.id,
+          process_id: processId,
+          content: updatedContent,
+          state: "INITIAL",
+          status: "초안",
+        }
+      );
+    }
+    if (onWorkProductChange) await onWorkProductChange();
+  }
+
+  function getItemValue(itemKey) {
+    return wp?.content?.[itemKey] || null;
+  }
+
+  const requiredItems = (cfg.items || []).filter(i => i.required);
+  const filledRequired = requiredItems.filter(i => {
+    const v = getItemValue(i.key);
+    return v && v.body && v.body.trim().length > 0;
+  });
+  const allRequiredFilled = filledRequired.length === requiredItems.length && requiredItems.length > 0;
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
@@ -98,15 +161,6 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           <div>
             <h2 style={{ fontSize: 14, fontWeight: 700, margin: 0 }}>
               {cfg.id} 산출물 항목
-              {cfg.placeholder && (
-                <span style={{
-                  marginLeft: 8, fontSize: 9, fontWeight: 600,
-                  background: "var(--c-bg-mid)", color: "var(--c-text-soft)",
-                  padding: "2px 8px", borderRadius: 10,
-                }}>
-                  Phase 1 — 셸만 구현됨
-                </span>
-              )}
             </h2>
             <div style={{ fontSize: 11, color: "var(--c-text-muted)", marginTop: 3 }}>
               설정에서 정의된 항목이 동적으로 렌더링됩니다 — 산출물 등록 또는 직접 입력
@@ -116,43 +170,69 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {(cfg.items ?? []).map(item => (
-            <ItemRow key={item.key} item={item} disabled={missingDeps.length > 0} />
+            <ItemRow
+              key={item.key}
+              item={item}
+              value={getItemValue(item.key)}
+              disabled={missingDeps.length > 0}
+              onRegister={() => setRegisterModal({ open: true, item })}
+              onDirect={() => setDirectModal({ open: true, item })}
+            />
           ))}
           {(!cfg.items || cfg.items.length === 0) && (
             <div style={{
-              padding: 24, background: "var(--c-bg-soft)",
-              borderRadius: 8, textAlign: "center", color: "var(--c-text-muted)", fontSize: 12,
+              padding: 32,
+              background: "var(--c-bg-soft)",
+              border: "1px dashed var(--c-border-strong)",
+              borderRadius: 8,
+              textAlign: "center",
             }}>
-              항목이 정의되지 않았습니다. 좌측 [설정]에서 이 프로세스의 항목을 정의하세요.
+              <div style={{ fontSize: 24, marginBottom: 8, opacity: 0.5 }}>📋</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "var(--c-text)", marginBottom: 6 }}>
+                항목이 정의되지 않았습니다
+              </div>
+              <div style={{ fontSize: 11, color: "var(--c-text-muted)", lineHeight: 1.6, maxWidth: 480, margin: "0 auto" }}>
+                화면설계서 v2.4에 이 프로세스의 구체 항목명이 명시되지 않았습니다.<br/>
+                Phase 3의 [설정 → 스키마 정의] 화면에서 대표님 검토 후 정의 예정입니다.
+              </div>
             </div>
           )}
         </div>
 
-        {/* 하단 액션 — 저장 / 생성 */}
+        {/* 하단 액션 */}
         <div style={{
           marginTop: 24, paddingTop: 20,
           borderTop: "1px solid var(--c-border)",
-          display: "flex", justifyContent: "flex-end", gap: 8,
+          display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8,
         }}>
-          <button disabled style={{
-            background: "#fff", border: "1px solid var(--c-border-strong)",
-            borderRadius: 6, padding: "9px 18px",
-            fontSize: 12, fontWeight: 600, color: "var(--c-text-muted)",
+          <div style={{
+            flex: 1,
+            fontSize: 11, color: "var(--c-text-muted)",
           }}>
-            저장
-          </button>
+            {requiredItems.length > 0 && (
+              <>
+                필수 항목: <strong style={{ color: allRequiredFilled ? "#10B981" : "var(--c-text)" }}>
+                  {filledRequired.length} / {requiredItems.length}
+                </strong>
+                {allRequiredFilled && " ✓"}
+              </>
+            )}
+          </div>
           <button disabled style={{
-            background: cfg.color, color: "#fff", border: "none",
+            background: allRequiredFilled ? cfg.color : "var(--c-bg-mid)",
+            color: allRequiredFilled ? "#fff" : "var(--c-text-muted)",
+            border: "none",
             borderRadius: 6, padding: "9px 18px",
             fontSize: 12, fontWeight: 600,
-            opacity: 0.5,
+            opacity: 0.7,
+            cursor: "not-allowed",
           }}>
-            ⚡ AI 생성 (Phase 2)
+            ⚡ AI 생성 (Phase 2-2)
           </button>
         </div>
       </div>
 
-      {/* Phase 1 안내 */}
+      {/* Phase 2-1 안내 */}
       <div style={{
         marginTop: 16, padding: "12px 16px",
         background: "rgba(30, 39, 97, 0.04)",
@@ -160,14 +240,48 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         borderRadius: 8,
         fontSize: 11, color: "var(--c-text-soft)", lineHeight: 1.6,
       }}>
-        <strong>Phase 1 진행 중</strong> — 메인 워크스페이스 셸 + 사이드바 + 워크플로우 + 항목 행 UI까지 완성되었습니다.<br/>
-        다음 Phase 2에서는 [산출물 등록] / [직접 입력] 모달과 AI 생성, 그리고 5-Phase QA가 추가됩니다.
+        <strong>Phase 2-1 진행 중</strong> — 산출물 등록 / 직접 입력 모달 동작 중. 항목별 입력값이 Supabase에 저장됩니다.<br/>
+        다음 Phase 2-2에서는 AI 생성(Claude) + 5-Phase QA(Gemini) + Rationale Report가 추가됩니다.
       </div>
+
+      {/* ── 모달 ──────────────────────────────────── */}
+      {registerModal.open && (
+        <WorkProductRegisterModal
+          open={registerModal.open}
+          onClose={() => setRegisterModal({ open: false, item: null })}
+          processId={processId}
+          item={registerModal.item}
+          initialValue={getItemValue(registerModal.item.key)}
+          onSave={(val) => handleItemSave(registerModal.item.key, val)}
+        />
+      )}
+      {directModal.open && (
+        <WorkProductDirectInputModal
+          open={directModal.open}
+          onClose={() => setDirectModal({ open: false, item: null })}
+          processId={processId}
+          item={directModal.item}
+          initialValue={getItemValue(directModal.item.key)}
+          onSave={(val) => handleItemSave(directModal.item.key, val)}
+        />
+      )}
     </div>
   );
 }
 
-function ItemRow({ item, disabled }) {
+function ItemRow({ item, value, disabled, onRegister, onDirect }) {
+  const hasValue = value && value.body && value.body.trim().length > 0;
+  const preview = hasValue
+    ? truncate(value.body, 80)
+    : "항목을 등록하거나 직접 입력하세요";
+  const sourceLabel = value?.source === "register"
+    ? `📎 ${value.fileName || "산출물"}`
+    : value?.source === "direct"
+    ? "✍ 직접 입력"
+    : null;
+
+  const canRegister = item.inputType !== "Text";
+
   return (
     <div style={{
       display: "grid",
@@ -191,41 +305,65 @@ function ItemRow({ item, disabled }) {
 
       {/* 내용 미리보기 */}
       <div style={{
-        background: "#fff",
-        border: "1px solid var(--c-border-strong)",
+        background: hasValue ? "#fff" : "var(--c-bg-soft)",
+        border: `1px solid ${hasValue ? "var(--c-navy-mid)" : "var(--c-border-strong)"}`,
         borderRadius: 6,
-        padding: "12px 14px",
-        fontSize: 11, color: "var(--c-text-muted)",
-        fontStyle: "italic",
-        display: "flex", alignItems: "center",
+        padding: "10px 14px",
+        fontSize: 11,
+        color: hasValue ? "var(--c-text)" : "var(--c-text-muted)",
+        fontStyle: hasValue ? "normal" : "italic",
+        display: "flex", flexDirection: "column", justifyContent: "center",
+        gap: 4,
       }}>
-        항목을 등록하거나 직접 입력하세요
+        {sourceLabel && (
+          <div style={{
+            fontSize: 10, color: "var(--c-navy-mid)",
+            fontWeight: 600, fontStyle: "normal",
+          }}>
+            {sourceLabel}
+          </div>
+        )}
+        <div style={{ lineHeight: 1.5 }}>{preview}</div>
       </div>
 
       {/* 산출물 등록 버튼 */}
-      <button disabled={disabled} style={{
-        background: disabled ? "var(--c-bg-mid)" : "var(--c-navy-deep)",
-        color: disabled ? "var(--c-text-muted)" : "#fff",
-        border: "none", borderRadius: 6,
-        fontSize: 11, fontWeight: 600,
-        cursor: disabled ? "not-allowed" : "pointer",
-      }}>
+      <button
+        disabled={disabled || !canRegister}
+        onClick={onRegister}
+        title={!canRegister ? "이 항목은 직접 입력만 가능합니다" : undefined}
+        style={{
+          background: disabled || !canRegister ? "var(--c-bg-mid)" : "var(--c-navy-deep)",
+          color: disabled || !canRegister ? "var(--c-text-muted)" : "#fff",
+          border: "none", borderRadius: 6,
+          fontSize: 11, fontWeight: 600,
+          cursor: disabled || !canRegister ? "not-allowed" : "pointer",
+          opacity: !canRegister ? 0.5 : 1,
+        }}>
         산출물 등록
       </button>
 
       {/* 직접 입력 버튼 */}
-      <button disabled={disabled} style={{
-        background: "#fff",
-        color: disabled ? "var(--c-text-muted)" : "var(--c-navy-deep)",
-        border: `1px solid ${disabled ? "var(--c-border)" : "var(--c-navy-deep)"}`,
-        borderRadius: 6,
-        fontSize: 11, fontWeight: 600,
-        cursor: disabled ? "not-allowed" : "pointer",
-      }}>
+      <button
+        disabled={disabled}
+        onClick={onDirect}
+        style={{
+          background: "#fff",
+          color: disabled ? "var(--c-text-muted)" : "var(--c-navy-deep)",
+          border: `1px solid ${disabled ? "var(--c-border)" : "var(--c-navy-deep)"}`,
+          borderRadius: 6,
+          fontSize: 11, fontWeight: 600,
+          cursor: disabled ? "not-allowed" : "pointer",
+        }}>
         직접 입력
       </button>
     </div>
   );
+}
+
+function truncate(str, n) {
+  if (!str) return "";
+  const oneLine = str.replace(/\n+/g, " ");
+  return oneLine.length > n ? oneLine.slice(0, n) + "…" : oneLine;
 }
 
 function StateBadge({ state }) {

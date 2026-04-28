@@ -90,6 +90,8 @@ export default function Sidebar({ workProducts = [], collapsed = false }) {
 }
 
 function ProcessItem({ cfg, progress, active, collapsed, onClick }) {
+  const isUndefined = !cfg.items || cfg.items.length === 0;
+
   return (
     <button
       onClick={onClick}
@@ -105,6 +107,7 @@ function ProcessItem({ cfg, progress, active, collapsed, onClick }) {
         cursor: "pointer",
         transition: "background 0.15s",
         position: "relative",
+        opacity: isUndefined && !active ? 0.55 : 1,
       }}
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = "rgba(255,255,255,0.05)"; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = "transparent"; }}
@@ -119,7 +122,7 @@ function ProcessItem({ cfg, progress, active, collapsed, onClick }) {
         </div>
       ) : (
         <>
-          {/* 항목명 + 진행률 텍스트 */}
+          {/* 항목명 + 진행률/미정의 표시 */}
           <div style={{
             display: "flex", justifyContent: "space-between", alignItems: "center",
             marginBottom: 4,
@@ -132,28 +135,48 @@ function ProcessItem({ cfg, progress, active, collapsed, onClick }) {
               <span style={{ opacity: 0.6, marginRight: 6 }}>{cfg.id}</span>
               {cfg.label}
             </div>
-            <div style={{
-              fontSize: 10,
-              fontWeight: 700,
-              color: progressColor(progress),
-              fontVariantNumeric: "tabular-nums",
-              flexShrink: 0,
-              marginLeft: 6,
-            }}>
-              {progress}%
-            </div>
+            {isUndefined ? (
+              <div style={{
+                fontSize: 9, fontWeight: 700,
+                color: "rgba(255,255,255,0.45)",
+                background: "rgba(255,255,255,0.08)",
+                border: "1px dashed rgba(255,255,255,0.25)",
+                padding: "1px 6px",
+                borderRadius: 8,
+                flexShrink: 0,
+                marginLeft: 6,
+                letterSpacing: "0.02em",
+              }}>
+                미정의
+              </div>
+            ) : (
+              <div style={{
+                fontSize: 10,
+                fontWeight: 700,
+                color: progressColor(progress),
+                fontVariantNumeric: "tabular-nums",
+                flexShrink: 0,
+                marginLeft: 6,
+              }}>
+                {progress}%
+              </div>
+            )}
           </div>
 
-          {/* 진행률 바 */}
+          {/* 진행률 바 (미정의면 점선 트랙) */}
           <div style={{
-            height: 3, background: "rgba(255,255,255,0.10)",
+            height: 3,
+            background: isUndefined ? "transparent" : "rgba(255,255,255,0.10)",
+            borderTop: isUndefined ? "1px dashed rgba(255,255,255,0.20)" : "none",
             borderRadius: 2, overflow: "hidden",
           }}>
-            <div style={{
-              height: "100%", width: `${progress}%`,
-              background: progressColor(progress),
-              transition: "width 0.4s ease, background 0.3s",
-            }} />
+            {!isUndefined && (
+              <div style={{
+                height: "100%", width: `${progress}%`,
+                background: progressColor(progress),
+                transition: "width 0.4s ease, background 0.3s",
+              }} />
+            )}
           </div>
         </>
       )}
