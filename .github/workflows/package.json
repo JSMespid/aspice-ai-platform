@@ -1,0 +1,23 @@
+{
+  "name": "aspice-ai-platform",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "eval": "node evals/runner.js",
+    "eval:sys1": "node evals/runner.js --process=SYS.1",
+    "eval:sys4": "node evals/runner.js --process=SYS.4",
+    "eval:sys5": "node evals/runner.js --process=SYS.5"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.2.1",
+    "vite": "^5.0.8"
+  }
+}
