@@ -224,7 +224,7 @@ export function Select({ label, value, onChange, options }) {
 }
 
 // ── Textarea ─────────────────────────────────────────────────────────────────
-export function Textarea({ label, value, onChange, placeholder, rows = 4, style: extraStyle = {} }) {
+export function Textarea({ label, value, onChange, placeholder, rows = 4, style: extraStyle = {}, disabled = false }) {
   const [focus, setFocus] = useState(false);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
@@ -235,14 +235,16 @@ export function Textarea({ label, value, onChange, placeholder, rows = 4, style:
         }}>{label}</label>
       )}
       <textarea value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} rows={rows}
+        disabled={disabled}
         onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
         style={{
-          background: T.surface,
+          background: disabled ? T.surfaceHover : T.surface,
           border: `1px solid ${focus ? T.borderFocus : T.border}`,
-          borderRadius: 7, padding: "8px 12px", color: T.text, fontSize: 14,
+          borderRadius: 7, padding: "8px 12px", color: disabled ? T.muted : T.text, fontSize: 14,
           outline: "none", resize: "vertical", lineHeight: 1.6,
           transition: "border-color .15s, box-shadow .15s",
           boxShadow: focus ? `0 0 0 3px ${T.accentGlow}` : "none",
+          cursor: disabled ? "not-allowed" : "text",
           ...extraStyle,
         }} />
     </div>

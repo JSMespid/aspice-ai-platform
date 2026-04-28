@@ -2849,7 +2849,7 @@ ${instruction}`;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 9999, backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: T.surface, borderRadius: 12, padding: 24, width: "min(600px,95vw)", border: `1px solid ${T.border}`, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", maxHeight: "85vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
+      <div style={{ background: T.surface, borderRadius: 12, padding: 24, width: "min(600px,95vw)", border: `1px solid ${T.border}`, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", maxHeight: "85vh", overflowY: "auto", }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>✦ Claude에게 수정 요청</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
@@ -2934,7 +2934,7 @@ function ItemEditModal({ item, onSave, onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 9999, backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: T.surface, borderRadius: 12, padding: 24, width: "min(600px,95vw)", border: `1px solid ${T.border}`, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", maxHeight: "85vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
+      <div style={{ background: T.surface, borderRadius: 12, padding: 24, width: "min(600px,95vw)", border: `1px solid ${T.border}`, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", maxHeight: "85vh", overflowY: "auto", }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>항목 직접 편집</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
@@ -2991,7 +2991,7 @@ function FixPreviewModal({ original, fixed, onApply, onEditItem, onClose }) {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 9998, backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <div style={{ background: T.surface, borderRadius: 12, padding: 24, width: "min(700px,95vw)", border: `1px solid ${T.border}`, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", maxHeight: "88vh", overflowY: "auto", border: `1px solid ${T.border}` }}>
+      <div style={{ background: T.surface, borderRadius: 12, padding: 24, width: "min(700px,95vw)", border: `1px solid ${T.border}`, boxShadow: "0 16px 48px rgba(0,0,0,0.12)", maxHeight: "88vh", overflowY: "auto", }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ fontSize: 15, fontWeight: 700 }}>✦ Claude 수정 결과 미리보기</h3>
           <button onClick={onClose} style={{ background: "none", border: "none", color: T.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
