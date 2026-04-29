@@ -73,12 +73,17 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         { content: updatedContent }
       );
     } else {
+      // 신규 work_product 생성
+      // - title: "SYS.1 산출물" 식의 자동 생성 (Phase 2-2 AI 생성 시 의미있는 제목으로 갱신)
+      // - state: 9-state 머신의 INITIAL
+      // - status: v1 호환용 ("초안")
       await apiCall(
         `/api/projects?resource=work_products`,
         "POST",
         {
           project_id: project.id,
           process_id: processId,
+          title: `${processId} 산출물`,
           content: updatedContent,
           state: "INITIAL",
           status: "초안",
@@ -249,6 +254,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         <WorkProductRegisterModal
           open={registerModal.open}
           onClose={() => setRegisterModal({ open: false, item: null })}
+          projectId={project.id}
           processId={processId}
           item={registerModal.item}
           initialValue={getItemValue(registerModal.item.key)}
@@ -274,13 +280,32 @@ function ItemRow({ item, value, disabled, onRegister, onDirect }) {
   const preview = hasValue
     ? truncate(value.body, 80)
     : "항목을 등록하거나 직접 입력하세요";
-  const sourceLabel = value?.source === "register"
+
+  // 출처 라벨 + 다운로드 가능 여부
+  const isUploaded = value?.source === "register" && value?.storagePath;
+  const sourceLabel = isUploaded
     ? `📎 ${value.fileName || "산출물"}`
+    : value?.source === "register"
+    ? `📎 ${value.fileName || "산출물"} (메타만)` // 구버전 호환
     : value?.source === "direct"
     ? "✍ 직접 입력"
     : null;
 
   const canRegister = item.inputType !== "Text";
+
+  // 다운로드 핸들러
+  async function handleDownload(e) {
+    e.stopPropagation();
+    if (!isUploaded) return;
+    try {
+      const res = await fetch(`/api/upload?action=signed_url&path=${encodeURIComponent(value.storagePath)}`);
+      if (!res.ok) throw new Error(await res.text());
+      const { url } = await res.json();
+      window.open(url, "_blank", "noopener");
+    } catch (err) {
+      alert("다운로드 링크 생성 실패: " + err.message);
+    }
+  }
 
   return (
     <div style={{
@@ -317,10 +342,32 @@ function ItemRow({ item, value, disabled, onRegister, onDirect }) {
       }}>
         {sourceLabel && (
           <div style={{
-            fontSize: 10, color: "var(--c-navy-mid)",
-            fontWeight: 600, fontStyle: "normal",
+            fontSize: 10, fontWeight: 600, fontStyle: "normal",
+            display: "flex", alignItems: "center", gap: 8,
           }}>
-            {sourceLabel}
+            <span style={{ color: "var(--c-navy-mid)" }}>{sourceLabel}</span>
+            {isUploaded && (
+              <button
+                onClick={handleDownload}
+                style={{
+                  fontSize: 10, fontWeight: 600,
+                  background: "transparent",
+                  border: "1px solid var(--c-navy-mid)",
+                  color: "var(--c-navy-mid)",
+                  borderRadius: 3,
+                  padding: "1px 6px",
+                  cursor: "pointer",
+                }}
+                title="파일 다운로드"
+              >
+                ↓ 다운로드
+              </button>
+            )}
+            {value?.fileSize && (
+              <span style={{ color: "var(--c-text-muted)", fontWeight: 400 }}>
+                · {(value.fileSize / 1024).toFixed(1)} KB
+              </span>
+            )}
           </div>
         )}
         <div style={{ lineHeight: 1.5 }}>{preview}</div>
