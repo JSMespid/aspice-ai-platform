@@ -24,7 +24,7 @@
 //   state_transitions 행 기록 (INITIAL → GENERATING → GENERATED/REJECTED)
 //   audit_logs 행 기록
 
-const TIMEOUT_MS = 90_000;
+const TIMEOUT_MS = 270_000; // 4.5분 (Vercel maxDuration 300초 한도 내 안전 마진)
 const MAX_TOKENS = 8192; // Sonnet 4.6 기본 최대 (이전 4096은 NAD 자료에 부족했음)
 const MODEL = 'claude-sonnet-4-6';
 const PROVIDER = 'anthropic';
