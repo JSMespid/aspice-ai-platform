@@ -17,6 +17,7 @@ import { PROCESSES, getPreviousProcessIds } from "../config/processes.js";
 import WorkProductRegisterModal from "../components/WorkProductRegisterModal.jsx";
 import WorkProductDirectInputModal from "../components/WorkProductDirectInputModal.jsx";
 import RationalePanel from "../components/RationalePanel.jsx";
+import GeneratedArtifactView from "../components/GeneratedArtifactView.jsx";
 import { runAgentHarness, AgentStep } from "../lib/agent-harness.js";
 
 // AI 생성 지원 프로세스 (Phase 2-2a 는 SYS.1만)
@@ -301,6 +302,15 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           </button>
         </div>
       </div>
+
+      {/* ── AI 생성 결과 (있을 때만 표시) ────────────── */}
+      {wp?.content?.ai_generated && (
+        <GeneratedArtifactView
+          aiGenerated={wp.content.ai_generated}
+          processColor={cfg.color}
+          onReopenPanel={agentResult ? () => setPanelOpen(true) : null}
+        />
+      )}
 
       {/* Phase 안내 */}
       <div style={{
