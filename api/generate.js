@@ -25,7 +25,7 @@
 //   audit_logs 행 기록
 
 const TIMEOUT_MS = 90_000;
-const MAX_TOKENS = 4096;
+const MAX_TOKENS = 8192; // Sonnet 4.6 기본 최대 (이전 4096은 NAD 자료에 부족했음)
 const MODEL = 'claude-sonnet-4-6';
 const PROVIDER = 'anthropic';
 
@@ -267,17 +267,27 @@ async function callClaude({ systemPrompt, userPrompt, schema }) {
       throw new Error('No text block in Claude response');
     }
     const rawOutput = textBlock.text;
+    const stopReason = data.stop_reason || 'unknown';
+
     let parsedOutput = null;
     try {
       parsedOutput = JSON.parse(rawOutput);
     } catch (e) {
-      throw new Error(`Failed to parse JSON from Claude: ${e.message}`);
+      // 잘림 감지: stop_reason 이 max_tokens 이면 명확히 안내
+      if (stopReason === 'max_tokens') {
+        throw new Error(
+          `Claude 응답이 max_tokens(${MAX_TOKENS})에 도달해 잘렸습니다. ` +
+          `생성된 ${rawOutput.length}자가 JSON으로 완결되지 못함. ` +
+          `해결책: api/generate.js 의 MAX_TOKENS 를 더 크게 (예: 16000) 늘리세요.`
+        );
+      }
+      throw new Error(`Failed to parse JSON from Claude (stop=${stopReason}): ${e.message}`);
     }
 
     return {
       rawOutput,
       parsedOutput,
-      finishReason: data.stop_reason || 'unknown',
+      finishReason: stopReason,
       inputTokens: data.usage?.input_tokens || 0,
       outputTokens: data.usage?.output_tokens || 0,
       latencyMs: latency,
