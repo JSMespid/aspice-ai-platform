@@ -1,17 +1,26 @@
 // SCR-05 — V-Model 프로세스 화면 (Data-Driven 동적 렌더링)
 // 화면설계서 슬라이드 12, 15, 16
 //
-// Phase 2-1 (현재):
-//   - 산출물 등록 모달 + 직접 입력 모달 연결
-//   - Supabase work_products 저장 (item.key 단위로 누적)
-// Phase 2-2~5 (다음):
-//   - AI 생성, 5-Phase QA, Rationale Report
+// Phase 2-1 완료:
+//   - 산출물 등록 모달 + 직접 입력 모달 + Supabase Storage 업로드
+// Phase 2-2a (현재):
+//   - AI 생성 버튼 활성화 (필수 항목 충족 시)
+//   - Claude Sonnet 4.6 + Skills + 5축 가드레일 (1, 2, 3축 활성)
+//   - 우측 슬라이드 패널 (RationalePanel) 에 진행/결과/가드레일 표시
+// Phase 2-2b 예정:
+//   - Gemini 교차검증 (4축 활성)
+//   - critique-and-refine cycle
 
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { PROCESSES, getPreviousProcessIds } from "../config/processes.js";
 import WorkProductRegisterModal from "../components/WorkProductRegisterModal.jsx";
 import WorkProductDirectInputModal from "../components/WorkProductDirectInputModal.jsx";
+import RationalePanel from "../components/RationalePanel.jsx";
+import { runAgentHarness, AgentStep } from "../lib/agent-harness.js";
+
+// AI 생성 지원 프로세스 (Phase 2-2a 는 SYS.1만)
+const AI_GENERATE_SUPPORTED = new Set(["SYS.1"]);
 
 async function apiCall(path, method = "GET", body = null) {
   const res = await fetch(path, {
@@ -35,6 +44,13 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   // 모달 상태
   const [registerModal, setRegisterModal] = useState({ open: false, item: null });
   const [directModal, setDirectModal] = useState({ open: false, item: null });
+
+  // Rationale Panel 상태 (Phase 2-2a)
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [agentStep, setAgentStep] = useState(AgentStep.IDLE);
+  const [agentDetail, setAgentDetail] = useState(null);
+  const [agentResult, setAgentResult] = useState(null);
+  const [generating, setGenerating] = useState(false);
 
   useEffect(() => {
     setState(wp?.state || "INITIAL");
@@ -95,6 +111,45 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
 
   function getItemValue(itemKey) {
     return wp?.content?.[itemKey] || null;
+  }
+
+  // ── AI 생성 핸들러 (Phase 2-2a) ──────────────────
+  async function handleAIGenerate() {
+    if (!wp) {
+      alert("입력값을 먼저 저장하세요.");
+      return;
+    }
+    if (!AI_GENERATE_SUPPORTED.has(processId)) {
+      alert(`현재 ${processId}는 AI 생성이 지원되지 않습니다. Phase 2-2a는 SYS.1만 지원합니다.`);
+      return;
+    }
+
+    // 패널 열고 진행 시작
+    setPanelOpen(true);
+    setAgentResult(null);
+    setAgentStep(AgentStep.PREPARING);
+    setAgentDetail({ message: '시작 중...' });
+    setGenerating(true);
+
+    try {
+      const result = await runAgentHarness({
+        projectId: project.id,
+        processId,
+        workProductId: wp.id,
+        onProgress: (step, detail) => {
+          setAgentStep(step);
+          setAgentDetail(detail);
+        },
+      });
+      setAgentResult(result);
+
+      // work_product 데이터 다시 로드 (state 업데이트 반영)
+      if (onWorkProductChange) await onWorkProductChange();
+    } catch (e) {
+      setAgentStep(AgentStep.FAILED);
+      setAgentDetail({ message: `오류: ${e.message}` });
+    }
+    setGenerating(false);
   }
 
   const requiredItems = (cfg.items || []).filter(i => i.required);
@@ -223,21 +278,31 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               </>
             )}
           </div>
-          <button disabled style={{
-            background: allRequiredFilled ? cfg.color : "var(--c-bg-mid)",
-            color: allRequiredFilled ? "#fff" : "var(--c-text-muted)",
-            border: "none",
-            borderRadius: 6, padding: "9px 18px",
-            fontSize: 12, fontWeight: 600,
-            opacity: 0.7,
-            cursor: "not-allowed",
-          }}>
-            ⚡ AI 생성 (Phase 2-2)
+          <button
+            onClick={handleAIGenerate}
+            disabled={!allRequiredFilled || generating || !AI_GENERATE_SUPPORTED.has(processId)}
+            title={
+              !AI_GENERATE_SUPPORTED.has(processId)
+                ? `Phase 2-2a는 SYS.1만 지원합니다 (${processId} 미지원)`
+                : !allRequiredFilled
+                  ? "필수 항목을 모두 채우세요"
+                  : "AI 생성을 시작합니다"
+            }
+            style={{
+              background: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId)) ? cfg.color : "var(--c-bg-mid)",
+              color: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId)) ? "#fff" : "var(--c-text-muted)",
+              border: "none",
+              borderRadius: 6, padding: "9px 18px",
+              fontSize: 12, fontWeight: 600,
+              opacity: generating ? 0.6 : 1,
+              cursor: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId) && !generating) ? "pointer" : "not-allowed",
+            }}>
+            {generating ? "⚡ 생성 중..." : "⚡ AI 생성"}
           </button>
         </div>
       </div>
 
-      {/* Phase 2-1 안내 */}
+      {/* Phase 안내 */}
       <div style={{
         marginTop: 16, padding: "12px 16px",
         background: "rgba(30, 39, 97, 0.04)",
@@ -245,8 +310,8 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         borderRadius: 8,
         fontSize: 11, color: "var(--c-text-soft)", lineHeight: 1.6,
       }}>
-        <strong>Phase 2-1 진행 중</strong> — 산출물 등록 / 직접 입력 모달 동작 중. 항목별 입력값이 Supabase에 저장됩니다.<br/>
-        다음 Phase 2-2에서는 AI 생성(Claude) + 5-Phase QA(Gemini) + Rationale Report가 추가됩니다.
+        <strong>Phase 2-2a 활성</strong> — Claude Sonnet 4.6 + Skills (aspice-sys1-derivation, automotive-domain-guide, traceability-rules) + 5축 가드레일 (1, 2, 3축).<br/>
+        다음 Phase 2-2b: Gemini 교차검증 추가 (4축 활성). Phase 2-3: HITL 승인 (5축 활성).
       </div>
 
       {/* ── 모달 ──────────────────────────────────── */}
@@ -271,6 +336,15 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           onSave={(val) => handleItemSave(directModal.item.key, val)}
         />
       )}
+
+      {/* Rationale Panel (우측 슬라이드, Phase 2-2a) */}
+      <RationalePanel
+        open={panelOpen}
+        onClose={() => !generating && setPanelOpen(false)}
+        step={agentStep}
+        detail={agentDetail}
+        result={agentResult}
+      />
     </div>
   );
 }
