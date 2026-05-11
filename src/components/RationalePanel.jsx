@@ -153,7 +153,7 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
 function ProgressSection({ step, detail }) {
   const steps = [
     { id: AgentStep.PREPARING,  label: '준비',     desc: '입력 검증 + Skills 로딩' },
-    { id: AgentStep.GENERATING, label: '생성',     desc: 'Claude Sonnet 4.6' },
+    { id: AgentStep.GENERATING, label: '생성',     desc: 'Claude Opus 4.7 (adaptive thinking)' },
     { id: AgentStep.VALIDATING, label: '검증',     desc: '5축 가드레일' },
     { id: AgentStep.COMPLETED,  label: '완료',     desc: '결과 저장' },
   ];
