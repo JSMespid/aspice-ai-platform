@@ -5,7 +5,7 @@
 //   - 산출물 등록 모달 + 직접 입력 모달 + Supabase Storage 업로드
 // Phase 2-2a (현재):
 //   - AI 생성 버튼 활성화 (필수 항목 충족 시)
-//   - Claude Sonnet 4.6 + Skills + 5축 가드레일 (1, 2, 3축 활성)
+//   - Claude Opus 4.7 (adaptive thinking) + Skills + 5축 가드레일 (1, 2, 3축 활성)
 //   - 우측 슬라이드 패널 (RationalePanel) 에 진행/결과/가드레일 표시
 // Phase 2-2b 예정:
 //   - Gemini 교차검증 (4축 활성)
@@ -310,7 +310,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         borderRadius: 8,
         fontSize: 11, color: "var(--c-text-soft)", lineHeight: 1.6,
       }}>
-        <strong>Phase 2-2a 활성</strong> — Claude Sonnet 4.6 + Skills (aspice-sys1-derivation, automotive-domain-guide, traceability-rules) + 5축 가드레일 (1, 2, 3축).<br/>
+        <strong>Phase 2-2a 활성</strong> — Claude Opus 4.7 (adaptive thinking) + Skills (aspice-sys1-derivation, automotive-domain-guide, traceability-rules) + 5축 가드레일 (1, 2, 3축).<br/>
         다음 Phase 2-2b: Gemini 교차검증 추가 (4축 활성). Phase 2-3: HITL 승인 (5축 활성).
       </div>
 
