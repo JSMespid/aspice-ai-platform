@@ -1,0 +1,11 @@
+{
+  "rewrites": [
+    { "source": "/((?!api/.*).*)", "destination": "/index.html" }
+  ],
+  "functions": {
+    "api/generate.js": {
+      "maxDuration": 120,
+      "includeFiles": "skills/**"
+    }
+  }
+}
