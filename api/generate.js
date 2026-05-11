@@ -24,9 +24,9 @@
 //   state_transitions 행 기록 (INITIAL → GENERATING → GENERATED/REJECTED)
 //   audit_logs 행 기록
 
-const TIMEOUT_MS = 270_000; // 4.5분 (Vercel maxDuration 300초 한도 내 안전 마진)
-const MAX_TOKENS = 8192; // Sonnet 4.6 기본 최대 (이전 4096은 NAD 자료에 부족했음)
-const MODEL = 'claude-sonnet-4-6';
+const TIMEOUT_MS = 280_000; // 4분 40초 (Vercel Hobby maxDuration 300초 한도 내 안전 마진)
+const MAX_TOKENS = 16000;   // 한글 풍부한 ASPICE 산출물 충분히 담을 크기
+const MODEL = 'claude-opus-4-7';  // 최상위 reasoning 모델 (품질 우선)
 const PROVIDER = 'anthropic';
 
 // ──────────────────────────────────────────────────
@@ -85,15 +85,46 @@ function composeSystemPrompt(processId) {
       skillBlocks.push(`<skill name="${name}">\n${md}\n</skill>`);
     }
   }
-  return `You are an expert ASPICE PAM v4.0 consultant for automotive software development.
+  return `You are a senior ASPICE PAM v4.0 consultant and automotive functional safety engineer. You have 15+ years of experience deriving stakeholder requirements for automotive ECUs, ADAS, infotainment, and connected vehicle systems.
 
-You will generate a structured ASPICE work product following the rules in the loaded Skills below.
+Your task: Generate a high-quality ASPICE work product based on the provided input documents.
 
-CRITICAL: Your response MUST conform to the JSON schema provided in output_config. Any deviation will cause downstream validation failures.
+QUALITY PRINCIPLES (non-negotiable):
+
+1. **Completeness over brevity**: Extract EVERY meaningful stakeholder requirement from the input. Do not artificially limit yourself. ASPICE assessors penalize missing requirements.
+
+2. **Precision over speed**: For each STK_REQ, take time to:
+   - Cite the EXACT section/page of the source document
+   - Identify the underlying stakeholder need (not just paraphrase the input)
+   - Specify measurable verification criteria
+
+3. **Domain rigor**: Apply ISO 26262 (functional safety), ISO/SAE 21434 (cybersecurity), and ECE/KMVSS regulations where relevant. If a requirement has safety implications, classify ASIL.
+
+4. **No hallucination**:
+   - If a requirement is NOT in the input documents, do NOT invent it.
+   - If the input is ambiguous, mark in rationale: "Source document lacks specificity in X; clarification needed."
+   - Every STK_REQ_NNN MUST have a verifiable source_doc reference.
+
+5. **JSON Schema compliance**: Your response MUST exactly match the schema in output_config. Any deviation causes validation failures.
+
+6. **Korean OK for rationale**: Technical IDs, statements, source_doc in English. Rationale may use Korean if it captures nuance better.
+
+OUTPUT EXPECTATIONS:
+- Generate as many stakeholder_requirements as the input warrants (typical NAD-class systems: 15-30 STK_REQs).
+- Generate primary use cases (typically 3-7).
+- Include comprehensive operational_context (environmental, operational, regulatory).
+- Provide thorough traceability_seeds showing which SW/HW/SOW sections map to each STK_REQ.
 
 ${skillBlocks.join('\n\n')}
 
-Now generate the work product based on the user-provided input. Apply all checklists from the Skills above before finalizing your response.`;
+Now analyze the user-provided input carefully. Think step by step:
+- First, identify all stakeholders mentioned (driver, OEM, regulator, supplier, etc.)
+- Second, extract their needs from the input documents
+- Third, translate each need into a precise, testable STK_REQ
+- Fourth, validate every STK_REQ against the Quality Principles above
+- Finally, structure the response per the output schema
+
+Apply the checklists in each Skill BEFORE finalizing your response. Quality is the only goal.`;
 }
 
 // ──────────────────────────────────────────────────
@@ -179,8 +210,8 @@ import { runGuardrails } from '../src/lib/guardrails-server.js';
 // 비용 추정 (Sonnet 4.6 가격 기준)
 // ──────────────────────────────────────────────────
 function estimateCost(inputTokens, outputTokens) {
-  // Sonnet 4.6: $3 / MTok input, $15 / MTok output
-  return (inputTokens * 3 / 1_000_000) + (outputTokens * 15 / 1_000_000);
+  // Opus 4.7: $15 / MTok input, $75 / MTok output (Sonnet 대비 5배, 품질 우선이라 OK)
+  return (inputTokens * 15 / 1_000_000) + (outputTokens * 75 / 1_000_000);
 }
 
 // ──────────────────────────────────────────────────
@@ -244,6 +275,8 @@ async function callClaude({ systemPrompt, userPrompt, schema }) {
         max_tokens: MAX_TOKENS,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
+        // Adaptive thinking — Opus 4.7 의 깊은 reasoning 활성화 (품질 극대화)
+        thinking: { type: 'adaptive' },
         // Structured Outputs (GA — 별도 beta header 불필요)
         output_config: {
           format: {
