@@ -45,7 +45,7 @@ export async function runAgentHarness({ projectId, processId, workProductId, onP
   // 약간의 시각적 피드백 (Skills 로딩 시간)
   await new Promise(r => setTimeout(r, 300));
 
-  emit(AgentStep.GENERATING, { message: 'Claude Sonnet 4.6 호출 중 — NAD 자료처럼 입력이 큰 경우 최대 4분 소요됩니다. 패널을 닫지 마세요.' });
+  emit(AgentStep.GENERATING, { message: 'Claude Opus 4.7 (adaptive thinking) 호출 중 — 최고 품질 산출물을 위해 깊이 추론합니다. 보통 2~4분 소요. 패널을 닫지 마세요.' });
 
   let response;
   try {
