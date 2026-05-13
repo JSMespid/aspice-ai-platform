@@ -6,6 +6,9 @@
     "api/generate.js": {
       "maxDuration": 300,
       "includeFiles": "skills/**"
+    },
+    "api/evaluate.js": {
+      "maxDuration": 90
     }
   }
 }
