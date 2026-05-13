@@ -1,17 +1,26 @@
-// src/components/GeneratedArtifactView.jsx
+// src/components/GeneratedArtifactView.jsx — Phase 2-2b STEP C-2
 //
-// 화면설계서 v260506 SCR-05 의도:
+// 화면설계서 v260506 SCR-05 (확장):
 //   AI 생성이 완료된 후, 생성된 산출물을 메인 화면에 시각적으로 표시
-//   (RationalePanel 은 진행/감사 정보 / 이 컴포넌트는 산출물 본체)
+//   상단 액션 영역에 사용자 제어 버튼 (Rationale 보기 / QA 검토 시작)
 //
-// Phase 2-2a 범위:
-//   - SYS.1 의 stakeholder_requirements / use_cases / operational_context / traceability_seeds 표시
-//   - JSON 원본 보기 토글
-//   - "AI 생성 결과 보기" 패널 다시 열기 버튼 (Rationale 재진입)
+// Phase 2-2b STEP C-2 변경:
+//   - 상단 액션 영역 신규 — [📊 Rationale 보기] [🔍 QA 검토 시작]
+//   - canQAReview, hasEvaluator, evaluating props 지원
+//   - Phase 2-2a 기존 표시 (통계 바, STK_REQ 카드, Use Case, Operational Context, Traceability Seeds) 유지
 
 import { useState } from "react";
 
-export default function GeneratedArtifactView({ aiGenerated, processColor, onReopenPanel }) {
+export default function GeneratedArtifactView({
+  aiGenerated,
+  processColor,
+  onReopenPanel,
+  onQAReview,
+  canQAReview,
+  hasEvaluator,
+  evaluating,
+  onEditStkReq,   // 신규: STK_REQ 카드 편집 핸들러 (req => void)
+}) {
   const [view, setView] = useState("structured"); // 'structured' | 'json'
 
   if (!aiGenerated) return null;
@@ -30,7 +39,7 @@ export default function GeneratedArtifactView({ aiGenerated, processColor, onReo
       borderTop: `3px solid ${processColor}`,
       padding: 24,
     }}>
-      {/* 헤더 */}
+      {/* 헤더 + 액션 영역 */}
       <div style={{
         display: "flex",
         alignItems: "center",
@@ -38,6 +47,8 @@ export default function GeneratedArtifactView({ aiGenerated, processColor, onReo
         marginBottom: 18,
         paddingBottom: 14,
         borderBottom: "1px solid var(--c-border)",
+        flexWrap: "wrap",
+        gap: 12,
       }}>
         <div>
           <div style={{
@@ -56,37 +67,109 @@ export default function GeneratedArtifactView({ aiGenerated, processColor, onReo
           </h2>
         </div>
 
-        <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {/* JSON 원본 보기 토글 */}
           <button
             onClick={() => setView(view === "structured" ? "json" : "structured")}
             style={{
               background: "#fff",
               border: "1px solid var(--c-border-strong)",
               borderRadius: 6,
-              padding: "6px 12px",
+              padding: "7px 13px",
               fontSize: 11, fontWeight: 600,
               cursor: "pointer",
               color: "var(--c-text)",
             }}>
-            {view === "structured" ? "📋 JSON 원본 보기" : "📑 구조화 보기"}
+            {view === "structured" ? "📋 JSON 원본" : "📑 구조화 보기"}
           </button>
+
+          {/* Rationale 보기 (이전 결과 확인) */}
           {onReopenPanel && (
             <button
               onClick={onReopenPanel}
+              title="AI 생성 / QA 검토 결과 자세히 보기"
               style={{
-                background: processColor,
-                border: "none",
+                background: "#fff",
+                border: "1px solid var(--c-navy-deep)",
+                color: "var(--c-navy-deep)",
                 borderRadius: 6,
-                padding: "6px 12px",
+                padding: "7px 13px",
                 fontSize: 11, fontWeight: 600,
                 cursor: "pointer",
-                color: "#fff",
               }}>
               📊 Rationale 보기
             </button>
           )}
+
+          {/* QA 검토 시작 (Phase 2-2b STEP C-2 핵심) */}
+          {onQAReview && (
+            <button
+              onClick={onQAReview}
+              disabled={!canQAReview || evaluating}
+              title={
+                !canQAReview
+                  ? "먼저 AI 생성을 실행하세요"
+                  : evaluating
+                    ? "QA 검토 진행 중..."
+                    : hasEvaluator
+                      ? "다시 QA 검토를 실행합니다 (Gemini 재평가)"
+                      : "Gemini가 Claude의 결과를 독립 평가합니다 (편향 분리). 10~30초 소요."
+              }
+              style={{
+                background: (canQAReview && !evaluating) ? processColor : "var(--c-bg-mid)",
+                border: "none",
+                color: (canQAReview && !evaluating) ? "#fff" : "var(--c-text-muted)",
+                borderRadius: 6,
+                padding: "7px 13px",
+                fontSize: 11, fontWeight: 600,
+                cursor: (canQAReview && !evaluating) ? "pointer" : "not-allowed",
+                opacity: evaluating ? 0.6 : 1,
+              }}>
+              {evaluating
+                ? "🔍 검토 중..."
+                : hasEvaluator
+                  ? "🔍 QA 다시 검토"
+                  : "🔍 QA 검토 시작"}
+            </button>
+          )}
         </div>
       </div>
+
+      {/* QA 상태 안내 배너 */}
+      {hasEvaluator && (
+        <div style={{
+          marginBottom: 18,
+          padding: "10px 14px",
+          background: "rgba(35, 131, 226, 0.08)",
+          border: "1px solid rgba(35, 131, 226, 0.25)",
+          borderRadius: 6,
+          fontSize: 11, color: "var(--c-navy-deep)",
+          display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <span style={{ fontSize: 14 }}>✓</span>
+          <span>
+            <strong>QA 검토 완료</strong> — Gemini 독립 평가가 실행되었습니다.
+            우측 상단 <strong>[📊 Rationale 보기]</strong>를 눌러 critique 상세를 확인하세요.
+          </span>
+        </div>
+      )}
+      {!hasEvaluator && canQAReview && (
+        <div style={{
+          marginBottom: 18,
+          padding: "10px 14px",
+          background: "rgba(245, 158, 11, 0.08)",
+          border: "1px solid rgba(245, 158, 11, 0.30)",
+          borderRadius: 6,
+          fontSize: 11, color: "#92400E",
+          display: "flex", alignItems: "center", gap: 8,
+        }}>
+          <span style={{ fontSize: 14 }}>💡</span>
+          <span>
+            <strong>다음 단계</strong> — 산출물을 검토하신 후 우측 상단
+            <strong> [🔍 QA 검토 시작]</strong>을 누르면 Gemini가 독립 평가합니다.
+          </span>
+        </div>
+      )}
 
       {/* 본문 */}
       {view === "structured" ? (
@@ -96,6 +179,7 @@ export default function GeneratedArtifactView({ aiGenerated, processColor, onReo
           opContext={opContext}
           traceSeeds={traceSeeds}
           processColor={processColor}
+          onEditStkReq={onEditStkReq}
         />
       ) : (
         <JsonView aiGenerated={aiGenerated} />
@@ -105,12 +189,11 @@ export default function GeneratedArtifactView({ aiGenerated, processColor, onReo
 }
 
 // ──────────────────────────────────────────────────
-// 구조화 보기 (사람이 읽기 좋은 형태)
+// 구조화 보기
 // ──────────────────────────────────────────────────
-function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor }) {
+function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor, onEditStkReq }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      {/* 통계 요약 */}
       <SummaryBar
         stats={[
           { label: "STK_REQ", count: stkReqs.length, color: processColor },
@@ -120,16 +203,19 @@ function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor
         ]}
       />
 
-      {/* Stakeholder Requirements */}
       <Section title="Stakeholder Requirements" count={stkReqs.length}>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {stkReqs.map(req => (
-            <StkReqCard key={req.id} req={req} processColor={processColor} />
+            <StkReqCard
+              key={req.id}
+              req={req}
+              processColor={processColor}
+              onEdit={onEditStkReq ? () => onEditStkReq(req) : null}
+            />
           ))}
         </div>
       </Section>
 
-      {/* Use Cases */}
       {useCases.length > 0 && (
         <Section title="Use Cases" count={useCases.length}>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -140,7 +226,6 @@ function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor
         </Section>
       )}
 
-      {/* Operational Context */}
       <Section title="Operational Context">
         <div style={{
           background: "var(--c-bg-soft)",
@@ -179,7 +264,6 @@ function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor
         </div>
       </Section>
 
-      {/* Traceability Seeds */}
       {(traceSeeds.from_sw_req?.length || traceSeeds.from_hw_req?.length || traceSeeds.from_sow?.length) && (
         <Section title="Traceability Seeds">
           <div style={{ display: "flex", flexDirection: "column", gap: 10, fontSize: 11 }}>
@@ -199,9 +283,6 @@ function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor
   );
 }
 
-// ──────────────────────────────────────────────────
-// JSON 원본 보기
-// ──────────────────────────────────────────────────
 function JsonView({ aiGenerated }) {
   return (
     <pre style={{
@@ -223,9 +304,6 @@ function JsonView({ aiGenerated }) {
   );
 }
 
-// ──────────────────────────────────────────────────
-// 통계 바
-// ──────────────────────────────────────────────────
 function SummaryBar({ stats }) {
   return (
     <div style={{ display: "flex", gap: 10 }}>
@@ -254,10 +332,7 @@ function SummaryBar({ stats }) {
   );
 }
 
-// ──────────────────────────────────────────────────
-// STK_REQ 카드
-// ──────────────────────────────────────────────────
-function StkReqCard({ req, processColor }) {
+function StkReqCard({ req, processColor, onEdit }) {
   const categoryColors = {
     functional:     { bg: "rgba(35, 131, 226, 0.10)", text: "#1E3A8A", border: "rgba(35, 131, 226, 0.30)" },
     non_functional: { bg: "rgba(139, 92, 246, 0.10)", text: "#5B21B6", border: "rgba(139, 92, 246, 0.30)" },
@@ -272,15 +347,17 @@ function StkReqCard({ req, processColor }) {
     could:  "#6B7280",
   };
 
+  const isModified = req.modified === true;
+
   return (
     <div style={{
       padding: "12px 14px",
-      background: "#fff",
-      border: "1px solid var(--c-border)",
+      background: isModified ? "rgba(245, 158, 11, 0.04)" : "#fff",
+      border: `1px solid ${isModified ? "rgba(245, 158, 11, 0.30)" : "var(--c-border)"}`,
       borderRadius: 8,
       display: "flex", flexDirection: "column", gap: 8,
+      position: "relative",
     }}>
-      {/* 상단: ID + 카테고리 + 우선순위 */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <span style={{
           fontSize: 11, fontWeight: 700,
@@ -308,13 +385,44 @@ function StkReqCard({ req, processColor }) {
         </span>
         <span style={{
           fontSize: 10, color: "var(--c-text-muted)",
-          marginLeft: "auto",
         }}>
           🔍 {req.verification_method}
         </span>
+        {isModified && (
+          <span style={{
+            fontSize: 10, fontWeight: 600,
+            color: "#92400E",
+            padding: "2px 8px",
+            background: "rgba(245, 158, 11, 0.15)",
+            border: "1px solid rgba(245, 158, 11, 0.40)",
+            borderRadius: 10,
+          }}>
+            ✏ 사용자 수정
+          </span>
+        )}
+
+        {/* 편집 버튼 — 우측 끝 */}
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            title="이 요구사항 편집"
+            style={{
+              marginLeft: "auto",
+              background: "transparent",
+              border: "1px solid var(--c-border-strong)",
+              borderRadius: 4,
+              padding: "3px 9px",
+              fontSize: 10, fontWeight: 600,
+              color: "var(--c-text-soft)",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 3,
+            }}
+          >
+            ✏ 편집
+          </button>
+        )}
       </div>
 
-      {/* Statement */}
       <div style={{
         fontSize: 13, lineHeight: 1.6, color: "var(--c-text)",
         fontWeight: 500,
@@ -322,30 +430,29 @@ function StkReqCard({ req, processColor }) {
         {req.statement}
       </div>
 
-      {/* Rationale */}
-      <div style={{
-        fontSize: 11, lineHeight: 1.6,
-        color: "var(--c-text-soft)",
-        fontStyle: "italic",
-        paddingLeft: 10, borderLeft: "2px solid var(--c-border)",
-      }}>
-        💡 {req.rationale}
-      </div>
+      {req.rationale && (
+        <div style={{
+          fontSize: 11, lineHeight: 1.6,
+          color: "var(--c-text-soft)",
+          fontStyle: "italic",
+          paddingLeft: 10, borderLeft: "2px solid var(--c-border)",
+        }}>
+          💡 {req.rationale}
+        </div>
+      )}
 
-      {/* Source */}
-      <div style={{
-        fontSize: 10, color: "var(--c-text-muted)",
-        fontFamily: "monospace",
-      }}>
-        📎 {req.source_doc}
-      </div>
+      {req.source_doc && (
+        <div style={{
+          fontSize: 10, color: "var(--c-text-muted)",
+          fontFamily: "monospace",
+        }}>
+          📎 {req.source_doc}
+        </div>
+      )}
     </div>
   );
 }
 
-// ──────────────────────────────────────────────────
-// Use Case 카드
-// ──────────────────────────────────────────────────
 function UseCaseCard({ uc }) {
   return (
     <div style={{
@@ -408,9 +515,6 @@ function UseCaseCard({ uc }) {
   );
 }
 
-// ──────────────────────────────────────────────────
-// Traceability Row
-// ──────────────────────────────────────────────────
 function TraceabilityRow({ label, items, color }) {
   return (
     <div>
@@ -433,9 +537,6 @@ function TraceabilityRow({ label, items, color }) {
   );
 }
 
-// ──────────────────────────────────────────────────
-// Section 헬퍼
-// ──────────────────────────────────────────────────
 function Section({ title, count, children }) {
   return (
     <div>

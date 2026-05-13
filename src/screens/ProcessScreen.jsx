@@ -18,7 +18,8 @@ import WorkProductRegisterModal from "../components/WorkProductRegisterModal.jsx
 import WorkProductDirectInputModal from "../components/WorkProductDirectInputModal.jsx";
 import RationalePanel from "../components/RationalePanel.jsx";
 import GeneratedArtifactView from "../components/GeneratedArtifactView.jsx";
-import { runAgentHarness, AgentStep } from "../lib/agent-harness.js";
+import StkReqEditModal from "../components/StkReqEditModal.jsx";
+import { runGenerator, runEvaluator, AgentStep, isBusy } from "../lib/agent-harness.js";
 
 // AI 생성 지원 프로세스 (Phase 2-2a 는 SYS.1만)
 const AI_GENERATE_SUPPORTED = new Set(["SYS.1"]);
@@ -45,6 +46,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   // 모달 상태
   const [registerModal, setRegisterModal] = useState({ open: false, item: null });
   const [directModal, setDirectModal] = useState({ open: false, item: null });
+  const [stkReqEditModal, setStkReqEditModal] = useState({ open: false, req: null });
 
   // Rationale Panel 상태 (Phase 2-2a)
   const [panelOpen, setPanelOpen] = useState(false);
@@ -52,6 +54,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   const [agentDetail, setAgentDetail] = useState(null);
   const [agentResult, setAgentResult] = useState(null);
   const [generating, setGenerating] = useState(false);
+  const [evaluating, setEvaluating] = useState(false);
 
   useEffect(() => {
     setState(wp?.state || "INITIAL");
@@ -114,7 +117,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
     return wp?.content?.[itemKey] || null;
   }
 
-  // ── AI 생성 핸들러 (Phase 2-2a) ──────────────────
+  // ── AI 생성 핸들러 (Phase 2-2b STEP C-2: Generator만) ──
   async function handleAIGenerate() {
     if (!wp) {
       alert("입력값을 먼저 저장하세요.");
@@ -128,12 +131,12 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
     // 패널 열고 진행 시작
     setPanelOpen(true);
     setAgentResult(null);
-    setAgentStep(AgentStep.PREPARING);
+    setAgentStep(AgentStep.GEN_PREPARING);
     setAgentDetail({ message: '시작 중...' });
     setGenerating(true);
 
     try {
-      const result = await runAgentHarness({
+      const result = await runGenerator({
         projectId: project.id,
         processId,
         workProductId: wp.id,
@@ -142,16 +145,159 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           setAgentDetail(detail);
         },
       });
-      setAgentResult(result);
+      // agentResult 에 Generator 결과만 저장 (Evaluator 는 별도 트리거)
+      setAgentResult({ generator: result.generator, evaluator: null });
 
       // work_product 데이터 다시 로드 (state 업데이트 반영)
       if (onWorkProductChange) await onWorkProductChange();
     } catch (e) {
-      setAgentStep(AgentStep.FAILED);
+      setAgentStep(AgentStep.GEN_FAILED);
       setAgentDetail({ message: `오류: ${e.message}` });
     }
     setGenerating(false);
   }
+
+  // ── QA 검토 핸들러 (Phase 2-2b STEP C-2: Evaluator만, 사용자 명시 트리거) ──
+  async function handleQAReview() {
+    if (!agentResult?.generator) {
+      alert("AI 생성 결과가 없습니다. 먼저 [⚡ AI 생성] 을 실행하세요.");
+      return;
+    }
+
+    setPanelOpen(true);
+    setAgentStep(AgentStep.EVAL_PREPARING);
+    setAgentDetail({ message: 'QA 검토 준비 중...' });
+    setEvaluating(true);
+
+    try {
+      const result = await runEvaluator({
+        generatorResult: agentResult.generator,
+        projectId: project.id,
+        processId,
+        workProductId: wp.id,
+        onProgress: (step, detail) => {
+          setAgentStep(step);
+          setAgentDetail(detail);
+        },
+      });
+      // agentResult 에 Evaluator 결과 추가
+      setAgentResult(prev => ({
+        ...prev,
+        evaluator: result.evaluator,
+      }));
+    } catch (e) {
+      setAgentStep(AgentStep.EVAL_FAILED);
+      setAgentDetail({ message: `오류: ${e.message}` });
+    }
+    setEvaluating(false);
+  }
+
+  // ── STK_REQ 카드 편집 핸들러 (Phase 2-2b STEP C-2: 옵션 A) ──
+  // 사용자가 [✏ 편집] 클릭 시 모달 열기
+  function handleStkReqEditOpen(req) {
+    setStkReqEditModal({ open: true, req });
+  }
+
+  // 편집 모달에서 [저장] 클릭 시 호출 — DB 의 work_products.content 업데이트
+  async function handleStkReqEditSave(editedReq) {
+    if (!wp) throw new Error("Work product not found");
+
+    const existing = wp.content?.ai_generated;
+    if (!existing) throw new Error("No AI generated content");
+
+    const stkReqs = existing.stakeholder_requirements || [];
+    const idx = stkReqs.findIndex(r => r.id === editedReq.id);
+    if (idx < 0) throw new Error(`Requirement ${editedReq.id} not found`);
+
+    // 새 배열 생성 (immutable)
+    const newStkReqs = stkReqs.map((r, i) => i === idx ? editedReq : r);
+
+    const updatedContent = {
+      ...wp.content,
+      ai_generated: {
+        ...existing,
+        stakeholder_requirements: newStkReqs,
+        // 메타 정보 추가
+        user_modified: true,
+        last_modified_at: new Date().toISOString(),
+      },
+    };
+
+    // DB 업데이트
+    await apiCall(
+      `/api/projects?resource=work_products&id=${wp.id}`,
+      "PATCH",
+      { content: updatedContent }
+    );
+
+    // 부모에서 데이터 다시 로드
+    if (onWorkProductChange) await onWorkProductChange();
+  }
+
+  // ── 페이지 진입 시 마지막 critique 자동 로드 ──
+  // ai_generated 가 DB 에 있으면 가장 최근 evaluator critique 도 조회해서 agentResult 에 미리 설정
+  useEffect(() => {
+    if (!wp?.content?.ai_generated || agentResult) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        // 마지막 evaluator 결과 조회
+        const url = `/api/projects?resource=ai_generations&work_product_id=${wp.id}&agent_role=evaluator&order=created_at.desc&limit=1`;
+        const res = await fetch(url);
+        if (!res.ok) return;
+        const data = await res.json();
+        const lastEval = Array.isArray(data) && data.length > 0 ? data[0] : null;
+        if (cancelled) return;
+
+        // Generator 의 마지막 결과도 조회
+        const urlGen = `/api/projects?resource=ai_generations&work_product_id=${wp.id}&agent_role=generator&order=created_at.desc&limit=1`;
+        const resGen = await fetch(urlGen);
+        const dataGen = resGen.ok ? await resGen.json() : [];
+        const lastGen = Array.isArray(dataGen) && dataGen.length > 0 ? dataGen[0] : null;
+        if (cancelled) return;
+
+        // agentResult 미리 설정 (UI 에서 Rationale 보기 가능하게)
+        const generatorMock = lastGen ? {
+          success: true,
+          passed: lastGen.guardrail_passed,
+          ai_generation_id: lastGen.id,
+          output: wp.content.ai_generated,
+          guardrail_result: lastGen.guardrail_result,
+          meta: {
+            model: lastGen.model,
+            input_tokens: lastGen.input_tokens,
+            output_tokens: lastGen.output_tokens,
+            cost_usd: lastGen.cost_usd,
+            latency_ms: lastGen.latency_ms,
+            skills_used: lastGen.skills_used,
+          },
+        } : null;
+        const evaluatorMock = lastEval ? {
+          success: true,
+          critique: lastEval.parsed_output,
+          meta: {
+            model: lastEval.model,
+            input_tokens: lastEval.input_tokens,
+            output_tokens: lastEval.output_tokens,
+            cost_usd: lastEval.cost_usd,
+            latency_ms: lastEval.latency_ms,
+          },
+        } : null;
+
+        if (generatorMock || evaluatorMock) {
+          setAgentResult({
+            generator: generatorMock,
+            evaluator: evaluatorMock,
+          });
+        }
+      } catch (e) {
+        console.warn('[ProcessScreen] failed to load last critique:', e);
+      }
+    })();
+    return () => { cancelled = true; };
+    // wp?.id 변경 시 (또는 ai_generated 처음 등장 시) 1회만 실행
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wp?.id, wp?.content?.ai_generated]);
 
   const requiredItems = (cfg.items || []).filter(i => i.required);
   const filledRequired = requiredItems.filter(i => {
@@ -279,25 +425,9 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               </>
             )}
           </div>
-          {/* Rationale 보기 버튼 — 이전 생성 결과가 있을 때만 표시 */}
-          {agentResult && !generating && (
-            <button
-              onClick={() => setPanelOpen(true)}
-              title="이전 AI 생성/QA 검토 결과 다시 보기"
-              style={{
-                background: "#fff",
-                color: "var(--c-navy-deep)",
-                border: "1px solid var(--c-navy-deep)",
-                borderRadius: 6, padding: "9px 14px",
-                fontSize: 12, fontWeight: 600,
-                cursor: "pointer",
-              }}>
-              📊 Rationale 보기
-            </button>
-          )}
           <button
             onClick={handleAIGenerate}
-            disabled={!allRequiredFilled || generating || !AI_GENERATE_SUPPORTED.has(processId)}
+            disabled={!allRequiredFilled || generating || evaluating || !AI_GENERATE_SUPPORTED.has(processId)}
             title={
               !AI_GENERATE_SUPPORTED.has(processId)
                 ? `Phase 2-2a는 SYS.1만 지원합니다 (${processId} 미지원)`
@@ -311,8 +441,8 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               border: "none",
               borderRadius: 6, padding: "9px 18px",
               fontSize: 12, fontWeight: 600,
-              opacity: generating ? 0.6 : 1,
-              cursor: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId) && !generating) ? "pointer" : "not-allowed",
+              opacity: (generating || evaluating) ? 0.6 : 1,
+              cursor: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId) && !generating && !evaluating) ? "pointer" : "not-allowed",
             }}>
             {generating ? "⚡ 생성 중..." : "⚡ AI 생성"}
           </button>
@@ -324,7 +454,12 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         <GeneratedArtifactView
           aiGenerated={wp.content.ai_generated}
           processColor={cfg.color}
-          onReopenPanel={agentResult ? () => setPanelOpen(true) : null}
+          onReopenPanel={() => setPanelOpen(true)}
+          onQAReview={handleQAReview}
+          canQAReview={!!agentResult?.generator && !generating && !evaluating}
+          hasEvaluator={!!agentResult?.evaluator}
+          evaluating={evaluating}
+          onEditStkReq={handleStkReqEditOpen}
         />
       )}
 
@@ -336,8 +471,8 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         borderRadius: 8,
         fontSize: 11, color: "var(--c-text-soft)", lineHeight: 1.6,
       }}>
-        <strong>Phase 2-2b 활성 (STEP C-1)</strong> — Claude Opus 4.7 (Generator) + Gemini 2.0 Flash (Evaluator) + 5축 가드레일 (① 구조 / ② 추적성 / ③ 도메인 / ④ 교차검증).<br/>
-        다음 Phase 2-2b STEP C-2: 사용자 제어 QA 검토 + 다운로드 (JSON/CSV/Markdown). Phase 2-3: HITL 승인 (⑤ 활성).
+        <strong>Phase 2-2b 활성 (STEP C-2)</strong> — 사용자 제어 흐름: [⚡ AI 생성] → 결과 검토 → [🔍 QA 검토 시작] → 평가 결과 확인.<br/>
+        Claude Opus 4.7 (Generator) + Gemini 2.0 Flash (Evaluator) + 5축 가드레일 (① ② ③ ④ 활성). 다음 STEP C-3: 다운로드 (JSON/CSV/Markdown).
       </div>
 
       {/* ── 모달 ──────────────────────────────────── */}
@@ -363,10 +498,20 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         />
       )}
 
-      {/* Rationale Panel (우측 슬라이드, Phase 2-2a) */}
+      {/* STK_REQ 편집 모달 (Phase 2-2b STEP C-2: 옵션 A 카드별 인라인 편집) */}
+      {stkReqEditModal.open && (
+        <StkReqEditModal
+          open={stkReqEditModal.open}
+          onClose={() => setStkReqEditModal({ open: false, req: null })}
+          req={stkReqEditModal.req}
+          onSave={handleStkReqEditSave}
+        />
+      )}
+
+      {/* Rationale Panel (우측 슬라이드) */}
       <RationalePanel
         open={panelOpen}
-        onClose={() => !generating && setPanelOpen(false)}
+        onClose={() => !generating && !evaluating && setPanelOpen(false)}
         step={agentStep}
         detail={agentDetail}
         result={agentResult}

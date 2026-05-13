@@ -1,48 +1,32 @@
-// src/components/RationalePanel.jsx — Rationale Panel (Phase 2-2b)
-//
-// 화면설계서 v260506 SCR-11
-//
-// Phase 2-2b 추가 사항:
-//   - "QA 검토" 단계 (Gemini Evaluator) 진행 표시
-//   - 5축 가드레일 ④번 (cross_verify) 활성 표시
-//   - Gemini critique 결과 섹션 (verdict, issues, strengths, summary)
+// src/components/RationalePanel.jsx — Phase 2-2b STEP C-2
 
 import { AgentStep } from '../lib/agent-harness.js';
 
 export default function RationalePanel({ open, onClose, step, detail, result }) {
   if (!open) return null;
 
-  // result 구조: { generator, evaluator, finalPassed, ... }
-  const generator = result?.generator || result;
+  const generator = result?.generator;
   const evaluator = result?.evaluator;
   const critique = evaluator?.critique;
 
   return (
     <>
-      {/* Overlay */}
-      <div
-        onClick={onClose}
-        style={{
-          position: 'fixed', inset: 0,
-          background: 'rgba(15, 23, 42, 0.35)',
-          backdropFilter: 'blur(2px)',
-          zIndex: 900,
-        }}
-      />
+      <div style={{
+        position: 'fixed', inset: 0,
+        background: 'rgba(15, 23, 42, 0.35)',
+        backdropFilter: 'blur(2px)',
+        zIndex: 900,
+      }} />
 
-      {/* Panel */}
-      <div
-        style={{
-          position: 'fixed', top: 0, right: 0, bottom: 0,
-          width: 'min(640px, 95vw)',
-          background: '#fff',
-          boxShadow: '-8px 0 30px rgba(15, 23, 42, 0.18)',
-          zIndex: 901,
-          display: 'flex', flexDirection: 'column',
-          overflow: 'hidden',
-        }}
-      >
-        {/* Header */}
+      <div style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0,
+        width: 'min(640px, 95vw)',
+        background: '#fff',
+        boxShadow: '-8px 0 30px rgba(15, 23, 42, 0.18)',
+        zIndex: 901,
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+      }}>
         <div style={{
           padding: '18px 22px',
           borderBottom: '1px solid var(--c-border)',
@@ -70,9 +54,8 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
           }} aria-label="닫기">×</button>
         </div>
 
-        {/* Body */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 22px' }}>
-          <ProgressSection step={step} detail={detail} />
+          <ProgressSection step={step} detail={detail} hasGenerator={!!generator} hasEvaluator={!!evaluator} />
 
           {generator?.meta && (
             <MetaSection
@@ -82,19 +65,30 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
             />
           )}
 
-          {/* 가드레일 결과 */}
           {(generator?.guardrail_result || critique) && (
             <GuardrailSection
               generatorGuardrail={generator?.guardrail_result}
               critique={critique}
+              hasEvaluator={!!evaluator}
             />
           )}
 
-          {/* Gemini critique 상세 */}
           {critique && <CritiqueSection critique={critique} />}
+
+          {generator && !evaluator && (
+            <div style={{
+              marginTop: 18,
+              padding: '12px 14px',
+              background: 'rgba(245, 158, 11, 0.08)',
+              border: '1px solid rgba(245, 158, 11, 0.30)',
+              borderRadius: 8,
+              fontSize: 12, color: '#92400E', lineHeight: 1.6,
+            }}>
+              💡 <strong>QA 검토 미실행</strong> — 산출물 화면 우측 상단 <strong>[🔍 QA 검토 시작]</strong> 버튼을 누르면 Gemini가 독립 평가합니다 (5축 가드레일 ④).
+            </div>
+          )}
         </div>
 
-        {/* Footer */}
         <div style={{
           padding: '12px 22px',
           borderTop: '1px solid var(--c-border)',
@@ -116,58 +110,93 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
   );
 }
 
-// ──────────────────────────────────────────────────
-// 진행 단계 표시 (5단계 — Phase 2-2b)
-// ──────────────────────────────────────────────────
-function ProgressSection({ step, detail }) {
-  const steps = [
-    { id: AgentStep.PREPARING,  label: '준비',     desc: '입력 검증 + Skills 로딩' },
-    { id: AgentStep.GENERATING, label: '생성',     desc: 'Claude Opus 4.7 (adaptive thinking)' },
-    { id: AgentStep.VALIDATING, label: '구조 검증', desc: '5축 가드레일 ① ② ③' },
-    { id: AgentStep.EVALUATING, label: 'QA 검토',  desc: 'Gemini 독립 평가 (④ 교차검증)' },
-    { id: AgentStep.COMPLETED,  label: '완료',     desc: '결과 저장' },
+function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
+  const genSteps = [
+    { id: AgentStep.GEN_PREPARING,  label: '준비',       desc: '입력 검증 + Skills 로딩' },
+    { id: AgentStep.GEN_GENERATING, label: '생성',       desc: 'Claude Opus 4.7 (adaptive thinking)' },
+    { id: AgentStep.GEN_VALIDATING, label: '구조 검증',  desc: '5축 가드레일 ① ② ③' },
+    { id: AgentStep.GEN_COMPLETED,  label: 'AI 생성 완료', desc: '사용자 검토 단계' },
   ];
 
-  const stepIndex = steps.findIndex(s => s.id === step);
-  const isFailed = step === AgentStep.FAILED;
-  const isBlocked = step === AgentStep.BLOCKED;
-  const isCompleted = step === AgentStep.COMPLETED;
-  const isNeedsRef = step === AgentStep.NEEDS_REFINEMENT;
+  const evalSteps = [
+    { id: AgentStep.EVAL_PREPARING,  label: 'QA 준비',  desc: 'Gemini API 준비' },
+    { id: AgentStep.EVAL_EVALUATING, label: 'QA 검토',  desc: 'Gemini 독립 평가 (④ 교차검증)' },
+    { id: AgentStep.EVAL_COMPLETED,  label: 'QA 완료',  desc: '결과 저장' },
+  ];
+
+  function getStepState(stepId, group) {
+    const groupSteps = group === 'gen' ? genSteps : evalSteps;
+    const currentIndex = groupSteps.findIndex(s => s.id === step);
+    const stepIndex = groupSteps.findIndex(s => s.id === stepId);
+    const isFailed = (group === 'gen' && step === AgentStep.GEN_FAILED) ||
+                     (group === 'eval' && step === AgentStep.EVAL_FAILED);
+    const isBlocked = step === AgentStep.GEN_BLOCKED ||
+                      step === AgentStep.EVAL_REJECTED;
+    const isWarning = step === AgentStep.EVAL_NEEDS_REFINEMENT;
+
+    if (currentIndex === stepIndex && currentIndex >= 0) {
+      if (isFailed) return 'failed';
+      if (isBlocked) return 'blocked';
+      if (isWarning) return 'warning';
+      return 'active';
+    }
+
+    if (currentIndex >= 0 && stepIndex < currentIndex) return 'done';
+
+    if (group === 'gen' && hasGenerator) return 'done';
+    if (group === 'eval' && hasEvaluator) return 'done';
+
+    return 'pending';
+  }
 
   return (
     <Section title="진행 단계">
+      <div style={{
+        fontSize: 10, fontWeight: 700,
+        color: 'var(--c-text-muted)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        marginBottom: 8,
+      }}>
+        [1] AI 생성 (Generator)
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 18 }}>
+        {genSteps.map(s => (
+          <StepRow key={s.id} step={s} state={getStepState(s.id, 'gen')} />
+        ))}
+      </div>
+
+      <div style={{
+        fontSize: 10, fontWeight: 700,
+        color: 'var(--c-text-muted)',
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        marginBottom: 8,
+      }}>
+        [2] QA 검토 (Evaluator)
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {steps.map((s, i) => {
-          let state;
-          if (isFailed && i === stepIndex)        state = 'failed';
-          else if (isBlocked && i === stepIndex)  state = 'blocked';
-          else if (isNeedsRef && i === stepIndex) state = 'warning';
-          else if (i < stepIndex)                 state = 'done';
-          else if (i === stepIndex)               state = 'active';
-          else                                    state = 'pending';
-
-          if (isCompleted && i <= 4)              state = 'done';
-
-          return <StepRow key={s.id} step={s} state={state} />;
-        })}
+        {evalSteps.map(s => (
+          <StepRow key={s.id} step={s} state={getStepState(s.id, 'eval')} />
+        ))}
       </div>
 
       {detail?.message && (
         <div style={{
           marginTop: 12,
           padding: '10px 12px',
-          background: isBlocked || isFailed ? 'rgba(220, 38, 38, 0.08)' :
-                      isNeedsRef ? 'rgba(245, 158, 11, 0.08)' :
-                      'var(--c-bg-soft)',
-          border: isBlocked || isFailed ? '1px solid rgba(220, 38, 38, 0.25)' :
-                  isNeedsRef ? '1px solid rgba(245, 158, 11, 0.25)' :
-                  '1px solid transparent',
+          background: detail.message.includes('오류') || detail.message.includes('차단') || detail.message.includes('반려')
+            ? 'rgba(220, 38, 38, 0.08)'
+            : detail.message.includes('개선')
+              ? 'rgba(245, 158, 11, 0.08)'
+              : 'var(--c-bg-soft)',
+          border: detail.message.includes('오류') || detail.message.includes('차단') || detail.message.includes('반려')
+            ? '1px solid rgba(220, 38, 38, 0.25)'
+            : detail.message.includes('개선')
+              ? '1px solid rgba(245, 158, 11, 0.25)'
+              : '1px solid transparent',
           borderRadius: 6,
-          fontSize: 12,
-          color: isBlocked || isFailed ? '#991B1B' :
-                 isNeedsRef ? '#92400E' :
-                 'var(--c-text-soft)',
-          lineHeight: 1.6,
+          fontSize: 12, lineHeight: 1.6,
         }}>
           {detail.message}
         </div>
@@ -190,10 +219,10 @@ function StepRow({ step, state }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
       <div style={{
-        width: 28, height: 28, borderRadius: '50%',
+        width: 26, height: 26, borderRadius: '50%',
         background: c.bg, color: '#fff',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 12, fontWeight: 700, flexShrink: 0,
+        fontSize: 11, fontWeight: 700, flexShrink: 0,
         animation: c.pulse ? 'pulse 1.4s ease-in-out infinite' : 'none',
       }}>{c.icon}</div>
       <div style={{ flex: 1 }}>
@@ -204,9 +233,6 @@ function StepRow({ step, state }) {
   );
 }
 
-// ──────────────────────────────────────────────────
-// 메타데이터 (Generator + Evaluator)
-// ──────────────────────────────────────────────────
 function MetaSection({ meta, skillsUsed, evaluatorMeta }) {
   if (!meta) return null;
   const generatorCost = meta.cost_usd || 0;
@@ -226,29 +252,33 @@ function MetaSection({ meta, skillsUsed, evaluatorMeta }) {
           </>
         )}
 
-        <span style={{ color: 'var(--c-text-muted)' }}>Skills</span>
-        <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-          {(skillsUsed || []).map(s => (
-            <span key={s} style={{
-              fontSize: 10, fontWeight: 600,
-              background: 'rgba(30, 39, 97, 0.08)',
-              color: 'var(--c-navy-deep)',
-              padding: '2px 8px', borderRadius: 8,
-              border: '1px solid rgba(30, 39, 97, 0.18)',
-            }}>{s}</span>
-          ))}
-        </span>
+        {(skillsUsed?.length || 0) > 0 && (
+          <>
+            <span style={{ color: 'var(--c-text-muted)' }}>Skills</span>
+            <span style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+              {(skillsUsed || []).map(s => (
+                <span key={s} style={{
+                  fontSize: 10, fontWeight: 600,
+                  background: 'rgba(30, 39, 97, 0.08)',
+                  color: 'var(--c-navy-deep)',
+                  padding: '2px 8px', borderRadius: 8,
+                  border: '1px solid rgba(30, 39, 97, 0.18)',
+                }}>{s}</span>
+              ))}
+            </span>
+          </>
+        )}
 
         <span style={{ color: 'var(--c-text-muted)' }}>토큰 (Gen)</span>
         <span style={{ fontFamily: 'monospace' }}>
-          ↓ {meta.input_tokens?.toLocaleString() || 0} · ↑ {meta.output_tokens?.toLocaleString() || 0}
+          ↓ {(meta.input_tokens || 0).toLocaleString()} · ↑ {(meta.output_tokens || 0).toLocaleString()}
         </span>
 
         {evaluatorMeta && (
           <>
             <span style={{ color: 'var(--c-text-muted)' }}>토큰 (QA)</span>
             <span style={{ fontFamily: 'monospace' }}>
-              ↓ {evaluatorMeta.input_tokens?.toLocaleString() || 0} · ↑ {evaluatorMeta.output_tokens?.toLocaleString() || 0}
+              ↓ {(evaluatorMeta.input_tokens || 0).toLocaleString()} · ↑ {(evaluatorMeta.output_tokens || 0).toLocaleString()}
             </span>
           </>
         )}
@@ -262,12 +292,12 @@ function MetaSection({ meta, skillsUsed, evaluatorMeta }) {
         </span>
 
         <span style={{ color: 'var(--c-text-muted)' }}>지연 (Gen)</span>
-        <span style={{ fontFamily: 'monospace' }}>{meta.latency_ms?.toLocaleString() || 0}ms</span>
+        <span style={{ fontFamily: 'monospace' }}>{(meta.latency_ms || 0).toLocaleString()}ms</span>
 
         {evaluatorMeta && (
           <>
             <span style={{ color: 'var(--c-text-muted)' }}>지연 (QA)</span>
-            <span style={{ fontFamily: 'monospace' }}>{evaluatorMeta.latency_ms?.toLocaleString() || 0}ms</span>
+            <span style={{ fontFamily: 'monospace' }}>{(evaluatorMeta.latency_ms || 0).toLocaleString()}ms</span>
           </>
         )}
       </div>
@@ -275,10 +305,7 @@ function MetaSection({ meta, skillsUsed, evaluatorMeta }) {
   );
 }
 
-// ──────────────────────────────────────────────────
-// 5축 가드레일 결과 (① ② ③ 서버 + ④ Gemini + ⑤ HITL)
-// ──────────────────────────────────────────────────
-function GuardrailSection({ generatorGuardrail, critique }) {
+function GuardrailSection({ generatorGuardrail, critique, hasEvaluator }) {
   const axes = [
     { key: 'structure',    label: '① 구조',     desc: 'JSON Schema',         source: 'generator' },
     { key: 'traceability', label: '② 추적성',   desc: 'ID 매핑·V-Model',     source: 'generator' },
@@ -292,8 +319,8 @@ function GuardrailSection({ generatorGuardrail, critique }) {
       return { active: false, status: 'HOOKED', note: 'Phase 2-3 활성' };
     }
     if (axis.source === 'evaluator') {
-      if (!critique) {
-        return { active: false, status: 'HOOKED', note: 'Gemini 평가 미실행' };
+      if (!hasEvaluator || !critique) {
+        return { active: false, status: 'PENDING', note: 'QA 검토 미실행' };
       }
       const passed = critique.verdict === 'passed';
       const issues = critique.issues || [];
@@ -307,7 +334,6 @@ function GuardrailSection({ generatorGuardrail, critique }) {
         issueCount: issues.length,
       };
     }
-    // generator
     const r = generatorGuardrail?.axes?.[axis.key];
     if (!r) return { active: false, status: 'HOOKED', note: '미실행' };
     return {
@@ -327,7 +353,7 @@ function GuardrailSection({ generatorGuardrail, critique }) {
           if (!s.active) {
             bg = 'var(--c-bg-soft)';
             border = 'var(--c-border)';
-            statusBg = '#9CA3AF';
+            statusBg = s.status === 'PENDING' ? '#F59E0B' : '#9CA3AF';
           } else if (s.status === 'PASS') {
             bg = 'rgba(16, 185, 129, 0.06)';
             border = 'rgba(16, 185, 129, 0.3)';
@@ -383,9 +409,6 @@ function GuardrailSection({ generatorGuardrail, critique }) {
   );
 }
 
-// ──────────────────────────────────────────────────
-// Gemini Critique 상세 섹션 (Phase 2-2b 신규)
-// ──────────────────────────────────────────────────
 function CritiqueSection({ critique }) {
   if (!critique) return null;
 
@@ -401,7 +424,6 @@ function CritiqueSection({ critique }) {
 
   return (
     <Section title="Gemini QA 검토 결과">
-      {/* Verdict 요약 */}
       <div style={{
         padding: '12px 14px',
         background: vc.bg,
@@ -427,7 +449,7 @@ function CritiqueSection({ critique }) {
             fontSize: 12, fontWeight: 700,
             color: vc.color, fontFamily: 'monospace',
           }}>
-            {(critique.overall_score * 100).toFixed(0)} / 100
+            {((critique.overall_score || 0) * 100).toFixed(0)} / 100
           </span>
         </div>
         <div style={{
@@ -438,7 +460,6 @@ function CritiqueSection({ critique }) {
         </div>
       </div>
 
-      {/* 강점 */}
       {strengths.length > 0 && (
         <div style={{ marginBottom: 14 }}>
           <div style={{
@@ -460,7 +481,6 @@ function CritiqueSection({ critique }) {
         </div>
       )}
 
-      {/* 이슈 */}
       {issues.length > 0 && (
         <div>
           <div style={{
@@ -478,7 +498,6 @@ function CritiqueSection({ critique }) {
         </div>
       )}
 
-      {/* refinement_instructions */}
       {critique.refinement_instructions && (
         <div style={{
           marginTop: 14,
@@ -494,7 +513,7 @@ function CritiqueSection({ critique }) {
             textTransform: 'uppercase',
             marginBottom: 4,
           }}>
-            💡 개선 지시 (refinement instructions)
+            💡 개선 지시
           </div>
           <div style={{ color: 'var(--c-text)' }}>
             {critique.refinement_instructions}
@@ -580,9 +599,6 @@ function IssueCard({ issue }) {
   );
 }
 
-// ──────────────────────────────────────────────────
-// Section 헬퍼
-// ──────────────────────────────────────────────────
 function Section({ title, children }) {
   return (
     <div style={{ marginBottom: 22 }}>
