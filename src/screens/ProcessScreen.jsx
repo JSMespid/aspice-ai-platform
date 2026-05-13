@@ -279,6 +279,22 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               </>
             )}
           </div>
+          {/* Rationale 보기 버튼 — 이전 생성 결과가 있을 때만 표시 */}
+          {agentResult && !generating && (
+            <button
+              onClick={() => setPanelOpen(true)}
+              title="이전 AI 생성/QA 검토 결과 다시 보기"
+              style={{
+                background: "#fff",
+                color: "var(--c-navy-deep)",
+                border: "1px solid var(--c-navy-deep)",
+                borderRadius: 6, padding: "9px 14px",
+                fontSize: 12, fontWeight: 600,
+                cursor: "pointer",
+              }}>
+              📊 Rationale 보기
+            </button>
+          )}
           <button
             onClick={handleAIGenerate}
             disabled={!allRequiredFilled || generating || !AI_GENERATE_SUPPORTED.has(processId)}
@@ -320,8 +336,8 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         borderRadius: 8,
         fontSize: 11, color: "var(--c-text-soft)", lineHeight: 1.6,
       }}>
-        <strong>Phase 2-2a 활성</strong> — Claude Opus 4.7 (adaptive thinking) + Skills (aspice-sys1-derivation, automotive-domain-guide, traceability-rules) + 5축 가드레일 (1, 2, 3축).<br/>
-        다음 Phase 2-2b: Gemini 교차검증 추가 (4축 활성). Phase 2-3: HITL 승인 (5축 활성).
+        <strong>Phase 2-2b 활성 (STEP C-1)</strong> — Claude Opus 4.7 (Generator) + Gemini 2.0 Flash (Evaluator) + 5축 가드레일 (① 구조 / ② 추적성 / ③ 도메인 / ④ 교차검증).<br/>
+        다음 Phase 2-2b STEP C-2: 사용자 제어 QA 검토 + 다운로드 (JSON/CSV/Markdown). Phase 2-3: HITL 승인 (⑤ 활성).
       </div>
 
       {/* ── 모달 ──────────────────────────────────── */}
