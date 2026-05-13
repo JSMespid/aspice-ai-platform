@@ -236,15 +236,44 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
 
   // ── 페이지 진입 시 마지막 critique 자동 로드 ──
   // ai_generated 가 DB 에 있으면 가장 최근 evaluator critique 도 조회해서 agentResult 에 미리 설정
+  // API 조회 실패 시에도 wp.content.ai_generated 만으로 최소한의 generator mock 생성 (QA 검토 가능)
   useEffect(() => {
     if (!wp?.content?.ai_generated || agentResult) return;
     let cancelled = false;
+
+    // STEP 1: API 조회 시도 없이 즉시 최소 mock 설정 (fallback)
+    // 이렇게 하면 API 조회가 실패해도 QA 검토 버튼이 활성화됨
+    const minimalGeneratorMock = {
+      success: true,
+      passed: true,
+      ai_generation_id: null,  // DB 조회 후 채워질 수 있음
+      output: wp.content.ai_generated,
+      meta: {
+        model: 'claude-opus-4-7',
+        input_tokens: 0,
+        output_tokens: 0,
+        cost_usd: 0,
+        latency_ms: 0,
+        skills_used: ['aspice-sys1-derivation', 'automotive-domain-guide', 'traceability-rules'],
+      },
+    };
+    setAgentResult({
+      generator: minimalGeneratorMock,
+      evaluator: null,
+    });
+    // agentStep 도 "AI 생성 완료" 상태로 설정 (Rationale Panel 표시 정상화)
+    setAgentStep(AgentStep.GEN_COMPLETED);
+
+    // STEP 2: API 조회 시도 (성공하면 실제 값으로 덮어쓰기, 실패하면 fallback 유지)
     (async () => {
       try {
         // 마지막 evaluator 결과 조회
         const url = `/api/projects?resource=ai_generations&work_product_id=${wp.id}&agent_role=evaluator&order=created_at.desc&limit=1`;
         const res = await fetch(url);
-        if (!res.ok) return;
+        if (!res.ok) {
+          console.log('[ProcessScreen] ai_generations API 미지원 또는 데이터 없음 — fallback 유지');
+          return;
+        }
         const data = await res.json();
         const lastEval = Array.isArray(data) && data.length > 0 ? data[0] : null;
         if (cancelled) return;
@@ -256,7 +285,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         const lastGen = Array.isArray(dataGen) && dataGen.length > 0 ? dataGen[0] : null;
         if (cancelled) return;
 
-        // agentResult 미리 설정 (UI 에서 Rationale 보기 가능하게)
+        // 실제 DB 값으로 mock 덮어쓰기
         const generatorMock = lastGen ? {
           success: true,
           passed: lastGen.guardrail_passed,
@@ -271,7 +300,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
             latency_ms: lastGen.latency_ms,
             skills_used: lastGen.skills_used,
           },
-        } : null;
+        } : minimalGeneratorMock;
         const evaluatorMock = lastEval ? {
           success: true,
           critique: lastEval.parsed_output,
@@ -284,14 +313,17 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           },
         } : null;
 
-        if (generatorMock || evaluatorMock) {
-          setAgentResult({
-            generator: generatorMock,
-            evaluator: evaluatorMock,
-          });
+        setAgentResult({
+          generator: generatorMock,
+          evaluator: evaluatorMock,
+        });
+        // Evaluator 도 있으면 QA 완료 단계로
+        if (evaluatorMock) {
+          setAgentStep(AgentStep.EVAL_COMPLETED);
         }
       } catch (e) {
         console.warn('[ProcessScreen] failed to load last critique:', e);
+        // fallback 으로 이미 설정된 minimalGeneratorMock 유지
       }
     })();
     return () => { cancelled = true; };

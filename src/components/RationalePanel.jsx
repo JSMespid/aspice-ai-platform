@@ -134,6 +134,7 @@ function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
                       step === AgentStep.EVAL_REJECTED;
     const isWarning = step === AgentStep.EVAL_NEEDS_REFINEMENT;
 
+    // 우선 순위 1: 현재 활성 단계
     if (currentIndex === stepIndex && currentIndex >= 0) {
       if (isFailed) return 'failed';
       if (isBlocked) return 'blocked';
@@ -141,11 +142,15 @@ function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
       return 'active';
     }
 
+    // 우선 순위 2: 현재 활성 단계 이전 단계 (완료됨)
     if (currentIndex >= 0 && stepIndex < currentIndex) return 'done';
 
+    // 우선 순위 3: result 가 있으면 그룹 모두 완료로 표시
+    // (페이지 새로고침 후 마지막 결과 로드된 경우)
     if (group === 'gen' && hasGenerator) return 'done';
     if (group === 'eval' && hasEvaluator) return 'done';
 
+    // 우선 순위 4: 그 외 모두 pending
     return 'pending';
   }
 
