@@ -503,9 +503,12 @@ function mergePerSheetOutputs(perSheetOutputs, processId, title) {
 }
 
 // ──────────────────────────────────────────────────
-// Claude API 호출 (with Structured Outputs)
+// Claude API 호출 (with Structured Outputs + Rate Limit Retry)
+// Phase 2-2c: 429 응답 시 retry-after 헤더 기반 자동 재시도 (최대 2회)
+// 병렬 호출 시에도 안전하게 작동
 // ──────────────────────────────────────────────────
-async function callClaude({ systemPrompt, userPrompt, schema }) {
+async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
+  const MAX_RETRIES = 2;
   const ctrl = new AbortController();
   const timeoutId = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   const t0 = Date.now();
@@ -535,6 +538,16 @@ async function callClaude({ systemPrompt, userPrompt, schema }) {
         },
       }),
     });
+
+    // Phase 2-2c: 429 (Rate Limit) 또는 529 (Overloaded) 자동 재시도
+    if ((res.status === 429 || res.status === 529) && attempt < MAX_RETRIES) {
+      const retryAfter = parseInt(res.headers.get('retry-after') || '5', 10);
+      const waitMs = Math.min(Math.max(retryAfter * 1000, 1000), 30000);  // 1~30초
+      console.log(`[callClaude] ${res.status} received, retry after ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+      clearTimeout(timeoutId);
+      await new Promise(r => setTimeout(r, waitMs));
+      return callClaude({ systemPrompt, userPrompt, schema, attempt: attempt + 1 });
+    }
 
     const data = await res.json();
     const latency = Date.now() - t0;
@@ -685,17 +698,18 @@ export default async function handler(req, res) {
     let rawOutputLog = '';
 
     if (useSheetSplit) {
-      // ── 시트별 분할 호출 (순차) ──
-      console.log(`[generate] Sheet-split mode: ${sheetBasedInputs.length} sheets`);
-      const perSheetOutputs = [];
+      // ── Phase 2-2c: 시트별 분할 호출 (병렬) ──
+      // 2026년 5월 Anthropic Tier 1 Opus rate limit 15배 인상으로 병렬 호출 안전
+      // callClaude 내부에 429/529 retry 로직 있어 추가 안전
+      console.log(`[generate] Sheet-split mode (parallel): ${sheetBasedInputs.length} sheets`);
 
       // 다른 시트들 요약 (전체 컨텍스트 제공용)
       const otherInputsSummary = sheetBasedInputs
         .map((si, i) => `Sheet ${i + 1}/${sheetBasedInputs.length}: "${si.sheet.sheet_name}" (group: ${si.sheet.group_name}, ${si.sheet.rows.length} rows)`)
         .join('\n');
 
-      for (let i = 0; i < sheetBasedInputs.length; i++) {
-        const si = sheetBasedInputs[i];
+      // 사전: 각 시트별 child row 생성 (병렬로 DB 기록)
+      const childRowPromises = sheetBasedInputs.map((si, i) => {
         const sheetUserPrompt = buildSheetUserPrompt({
           processId: process_id,
           sheetData: si.sheet,
@@ -705,14 +719,12 @@ export default async function handler(req, res) {
           customerSourceFileName: si.fileName,
           otherInputsSummary,
         });
-
-        // 시트별 child row 생성
-        const [child] = await sb(`/ai_generations`, 'POST', {
+        return sb(`/ai_generations`, 'POST', {
           project_id,
           process_id,
           work_product_id: wp.id,
           agent_role: 'generator',
-          agent_step: i + 1,  // 시트별 step (1, 2, 3, ...)
+          agent_step: i + 1,
           model: MODEL,
           provider: PROVIDER,
           system_prompt: systemPrompt.slice(0, 50000),
@@ -720,9 +732,14 @@ export default async function handler(req, res) {
           skills_used: skillsUsed,
           parent_generation_id: aiGenId,
           status: 'pending',
-        }, 'return=representation') || [];
-        const childId = child?.id;
+        }, 'return=representation').then(arr => ({
+          si, sheetUserPrompt, childId: arr?.[0]?.id || null,
+        }));
+      });
+      const sheetTasks = await Promise.all(childRowPromises);
 
+      // 병렬 Claude 호출 — Promise.allSettled 로 부분 실패 허용
+      const callPromises = sheetTasks.map(async ({ si, sheetUserPrompt, childId }, i) => {
         try {
           const sheetResult = await callClaude({
             systemPrompt,
@@ -730,13 +747,7 @@ export default async function handler(req, res) {
             schema: PER_SHEET_SCHEMA,
           });
 
-          totalInputTokens += sheetResult.inputTokens;
-          totalOutputTokens += sheetResult.outputTokens;
-          totalLatencyMs += sheetResult.latencyMs;
-          rawOutputLog += `\n=== Sheet ${i + 1}: ${si.sheet.sheet_name} ===\n${sheetResult.rawOutput}\n`;
-
-          perSheetOutputs.push(sheetResult.parsedOutput);
-
+          // child row 성공 업데이트
           if (childId) {
             const sheetCost = estimateCost(sheetResult.inputTokens, sheetResult.outputTokens);
             await sb(`/ai_generations?id=eq.${childId}`, 'PATCH', {
@@ -752,21 +763,59 @@ export default async function handler(req, res) {
           }
 
           console.log(`[generate] Sheet ${i + 1}/${sheetBasedInputs.length} done: ${sheetResult.parsedOutput.stakeholder_requirements?.length || 0} STK_REQs`);
+          return { success: true, si, sheetResult };
         } catch (e) {
           if (childId) {
             await sb(`/ai_generations?id=eq.${childId}`, 'PATCH', {
               status: 'failed',
               error_message: e.message?.slice(0, 1000),
-            });
+            }).catch(() => {});
           }
-          throw new Error(`시트 "${si.sheet.sheet_name}" 처리 실패: ${e.message}`);
+          console.error(`[generate] Sheet ${i + 1} failed:`, e.message);
+          return { success: false, si, error: e.message };
         }
+      });
+
+      const callResults = await Promise.all(callPromises);
+
+      // 성공/실패 분리
+      const successResults = callResults.filter(r => r.success);
+      const failedResults = callResults.filter(r => !r.success);
+
+      // 모든 시트가 실패하면 전체 실패
+      if (successResults.length === 0) {
+        throw new Error(
+          `모든 시트(${sheetBasedInputs.length}개) 처리에 실패했습니다.\n` +
+          failedResults.map(f => `  - "${f.si.sheet.sheet_name}": ${f.error}`).join('\n')
+        );
       }
+
+      // 일부 성공: 진행하되 warnings에 기록
+      const perSheetOutputs = successResults.map(r => r.sheetResult.parsedOutput);
+      const partialFailWarnings = failedResults.map(
+        f => `시트 "${f.si.sheet.sheet_name}" 처리 실패: ${f.error}`
+      );
+
+      // 토큰/비용/지연 누적
+      for (const r of successResults) {
+        totalInputTokens += r.sheetResult.inputTokens;
+        totalOutputTokens += r.sheetResult.outputTokens;
+        rawOutputLog += `\n=== Sheet: ${r.si.sheet.sheet_name} ===\n${r.sheetResult.rawOutput}\n`;
+      }
+      // 병렬이므로 latency 는 가장 긴 시트 기준 (실제 wall-clock time)
+      totalLatencyMs = Math.max(0, ...successResults.map(r => r.sheetResult.latencyMs));
 
       // 결과 병합
       const title = `Stakeholder Requirements for ${project.product_name || project.name || 'System'}`;
       parsedOutput = mergePerSheetOutputs(perSheetOutputs, process_id, title);
-      finishReason = 'merged_from_sheets';
+
+      // 부분 실패 경고 추가
+      if (partialFailWarnings.length > 0) {
+        parsedOutput.warnings = [...(parsedOutput.warnings || []), ...partialFailWarnings];
+      }
+      finishReason = failedResults.length > 0
+        ? `partial_success_${successResults.length}/${sheetBasedInputs.length}`
+        : 'merged_from_sheets';
     } else {
       // ── 단일 호출 (기존 흐름, 백워드 호환) ──
       const userPrompt = buildUserPrompt(process_id, wp.content, project);
