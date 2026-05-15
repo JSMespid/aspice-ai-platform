@@ -1,15 +1,19 @@
-// src/components/GeneratedArtifactView.jsx — Phase 2-2b STEP C-2
+// src/components/GeneratedArtifactView.jsx — Phase 2-2b STEP C-3a
 //
 // 화면설계서 v260506 SCR-05 (확장):
 //   AI 생성이 완료된 후, 생성된 산출물을 메인 화면에 시각적으로 표시
-//   상단 액션 영역에 사용자 제어 버튼 (Rationale 보기 / QA 검토 시작)
+//   상단 액션 영역에 사용자 제어 버튼 (Rationale 보기 / QA 검토 시작 / 다운로드)
 //
-// Phase 2-2b STEP C-2 변경:
-//   - 상단 액션 영역 신규 — [📊 Rationale 보기] [🔍 QA 검토 시작]
+// Phase 2-2b STEP C-3a 변경:
+//   - 다운로드 메뉴 추가 — JSON / CSV / Markdown (DOCX/XLSX 는 C-3b, C-3c)
+//
+// Phase 2-2b STEP C-2 (이전):
+//   - 상단 액션 영역 — [📊 Rationale 보기] [🔍 QA 검토 시작]
 //   - canQAReview, hasEvaluator, evaluating props 지원
-//   - Phase 2-2a 기존 표시 (통계 바, STK_REQ 카드, Use Case, Operational Context, Traceability Seeds) 유지
+//   - 카드별 [✏ 편집] 버튼
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
+import { exportJSON, exportCSV, exportMarkdown } from "../lib/exporters.js";
 
 export default function GeneratedArtifactView({
   aiGenerated,
@@ -19,9 +23,29 @@ export default function GeneratedArtifactView({
   canQAReview,
   hasEvaluator,
   evaluating,
-  onEditStkReq,   // 신규: STK_REQ 카드 편집 핸들러 (req => void)
+  onEditStkReq,
+  // STEP C-3a 신규 props (다운로드용 메타데이터)
+  projectName,
+  processId,
+  generatorModel,
+  evaluatorModel,
+  critique,        // 최근 critique (다운로드 포함용)
 }) {
   const [view, setView] = useState("structured"); // 'structured' | 'json'
+  const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
+  const downloadMenuRef = useRef(null);
+
+  // 메뉴 외부 클릭 시 닫기
+  useEffect(() => {
+    if (!downloadMenuOpen) return;
+    function handler(e) {
+      if (downloadMenuRef.current && !downloadMenuRef.current.contains(e.target)) {
+        setDownloadMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [downloadMenuOpen]);
 
   if (!aiGenerated) return null;
 
@@ -29,6 +53,41 @@ export default function GeneratedArtifactView({
   const useCases = aiGenerated.use_cases || [];
   const opContext = aiGenerated.operational_context || {};
   const traceSeeds = aiGenerated.traceability_seeds || {};
+
+  // 다운로드 메타데이터 구성
+  const exportMeta = {
+    project_name: projectName,
+    process_id: processId,
+    generator_model: generatorModel,
+    evaluator_model: evaluatorModel,
+    version: '2.2b',
+    critique,
+  };
+
+  function handleDownload(format) {
+    setDownloadMenuOpen(false);
+    try {
+      let result;
+      switch (format) {
+        case 'json':
+          result = exportJSON(aiGenerated, exportMeta);
+          break;
+        case 'csv':
+          result = exportCSV(aiGenerated, exportMeta);
+          break;
+        case 'markdown':
+          result = exportMarkdown(aiGenerated, exportMeta);
+          break;
+        default:
+          alert(`알 수 없는 형식: ${format}`);
+          return;
+      }
+      console.log(`[export] ${format} 다운로드 완료:`, result);
+    } catch (e) {
+      console.error(`[export] ${format} 실패:`, e);
+      alert(`다운로드 실패: ${e.message}`);
+    }
+  }
 
   return (
     <div style={{
@@ -67,7 +126,7 @@ export default function GeneratedArtifactView({
           </h2>
         </div>
 
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           {/* JSON 원본 보기 토글 */}
           <button
             onClick={() => setView(view === "structured" ? "json" : "structured")}
@@ -100,6 +159,69 @@ export default function GeneratedArtifactView({
               📊 Rationale 보기
             </button>
           )}
+
+          {/* 다운로드 메뉴 (Phase 2-2b STEP C-3a) */}
+          <div ref={downloadMenuRef} style={{ position: "relative" }}>
+            <button
+              onClick={() => setDownloadMenuOpen(o => !o)}
+              title="산출물 다운로드 (JSON / CSV / Markdown)"
+              style={{
+                background: "#fff",
+                border: "1px solid var(--c-border-strong)",
+                borderRadius: 6,
+                padding: "7px 13px",
+                fontSize: 11, fontWeight: 600,
+                cursor: "pointer",
+                color: "var(--c-text)",
+                display: "flex", alignItems: "center", gap: 4,
+              }}>
+              📥 다운로드 <span style={{ fontSize: 9, marginLeft: 2 }}>▼</span>
+            </button>
+
+            {downloadMenuOpen && (
+              <div style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                right: 0,
+                background: "#fff",
+                border: "1px solid var(--c-border-strong)",
+                borderRadius: 6,
+                boxShadow: "0 8px 24px rgba(15, 23, 42, 0.15)",
+                minWidth: 200,
+                zIndex: 10,
+                overflow: "hidden",
+              }}>
+                <DownloadMenuItem
+                  icon="📄"
+                  title="JSON"
+                  desc="원본 데이터 (시스템 통합)"
+                  onClick={() => handleDownload('json')}
+                />
+                <DownloadMenuItem
+                  icon="📊"
+                  title="CSV"
+                  desc="엑셀 표 (STK_REQ 정리)"
+                  onClick={() => handleDownload('csv')}
+                />
+                <DownloadMenuItem
+                  icon="📝"
+                  title="Markdown"
+                  desc="보고서 (Notion/GitHub)"
+                  onClick={() => handleDownload('markdown')}
+                />
+                <div style={{
+                  padding: "8px 12px",
+                  fontSize: 10,
+                  color: "var(--c-text-muted)",
+                  borderTop: "1px solid var(--c-border)",
+                  background: "var(--c-bg-soft)",
+                  fontStyle: "italic",
+                }}>
+                  Word (DOCX) · Excel (XLSX) 곧 제공
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* QA 검토 시작 (Phase 2-2b STEP C-2 핵심) */}
           {onQAReview && (
@@ -580,4 +702,35 @@ function chipStyle(bg, color, border) {
     border: `1px solid ${border}`,
     borderRadius: 10,
   };
+}
+
+// ──────────────────────────────────────────────────
+// 다운로드 메뉴 항목 (Phase 2-2b STEP C-3a)
+// ──────────────────────────────────────────────────
+function DownloadMenuItem({ icon, title, desc, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "block",
+        width: "100%",
+        textAlign: "left",
+        background: "transparent",
+        border: "none",
+        padding: "10px 14px",
+        cursor: "pointer",
+        borderBottom: "1px solid var(--c-border)",
+      }}
+      onMouseEnter={e => e.currentTarget.style.background = 'var(--c-bg-soft)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <span style={{ fontSize: 14 }}>{icon}</span>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--c-text)" }}>{title}</div>
+          <div style={{ fontSize: 10, color: "var(--c-text-muted)", marginTop: 1 }}>{desc}</div>
+        </div>
+      </div>
+    </button>
+  );
 }
