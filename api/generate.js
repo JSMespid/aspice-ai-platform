@@ -49,6 +49,32 @@ async function sb(path, method = 'GET', body = null, prefer = null) {
 }
 
 // ──────────────────────────────────────────────────
+// Phase 2-2c: 상태값 영문 ↔ 한글 매핑
+// work_products 테이블에는 state(영문) + status(한글) 두 컬럼이 있음
+// UI는 status(한글)를 읽고, 영문 state는 코드 내부 처리용
+// 두 컬럼이 항상 동기화되도록 헬퍼 사용
+// ──────────────────────────────────────────────────
+function stateToStatus(state) {
+  const map = {
+    'INITIAL':    '초안',
+    'GENERATING': '진행중',
+    'GENERATED':  '검토중',
+    'MODIFIED':   '검토중',
+    'REJECTED':   '반려됨',
+    'APPROVED':   '승인됨',
+  };
+  return map[state] || '초안';
+}
+
+function syncStateAndStatus(state) {
+  // 두 컬럼 모두 업데이트할 객체 반환
+  return {
+    state,
+    status: stateToStatus(state),
+  };
+}
+
+// ──────────────────────────────────────────────────
 // Skills 로딩 (filesystem 기반)
 // 빌드 시 함께 배포되도록 SKILL.md 들이 코드에 포함됨
 // ──────────────────────────────────────────────────
@@ -636,7 +662,7 @@ export default async function handler(req, res) {
     }
 
     // 2. state: GENERATING
-    await sb(`/work_products?id=eq.${wp.id}`, 'PATCH', { state: 'GENERATING' });
+    await sb(`/work_products?id=eq.${wp.id}`, 'PATCH', syncStateAndStatus('GENERATING'));
     await sb(`/state_transitions`, 'POST', {
       work_product_id: wp.id,
       from_state: wp.state || 'INITIAL',
@@ -865,7 +891,7 @@ export default async function handler(req, res) {
       : wp.content;
 
     await sb(`/work_products?id=eq.${wp.id}`, 'PATCH', {
-      state: newState,
+      ...syncStateAndStatus(newState),
       content: newContent,
     });
 
@@ -902,6 +928,7 @@ export default async function handler(req, res) {
       success: true,
       passed,
       state: newState,
+      status: stateToStatus(newState),  // Phase 2-2c: UI 표시용 한글 상태
       ai_generation_id: aiGenId,
       output: parsedOutput,
       guardrail_result: guardrailResult,
