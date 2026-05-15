@@ -492,6 +492,12 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           hasEvaluator={!!agentResult?.evaluator}
           evaluating={evaluating}
           onEditStkReq={handleStkReqEditOpen}
+          // 다운로드 메타데이터 (Phase 2-2b STEP C-3a)
+          projectName={project?.name}
+          processId={processId}
+          generatorModel={agentResult?.generator?.meta?.model}
+          evaluatorModel={agentResult?.evaluator?.meta?.model}
+          critique={agentResult?.evaluator?.critique}
         />
       )}
 
@@ -503,8 +509,8 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         borderRadius: 8,
         fontSize: 11, color: "var(--c-text-soft)", lineHeight: 1.6,
       }}>
-        <strong>Phase 2-2b 활성 (STEP C-2)</strong> — 사용자 제어 흐름: [⚡ AI 생성] → 결과 검토 → [🔍 QA 검토 시작] → 평가 결과 확인.<br/>
-        Claude Opus 4.7 (Generator) + Gemini 2.0 Flash (Evaluator) + 5축 가드레일 (① ② ③ ④ 활성). 다음 STEP C-3: 다운로드 (JSON/CSV/Markdown).
+        <strong>Phase 2-2b 활성 (STEP C-3a)</strong> — 사용자 제어 흐름 + 카드별 편집 + 다운로드 (JSON/CSV/Markdown).<br/>
+        Claude Opus 4.7 (Generator) + Gemini 2.0 Flash (Evaluator) + 5축 가드레일 (① ② ③ ④ 활성). 다음 STEP C-3b: Word (DOCX), C-3c: Excel (XLSX). Phase 2-3: HITL ⑤ 활성.
       </div>
 
       {/* ── 모달 ──────────────────────────────────── */}
