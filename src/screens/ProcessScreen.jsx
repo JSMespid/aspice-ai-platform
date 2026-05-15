@@ -264,26 +264,40 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
     // agentStep 도 "AI 생성 완료" 상태로 설정 (Rationale Panel 표시 정상화)
     setAgentStep(AgentStep.GEN_COMPLETED);
 
-    // STEP 2: API 조회 시도 (성공하면 실제 값으로 덮어쓰기, 실패하면 fallback 유지)
+    // STEP 2: 새 /api/ai-generations 엔드포인트로 마지막 결과 조회
+    //         성공하면 실제 값으로 덮어쓰기, 실패하면 fallback 유지
     (async () => {
       try {
-        // 마지막 evaluator 결과 조회
-        const url = `/api/projects?resource=ai_generations&work_product_id=${wp.id}&agent_role=evaluator&order=created_at.desc&limit=1`;
-        const res = await fetch(url);
-        if (!res.ok) {
-          console.log('[ProcessScreen] ai_generations API 미지원 또는 데이터 없음 — fallback 유지');
+        // 마지막 evaluator 결과 조회 (limit=1)
+        const evalUrl = `/api/ai-generations?work_product_id=${encodeURIComponent(wp.id)}&agent_role=evaluator&limit=1`;
+        const evalRes = await fetch(evalUrl);
+        if (!evalRes.ok) {
+          console.log('[ProcessScreen] /api/ai-generations 응답 실패:', evalRes.status, '— fallback 유지');
           return;
         }
-        const data = await res.json();
-        const lastEval = Array.isArray(data) && data.length > 0 ? data[0] : null;
+        const evalData = await evalRes.json();
+        if (!evalData.success) {
+          console.warn('[ProcessScreen] /api/ai-generations evaluator 조회 실패:', evalData.error);
+          return;
+        }
+        const lastEval = (evalData.results && evalData.results.length > 0) ? evalData.results[0] : null;
         if (cancelled) return;
 
-        // Generator 의 마지막 결과도 조회
-        const urlGen = `/api/projects?resource=ai_generations&work_product_id=${wp.id}&agent_role=generator&order=created_at.desc&limit=1`;
-        const resGen = await fetch(urlGen);
-        const dataGen = resGen.ok ? await resGen.json() : [];
-        const lastGen = Array.isArray(dataGen) && dataGen.length > 0 ? dataGen[0] : null;
+        // 마지막 generator 결과 조회
+        const genUrl = `/api/ai-generations?work_product_id=${encodeURIComponent(wp.id)}&agent_role=generator&limit=1`;
+        const genRes = await fetch(genUrl);
+        let lastGen = null;
+        if (genRes.ok) {
+          const genData = await genRes.json();
+          if (genData.success && genData.results && genData.results.length > 0) {
+            lastGen = genData.results[0];
+          }
+        }
         if (cancelled) return;
+
+        console.log('[ProcessScreen] 마지막 결과 로드:',
+          'generator:', lastGen ? `${lastGen.model} ($${(lastGen.cost_usd||0).toFixed(4)})` : 'none',
+          'evaluator:', lastEval ? `${lastEval.model} ($${(lastEval.cost_usd||0).toFixed(4)})` : 'none');
 
         // 실제 DB 값으로 mock 덮어쓰기
         const generatorMock = lastGen ? {
@@ -294,22 +308,23 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           guardrail_result: lastGen.guardrail_result,
           meta: {
             model: lastGen.model,
-            input_tokens: lastGen.input_tokens,
-            output_tokens: lastGen.output_tokens,
-            cost_usd: lastGen.cost_usd,
-            latency_ms: lastGen.latency_ms,
-            skills_used: lastGen.skills_used,
+            input_tokens: lastGen.input_tokens || 0,
+            output_tokens: lastGen.output_tokens || 0,
+            cost_usd: lastGen.cost_usd || 0,
+            latency_ms: lastGen.latency_ms || 0,
+            skills_used: lastGen.skills_used || [],
           },
         } : minimalGeneratorMock;
+
         const evaluatorMock = lastEval ? {
           success: true,
           critique: lastEval.parsed_output,
           meta: {
             model: lastEval.model,
-            input_tokens: lastEval.input_tokens,
-            output_tokens: lastEval.output_tokens,
-            cost_usd: lastEval.cost_usd,
-            latency_ms: lastEval.latency_ms,
+            input_tokens: lastEval.input_tokens || 0,
+            output_tokens: lastEval.output_tokens || 0,
+            cost_usd: lastEval.cost_usd || 0,
+            latency_ms: lastEval.latency_ms || 0,
           },
         } : null;
 
