@@ -50,9 +50,12 @@ export default function GeneratedArtifactView({
   if (!aiGenerated) return null;
 
   const stkReqs = aiGenerated.stakeholder_requirements || [];
-  const useCases = aiGenerated.use_cases || [];
+  const useCases = aiGenerated.use_cases || [];  // Phase 2-2c: 보통 빈 배열 (스키마 제거됨)
   const opContext = aiGenerated.operational_context || {};
   const traceSeeds = aiGenerated.traceability_seeds || {};
+  // Phase 2-2c 신규 필드
+  const coverageMatrix = aiGenerated.coverage_matrix || null;
+  const warnings = aiGenerated.warnings || [];
 
   // 다운로드 메타데이터 구성
   const exportMeta = {
@@ -60,7 +63,7 @@ export default function GeneratedArtifactView({
     process_id: processId,
     generator_model: generatorModel,
     evaluator_model: evaluatorModel,
-    version: '2.2b',
+    version: '2.2c',
     critique,
   };
 
@@ -323,6 +326,8 @@ export default function GeneratedArtifactView({
           traceSeeds={traceSeeds}
           processColor={processColor}
           onEditStkReq={onEditStkReq}
+          coverageMatrix={coverageMatrix}
+          warnings={warnings}
         />
       ) : (
         <JsonView aiGenerated={aiGenerated} />
@@ -332,32 +337,79 @@ export default function GeneratedArtifactView({
 }
 
 // ──────────────────────────────────────────────────
-// 구조화 보기
+// 구조화 보기 (Phase 2-2c: 그룹별 섹션 + Coverage Matrix)
 // ──────────────────────────────────────────────────
-function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor, onEditStkReq }) {
+function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor, onEditStkReq, coverageMatrix, warnings }) {
+  // Phase 2-2c: STK_REQ를 그룹별로 묶기
+  const grouped = groupByGroupName(stkReqs);
+  const hasGroups = grouped.size > 1 || (grouped.size === 1 && !grouped.has(null));
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <SummaryBar
         stats={[
           { label: "STK_REQ", count: stkReqs.length, color: processColor },
-          { label: "Use Case", count: useCases.length, color: "#2383E2" },
+          ...(hasGroups ? [{ label: "그룹", count: grouped.size, color: "#6940A5" }] : []),
           { label: "법규/표준", count: opContext.regulatory_constraints?.length || 0, color: "#F59E0B" },
           { label: "외부 IF", count: opContext.external_interfaces?.length || 0, color: "#10B981" },
         ]}
       />
 
-      <Section title="Stakeholder Requirements" count={stkReqs.length}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {stkReqs.map(req => (
-            <StkReqCard
-              key={req.id}
-              req={req}
-              processColor={processColor}
-              onEdit={onEditStkReq ? () => onEditStkReq(req) : null}
-            />
-          ))}
-        </div>
-      </Section>
+      {/* Phase 2-2c: Coverage Matrix (스펙 보존 결과) */}
+      {coverageMatrix && (
+        <CoverageMatrixView matrix={coverageMatrix} processColor={processColor} />
+      )}
+
+      {/* Phase 2-2c: Warnings */}
+      {warnings && warnings.length > 0 && (
+        <Section title="⚠ 주의사항" count={warnings.length}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {warnings.map((w, i) => (
+              <div key={i} style={{
+                padding: "8px 12px",
+                background: "rgba(245, 158, 11, 0.08)",
+                border: "1px solid rgba(245, 158, 11, 0.30)",
+                borderRadius: 6,
+                fontSize: 12,
+                color: "#92400E",
+                lineHeight: 1.6,
+              }}>
+                {w}
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Phase 2-2c: 그룹별 또는 평면 STK_REQ 표시 */}
+      {hasGroups ? (
+        <Section title="Stakeholder Requirements (그룹별)" count={stkReqs.length}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+            {Array.from(grouped.entries()).map(([groupName, reqs]) => (
+              <GroupSection
+                key={groupName || "_no_group"}
+                groupName={groupName}
+                reqs={reqs}
+                processColor={processColor}
+                onEditStkReq={onEditStkReq}
+              />
+            ))}
+          </div>
+        </Section>
+      ) : (
+        <Section title="Stakeholder Requirements" count={stkReqs.length}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {stkReqs.map(req => (
+              <StkReqCard
+                key={req.id}
+                req={req}
+                processColor={processColor}
+                onEdit={onEditStkReq ? () => onEditStkReq(req) : null}
+              />
+            ))}
+          </div>
+        </Section>
+      )}
 
       {useCases.length > 0 && (
         <Section title="Use Cases" count={useCases.length}>
@@ -531,6 +583,41 @@ function StkReqCard({ req, processColor, onEdit }) {
         }}>
           🔍 {req.verification_method}
         </span>
+        {/* Phase 2-2c: 시트 출처 배지 */}
+        {req.sheet_source && (
+          <span
+            title={`시트: ${req.sheet_source}${req.source_row ? `, 행 ${req.source_row}` : ""}${req.source_item_id ? ` (${req.source_item_id})` : ""}`}
+            style={{
+              fontSize: 10,
+              color: "#6940A5",
+              padding: "2px 8px",
+              background: "rgba(105, 64, 165, 0.08)",
+              border: "1px solid rgba(105, 64, 165, 0.25)",
+              borderRadius: 4,
+              fontFamily: "monospace",
+            }}
+          >
+            📋 {req.sheet_source}
+            {req.source_row && <span style={{ opacity: 0.7 }}> · R{req.source_row}</span>}
+            {req.source_item_id && <span style={{ opacity: 0.7 }}> · {req.source_item_id}</span>}
+          </span>
+        )}
+        {/* Phase 2-2c: 명세 요청 필요 */}
+        {req.clarification_needed && (
+          <span
+            title="입력이 모호하여 고객 명세 요청 필요"
+            style={{
+              fontSize: 10, fontWeight: 600,
+              color: "#C77D1A",
+              padding: "2px 8px",
+              background: "rgba(199, 125, 26, 0.10)",
+              border: "1px solid rgba(199, 125, 26, 0.30)",
+              borderRadius: 10,
+            }}
+          >
+            ❓ 명세 요청
+          </span>
+        )}
         {isModified && (
           <span style={{
             fontSize: 10, fontWeight: 600,
@@ -763,5 +850,228 @@ function DownloadMenuItem({ icon, title, desc, onClick, primary }) {
         </div>
       </div>
     </button>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// Phase 2-2c: 그룹별 표시 + Coverage Matrix
+// ────────────────────────────────────────────────────────────────
+
+// STK_REQ를 group 필드 기준으로 묶기 (Map 보존하여 입력 순서 유지)
+function groupByGroupName(stkReqs) {
+  const map = new Map();
+  for (const req of stkReqs) {
+    const key = req.group || null;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(req);
+  }
+  return map;
+}
+
+// Phase 2-2c: 그룹별 STK_REQ 섹션
+function GroupSection({ groupName, reqs, processColor, onEditStkReq }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const displayName = groupName || "기타";
+  const sheetSources = Array.from(new Set(reqs.map(r => r.sheet_source).filter(Boolean)));
+
+  return (
+    <div style={{
+      border: "1px solid var(--c-border, #E8E5E0)",
+      borderRadius: 10,
+      overflow: "hidden",
+      background: "#fff",
+    }}>
+      <div
+        onClick={() => setCollapsed(!collapsed)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "10px 14px",
+          background: `linear-gradient(to right, ${processColor}10, transparent)`,
+          borderBottom: collapsed ? "none" : "1px solid var(--c-border, #E8E5E0)",
+          cursor: "pointer",
+          userSelect: "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{
+            fontSize: 10,
+            transform: collapsed ? "rotate(-90deg)" : "rotate(0)",
+            transition: "transform 0.15s",
+            color: "var(--c-text-muted, #9B9A97)",
+          }}>▼</span>
+          <span style={{
+            fontFamily: "monospace",
+            fontWeight: 700,
+            fontSize: 13,
+            color: processColor,
+            letterSpacing: "0.02em",
+          }}>
+            {displayName}
+          </span>
+          <span style={{
+            fontSize: 11,
+            color: "var(--c-text-muted, #9B9A97)",
+            fontWeight: 600,
+          }}>
+            {reqs.length}개
+          </span>
+          {sheetSources.length > 0 && (
+            <span style={{
+              fontSize: 10,
+              color: "var(--c-text-soft, #6B6B6B)",
+              fontStyle: "italic",
+            }}>
+              · {sheetSources.join(", ")}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {!collapsed && (
+        <div style={{ padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          {reqs.map(req => (
+            <StkReqCard
+              key={req.id}
+              req={req}
+              processColor={processColor}
+              onEdit={onEditStkReq ? () => onEditStkReq(req) : null}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Phase 2-2c: Coverage Matrix 표시
+function CoverageMatrixView({ matrix, processColor }) {
+  const { by_group = [], summary } = matrix || {};
+  if (!summary) return null;
+
+  const statusConfig = {
+    compliant: {
+      label: "✓ 스펙 보존 양호",
+      color: "#0F7B6C",
+      bg: "rgba(15, 123, 108, 0.08)",
+      border: "rgba(15, 123, 108, 0.30)",
+    },
+    spec_loss: {
+      label: "⚠ 스펙 손실 감지",
+      color: "#E03E3E",
+      bg: "rgba(224, 62, 62, 0.08)",
+      border: "rgba(224, 62, 62, 0.30)",
+    },
+    over_decomposed: {
+      label: "⚠ 과도한 분리",
+      color: "#C77D1A",
+      bg: "rgba(199, 125, 26, 0.08)",
+      border: "rgba(199, 125, 26, 0.30)",
+    },
+  };
+  const sc = statusConfig[summary.status] || statusConfig.compliant;
+
+  return (
+    <Section title="📊 Coverage Matrix (스펙 보존 검증)" count={by_group.length}>
+      <div style={{
+        padding: "10px 12px",
+        background: sc.bg,
+        border: `1px solid ${sc.border}`,
+        borderRadius: 6,
+        marginBottom: 10,
+      }}>
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
+          flexWrap: "wrap",
+        }}>
+          <span style={{
+            fontSize: 13,
+            fontWeight: 700,
+            color: sc.color,
+          }}>
+            {sc.label}
+          </span>
+          <div style={{
+            display: "flex",
+            gap: 16,
+            fontSize: 11,
+            color: "var(--c-text-soft, #6B6B6B)",
+          }}>
+            <span>입력 행: <strong style={{ color: "var(--c-text, #37352F)" }}>{summary.total_input_rows}</strong></span>
+            <span>STK_REQ: <strong style={{ color: "var(--c-text, #37352F)" }}>{summary.total_stk_reqs}</strong></span>
+            <span>비율: <strong style={{ color: sc.color }}>{Number(summary.overall_ratio).toFixed(3)}</strong></span>
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: "var(--c-text-soft, #6B6B6B)", marginTop: 6, lineHeight: 1.6 }}>
+          {summary.status === "compliant" && "고객 입력이 STK_REQ로 적절히 보존되었습니다 (비율 1.0 ~ 1.3 범위)."}
+          {summary.status === "spec_loss" && "⚠️ 일부 고객 입력이 STK_REQ로 변환되지 않았습니다. ASPICE 평가관 지적 위험이 있습니다."}
+          {summary.status === "over_decomposed" && "⚠️ 입력 대비 STK_REQ가 너무 많이 생성되었습니다. 일부는 발명되었을 가능성이 있습니다."}
+        </div>
+      </div>
+
+      {by_group.length > 0 && (
+        <div style={{
+          border: "1px solid var(--c-border, #E8E5E0)",
+          borderRadius: 6,
+          overflow: "hidden",
+        }}>
+          <table style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: 12,
+          }}>
+            <thead>
+              <tr style={{ background: "var(--c-bg-soft, #F7F7F5)" }}>
+                <th style={{ padding: "8px 10px", textAlign: "left", borderBottom: "1px solid var(--c-border, #E8E5E0)", fontWeight: 600 }}>그룹</th>
+                <th style={{ padding: "8px 10px", textAlign: "left", borderBottom: "1px solid var(--c-border, #E8E5E0)", fontWeight: 600 }}>시트</th>
+                <th style={{ padding: "8px 10px", textAlign: "right", borderBottom: "1px solid var(--c-border, #E8E5E0)", fontWeight: 600 }}>입력 행</th>
+                <th style={{ padding: "8px 10px", textAlign: "right", borderBottom: "1px solid var(--c-border, #E8E5E0)", fontWeight: 600 }}>STK_REQ</th>
+                <th style={{ padding: "8px 10px", textAlign: "right", borderBottom: "1px solid var(--c-border, #E8E5E0)", fontWeight: 600 }}>비율</th>
+                <th style={{ padding: "8px 10px", textAlign: "right", borderBottom: "1px solid var(--c-border, #E8E5E0)", fontWeight: 600 }}>누락</th>
+              </tr>
+            </thead>
+            <tbody>
+              {by_group.map((g, i) => {
+                const ratio = Number(g.ratio || 0);
+                const hasUnmapped = (g.unmapped_input_rows || []).length > 0;
+                const ratioColor =
+                  ratio < 1.0 ? "#E03E3E" :
+                  ratio > 1.3 ? "#C77D1A" :
+                  "#0F7B6C";
+                return (
+                  <tr key={i} style={{ borderBottom: i === by_group.length - 1 ? "none" : "1px solid var(--c-border, #E8E5E0)" }}>
+                    <td style={{ padding: "8px 10px", fontFamily: "monospace", fontWeight: 600, color: processColor }}>{g.group || "—"}</td>
+                    <td style={{ padding: "8px 10px", color: "var(--c-text-soft, #6B6B6B)" }}>{g.sheet_source || "—"}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{g.input_rows}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{g.derived_stk_reqs}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", fontVariantNumeric: "tabular-nums", color: ratioColor, fontWeight: 600 }}>{ratio.toFixed(3)}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right" }}>
+                      {hasUnmapped ? (
+                        <span style={{
+                          fontSize: 10,
+                          padding: "2px 6px",
+                          background: "rgba(224, 62, 62, 0.10)",
+                          color: "#E03E3E",
+                          borderRadius: 3,
+                          fontWeight: 600,
+                        }}>
+                          {g.unmapped_input_rows.length}개
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--c-text-muted, #9B9A97)" }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
   );
 }

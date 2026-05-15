@@ -1,16 +1,14 @@
-// SCR-09 — 산출물 등록 모달 (실제 파일 업로드)
+// SCR-09 — 산출물 등록 모달 (Phase 2-2c 확장)
 //
-// 화면설계서 v2.4 슬라이드 13 명세:
-//   "산출물등록 → 파일 업로드 모달 → 메타데이터 저장"
-//
-// 동작:
-//   1) 사용자가 파일 선택 (클릭 또는 드래그&드롭)
-//   2) 파일명/크기/타입 자동 표시 (사용자 타이핑 X)
-//   3) 텍스트 파일이면 본문 자동 추출 (옵션)
-//   4) [등록] 버튼 클릭 시:
-//      a. base64 인코딩 → POST /api/upload?action=upload
-//      b. storagePath 받아서 work_products.content[itemKey] 에 저장
-//      c. 메타데이터: storagePath, fileName, fileType, size, body, note
+// Phase 2-2b 까지: 파일 업로드 + 본문 텍스트 단일 입력
+// Phase 2-2c 변경:
+//   - 엑셀(.xlsx/.xls) 파일 감지 시 SheetJS 동적 로딩
+//   - 워크시트 목록 표시 + 시트별 체크박스 + 미리보기
+//   - 메타 시트 자동 감지 (Cover, Change Log, Legend, TOC, 표지, 변경이력, 범례, 목차 ...)
+//   - 그룹명 자동 추출 (Cellular Stack → CELLULAR, GNSS → GNSS ...)
+//   - 사용자가 선택한 시트만 JSON 변환 후 저장
+//   - work_products.content[itemKey].sheets 배열에 시트별 데이터 저장
+//   - 기존 단일 텍스트 흐름 유지 (백워드 호환)
 
 import { useState, useEffect, useRef } from "react";
 
@@ -19,15 +17,147 @@ const TEXT_TYPES = [
   "text/plain", "text/markdown", "text/csv",
   "application/json", "application/xml", "text/html",
 ];
+const EXCEL_EXTENSIONS = /\.(xlsx|xls|xlsm)$/i;
 
+// SheetJS CDN — 동적 로딩 (npm 의존성 회피)
+const SHEETJS_CDN = "https://esm.sh/xlsx@0.18.5";
+
+// ─── Phase 2-2c: 메타 시트 식별 키워드 (SKILL Section 4.2) ──────
+const META_SHEET_KEYWORDS = [
+  // English
+  "cover", "title", "change log", "changelog", "revision history",
+  "legend", "glossary", "toc", "table of contents", "index",
+  "about", "info", "notes", "readme",
+  // Korean
+  "표지", "커버", "변경이력", "개정이력", "이력",
+  "범례", "용어집", "목차", "설명", "안내",
+];
+
+function isMetaSheet(sheetName) {
+  if (!sheetName) return true;
+  const lower = sheetName.toLowerCase().trim();
+  return META_SHEET_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
+}
+
+// ─── Phase 2-2c: 그룹명 자동 추출 (SKILL Section 4.3) ──────────
+const GROUP_ABBREVIATIONS = [
+  [/cellular|4g|5g|lte/i, "CELLULAR"],
+  [/bluetooth.*wi-?fi|bt.*wifi/i, "BTWIFI"],
+  [/gnss|gps|positioning/i, "GNSS"],
+  [/bluetooth\b|^bt\b/i, "BT"],
+  [/wi-?fi|wlan/i, "WIFI"],
+  [/diagnostic|uds\b/i, "DIAG"],
+  [/power|energy/i, "POWER"],
+  [/boot|startup/i, "BOOT"],
+  [/ota|update/i, "OTA"],
+  [/security|cybersec/i, "SEC"],
+  [/audio|sound/i, "AUDIO"],
+  [/display|hmi\b|^ui\b/i, "HMI"],
+  [/can\s*bus|^can\b|can\s*network/i, "CAN"],
+  [/ethernet|automotive\s*eth/i, "ETH"],
+  [/\blin\b/i, "LIN"],
+  [/connectivity/i, "CONN"],
+  [/telematics|tcu/i, "TELEM"],
+  [/antenna|\bant\b/i, "ANT"],
+  [/storage|memory|flash/i, "STORAGE"],
+  [/logging|event\s*log/i, "LOG"],
+];
+
+function extractGroupName(sheetName, fallbackIndex) {
+  if (!sheetName) return `SHEET${fallbackIndex}`;
+  const trimmed = sheetName.trim();
+  for (const [regex, abbr] of GROUP_ABBREVIATIONS) {
+    if (regex.test(trimmed)) return abbr;
+  }
+  const englishMatch = trimmed.match(/^[A-Za-z][A-Za-z0-9_]*/);
+  if (englishMatch) {
+    return englishMatch[0].toUpperCase().slice(0, 12);
+  }
+  return `SHEET${fallbackIndex}`;
+}
+
+// ─── SheetJS 동적 로딩 ──────────────────────────────────────────
+let _xlsxModule = null;
+async function loadSheetJS() {
+  if (_xlsxModule) return _xlsxModule;
+  try {
+    _xlsxModule = await import(/* @vite-ignore */ SHEETJS_CDN);
+    return _xlsxModule;
+  } catch (e) {
+    throw new Error(`SheetJS 로딩 실패: ${e.message}`);
+  }
+}
+
+// ─── 엑셀 파일 → 시트별 데이터 변환 ────────────────────────────
+async function parseExcelFile(file) {
+  const XLSX = await loadSheetJS();
+  const arrayBuffer = await file.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: "array" });
+
+  const sheets = workbook.SheetNames.map((sheetName, idx) => {
+    const ws = workbook.Sheets[sheetName];
+    const rawRows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", blankrows: false });
+
+    const columns = rawRows.length > 0 ? rawRows[0].map(c => String(c || "").trim()) : [];
+    const dataRows = rawRows.slice(1)
+      .filter(row => row.some(cell => String(cell || "").trim() !== ""))
+      .map((row, rowIdx) => {
+        const obj = { row_num: rowIdx + 2 };
+        columns.forEach((col, colIdx) => {
+          if (col) obj[col] = String(row[colIdx] || "").trim();
+        });
+        return obj;
+      });
+
+    const isMeta = isMetaSheet(sheetName);
+    const groupName = isMeta ? null : extractGroupName(sheetName, idx + 1);
+
+    return {
+      sheet_name: sheetName,
+      sheet_index: idx + 1,
+      group_name: groupName,
+      is_meta: isMeta,
+      selected: !isMeta,
+      columns,
+      row_count: dataRows.length,
+      rows: dataRows,
+      preview: dataRows.slice(0, 3),
+    };
+  });
+
+  return { sheets, total_sheets: workbook.SheetNames.length };
+}
+
+// ─── 선택된 시트들을 body 텍스트로 직렬화 (백워드 호환) ────────
+function serializeSheetsToBody(sheets) {
+  const lines = [];
+  for (const sheet of sheets) {
+    if (!sheet.selected || sheet.is_meta) continue;
+    lines.push(`### Sheet: ${sheet.sheet_name} (Group: ${sheet.group_name})`);
+    lines.push(`Columns: ${sheet.columns.join(" | ")}`);
+    lines.push("");
+    for (const row of sheet.rows) {
+      const parts = sheet.columns
+        .filter(c => row[c])
+        .map(c => `${c}: ${row[c]}`);
+      lines.push(`Row ${row.row_num}: ${parts.join(" | ")}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+// ────────────────────────────────────────────────────────────────
+// Main Component
+// ────────────────────────────────────────────────────────────────
 export default function WorkProductRegisterModal({
   open,
   onClose,
   projectId,
   processId,
-  item,             // { key, label, required, inputType }
+  item,
   initialValue,
-  onSave,           // (newValue) => Promise<void>
+  onSave,
 }) {
   const [file, setFile] = useState(null);
   const [body, setBody] = useState("");
@@ -38,24 +168,34 @@ export default function WorkProductRegisterModal({
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
 
-  // 모달 열릴 때 초기값 세팅
+  const [excelData, setExcelData] = useState(null);
+  const [parsingExcel, setParsingExcel] = useState(false);
+  const [excelError, setExcelError] = useState("");
+
   useEffect(() => {
     if (open) {
       setFile(null);
       setBody(initialValue?.body || "");
       setNote(initialValue?.note || "");
       setError("");
+      setExcelError("");
       setUploadProgress(0);
+      if (initialValue?.source_type === "excel_multi_sheet" && initialValue?.sheets) {
+        setExcelData({
+          sheets: initialValue.sheets,
+          total_sheets: initialValue.sheets.length,
+        });
+      } else {
+        setExcelData(null);
+      }
     }
   }, [open, initialValue]);
 
   if (!open) return null;
 
-  // ── 파일 선택 처리 ─────────────────────────────────────────────
-  function handleFileSelect(selectedFile) {
+  async function handleFileSelect(selectedFile) {
     if (!selectedFile) return;
 
-    // 크기 검증
     const sizeMB = selectedFile.size / 1024 / 1024;
     if (sizeMB > MAX_SIZE_MB) {
       setError(`파일 크기는 ${MAX_SIZE_MB}MB를 초과할 수 없습니다 (현재: ${sizeMB.toFixed(1)}MB)`);
@@ -63,16 +203,29 @@ export default function WorkProductRegisterModal({
     }
 
     setError("");
+    setExcelError("");
     setFile(selectedFile);
 
-    // 텍스트 파일이면 본문 자동 추출
+    if (EXCEL_EXTENSIONS.test(selectedFile.name)) {
+      setParsingExcel(true);
+      setExcelData(null);
+      try {
+        const parsed = await parseExcelFile(selectedFile);
+        setExcelData(parsed);
+        setBody(serializeSheetsToBody(parsed.sheets));
+      } catch (e) {
+        setExcelError(`엑셀 파싱 실패: ${e.message}`);
+        setExcelData(null);
+      }
+      setParsingExcel(false);
+      return;
+    }
+
     if (TEXT_TYPES.includes(selectedFile.type) || selectedFile.name.match(/\.(txt|md|csv|json|xml|html)$/i)) {
       const reader = new FileReader();
       reader.onload = (e) => {
-        const text = String(e.target.result || "").substring(0, 5000); // 5KB 미리보기
-        if (!body.trim()) {  // 비어있을 때만 자동 채움
-          setBody(text);
-        }
+        const text = String(e.target.result || "").substring(0, 5000);
+        if (!body.trim()) setBody(text);
       };
       reader.readAsText(selectedFile);
     }
@@ -85,9 +238,29 @@ export default function WorkProductRegisterModal({
     if (droppedFile) handleFileSelect(droppedFile);
   }
 
-  // ── 등록 처리: 업로드 → 메타데이터 저장 ───────────────────────
+  function toggleSheetSelection(sheetIdx) {
+    if (!excelData) return;
+    const newSheets = excelData.sheets.map((s, i) =>
+      i === sheetIdx ? { ...s, selected: !s.selected } : s
+    );
+    const newData = { ...excelData, sheets: newSheets };
+    setExcelData(newData);
+    setBody(serializeSheetsToBody(newSheets));
+  }
+
+  function updateGroupName(sheetIdx, newGroupName) {
+    if (!excelData) return;
+    const cleaned = newGroupName.toUpperCase().replace(/[^A-Z0-9_]/g, "").slice(0, 12);
+    const newSheets = excelData.sheets.map((s, i) =>
+      i === sheetIdx ? { ...s, group_name: cleaned || `SHEET${i + 1}` } : s
+    );
+    const newData = { ...excelData, sheets: newSheets };
+    setExcelData(newData);
+    setBody(serializeSheetsToBody(newSheets));
+  }
+
   async function handleRegister() {
-    if (!file) {
+    if (!file && !initialValue?.storagePath) {
       setError("파일을 선택하세요.");
       return;
     }
@@ -96,53 +269,75 @@ export default function WorkProductRegisterModal({
       return;
     }
 
+    if (excelData) {
+      const selectedSheets = excelData.sheets.filter(s => s.selected && !s.is_meta);
+      if (selectedSheets.length === 0) {
+        setError("최소 1개의 워크시트를 선택하세요. (메타 시트는 자동 제외됨)");
+        return;
+      }
+      const groupNames = selectedSheets.map(s => s.group_name);
+      const dupes = groupNames.filter((g, i) => groupNames.indexOf(g) !== i);
+      if (dupes.length > 0) {
+        setError(`그룹명이 중복되었습니다: ${[...new Set(dupes)].join(", ")} — 각 시트마다 고유한 그룹명이 필요합니다.`);
+        return;
+      }
+    }
+
     setUploading(true);
     setError("");
     setUploadProgress(10);
 
     try {
-      // 1) base64 인코딩
-      const base64 = await fileToBase64(file);
-      setUploadProgress(40);
+      let storagePath = initialValue?.storagePath;
+      let originalFileName = initialValue?.fileName || file?.name;
 
-      // 2) Supabase Storage 업로드
-      const uploadRes = await fetch("/api/upload?action=upload", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fileName: file.name,
-          contentType: file.type || "application/octet-stream",
-          base64,
-          projectId,
-          processId,
-          itemKey: item.key,
-        }),
-      });
+      if (file) {
+        const base64 = await fileToBase64(file);
+        setUploadProgress(40);
 
-      if (!uploadRes.ok) {
-        const errText = await uploadRes.text();
-        throw new Error(`업로드 실패: ${errText}`);
+        const uploadRes = await fetch("/api/upload?action=upload", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            fileName: file.name,
+            contentType: file.type || "application/octet-stream",
+            base64,
+            projectId,
+            processId,
+            itemKey: item.key,
+          }),
+        });
+
+        if (!uploadRes.ok) {
+          const errText = await uploadRes.text();
+          throw new Error(`업로드 실패: ${errText}`);
+        }
+        const uploadResult = await uploadRes.json();
+        storagePath = uploadResult.storagePath;
+        originalFileName = uploadResult.originalFileName;
+        setUploadProgress(80);
       }
-      const uploadResult = await uploadRes.json();
-      setUploadProgress(80);
 
-      // 3) work_products.content[item.key] 에 메타데이터 저장
-      await onSave({
+      const payload = {
         source: "register",
-        fileName: uploadResult.originalFileName,
-        fileType: file.type || "application/octet-stream",
-        fileSize: file.size,
-        storagePath: uploadResult.storagePath,
+        fileName: originalFileName,
+        fileType: file?.type || initialValue?.fileType || "application/octet-stream",
+        fileSize: file?.size || initialValue?.fileSize || 0,
+        storagePath,
         body: body.trim(),
         note: note.trim(),
         registeredAt: new Date().toISOString(),
-      });
-      setUploadProgress(100);
+      };
 
-      // 잠시 100% 표시 후 닫기
-      setTimeout(() => {
-        onClose();
-      }, 300);
+      if (excelData) {
+        payload.source_type = "excel_multi_sheet";
+        payload.sheets = excelData.sheets;
+        payload.total_sheets = excelData.total_sheets;
+      }
+
+      await onSave(payload);
+      setUploadProgress(100);
+      setTimeout(() => onClose(), 300);
     } catch (e) {
       setError("등록 실패: " + e.message);
       setUploadProgress(0);
@@ -150,7 +345,6 @@ export default function WorkProductRegisterModal({
     setUploading(false);
   }
 
-  // ── 기존 파일 정보 (편집 모드) ─────────────────────────────────
   const existingFile = !file && initialValue?.storagePath ? {
     name: initialValue.fileName,
     type: initialValue.fileType,
@@ -160,8 +354,10 @@ export default function WorkProductRegisterModal({
 
   return (
     <div style={overlayStyle} onClick={uploading ? undefined : onClose}>
-      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
-        {/* ── 헤더 ───────────────────────── */}
+      <div style={{
+        ...modalStyle,
+        maxWidth: excelData ? 820 : 600,
+      }} onClick={(e) => e.stopPropagation()}>
         <div style={headerStyle}>
           <div>
             <div style={metaLabelStyle}>{processId} · 산출물 등록</div>
@@ -173,19 +369,18 @@ export default function WorkProductRegisterModal({
           <button onClick={onClose} disabled={uploading} style={closeBtnStyle} aria-label="닫기">×</button>
         </div>
 
-        {/* ── 본문 ───────────────────────── */}
         <div style={bodyStyle}>
           <div style={infoBoxStyle}>
-            기존 산출물 파일(요구사항 명세서, 설계 문서 등)을 업로드합니다. 본문 텍스트는 AI 생성 시 입력으로 사용됩니다.
+            기존 산출물 파일(요구사항 명세서, 설계 문서 등)을 업로드합니다.
+            {" "}<strong>엑셀(.xlsx)</strong> 파일은 워크시트별 분류 처리됩니다. 본문 텍스트는 AI 생성 시 입력으로 사용됩니다.
           </div>
 
-          {/* 파일 선택 영역 */}
           <Field label="파일" required>
             {(file || existingFile) ? (
               <FileChip
                 file={file || existingFile}
                 isExisting={!file && !!existingFile}
-                onRemove={() => { setFile(null); }}
+                onRemove={() => { setFile(null); setExcelData(null); }}
                 disabled={uploading}
               />
             ) : (
@@ -201,18 +396,96 @@ export default function WorkProductRegisterModal({
               ref={fileInputRef}
               type="file"
               style={{ display: "none" }}
+              accept=".xlsx,.xls,.xlsm,.txt,.md,.csv,.json,.xml,.html,.docx,.pdf"
               onChange={(e) => handleFileSelect(e.target.files?.[0])}
               disabled={uploading}
             />
           </Field>
 
-          {/* 본문 */}
+          {parsingExcel && (
+            <div style={{
+              padding: "12px 14px",
+              background: "rgba(35, 131, 226, 0.08)",
+              border: "1px solid rgba(35, 131, 226, 0.30)",
+              borderRadius: 6,
+              fontSize: 12,
+              color: "#1A6DC4",
+              marginBottom: 14,
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}>
+              <div style={{
+                width: 14, height: 14,
+                border: "2px solid rgba(35, 131, 226, 0.30)",
+                borderTop: "2px solid #2383E2",
+                borderRadius: "50%",
+                animation: "spin 0.7s linear infinite",
+              }} />
+              엑셀 파일 분석 중... (SheetJS 동적 로딩)
+            </div>
+          )}
+
+          {excelError && (
+            <div style={errorBoxStyle}>⚠ {excelError}</div>
+          )}
+
+          {excelData && !parsingExcel && (
+            <Field label={`워크시트 (${excelData.total_sheets}개 감지)`}>
+              <div style={{
+                fontSize: 11,
+                color: "var(--c-text-muted)",
+                marginBottom: 8,
+                lineHeight: 1.6,
+              }}>
+                AI 생성에 포함할 시트를 선택하세요. 메타 시트(표지, 변경이력, 범례 등)는 자동 제외됩니다.
+                그룹명은 STK_REQ ID에 사용됩니다 (예: STK_REQ_CELLULAR_001).
+              </div>
+
+              <div style={{
+                border: "1px solid var(--c-border-strong)",
+                borderRadius: 8,
+                overflow: "hidden",
+              }}>
+                {excelData.sheets.map((sheet, idx) => (
+                  <SheetRow
+                    key={idx}
+                    sheet={sheet}
+                    onToggle={() => toggleSheetSelection(idx)}
+                    onGroupNameChange={(name) => updateGroupName(idx, name)}
+                    isLast={idx === excelData.sheets.length - 1}
+                  />
+                ))}
+              </div>
+
+              <div style={{
+                marginTop: 8,
+                fontSize: 11,
+                color: "var(--c-text-soft)",
+                display: "flex",
+                justifyContent: "space-between",
+              }}>
+                <span>
+                  선택됨: {excelData.sheets.filter(s => s.selected && !s.is_meta).length}개 시트
+                </span>
+                <span>
+                  총 데이터 행: {excelData.sheets
+                    .filter(s => s.selected && !s.is_meta)
+                    .reduce((sum, s) => sum + s.row_count, 0)}
+                  개
+                </span>
+              </div>
+            </Field>
+          )}
+
           <Field label="본문 내용" required>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
-              placeholder="파일 본문 또는 요약 내용을 입력하세요. (텍스트 파일은 자동 채워집니다)"
-              rows={6}
+              placeholder={excelData
+                ? "엑셀 데이터가 자동 변환되었습니다. 필요시 추가 설명을 적으세요."
+                : "파일 본문 또는 요약 내용을 입력하세요. (텍스트 파일은 자동 채워집니다)"}
+              rows={excelData ? 4 : 6}
               disabled={uploading}
               style={textareaStyle}
             />
@@ -221,7 +494,6 @@ export default function WorkProductRegisterModal({
             </div>
           </Field>
 
-          {/* 비고 */}
           <Field label="비고">
             <input
               type="text"
@@ -233,7 +505,6 @@ export default function WorkProductRegisterModal({
             />
           </Field>
 
-          {/* 진행률 */}
           {uploading && (
             <div style={{ marginTop: 14 }}>
               <div style={{
@@ -255,18 +526,16 @@ export default function WorkProductRegisterModal({
             </div>
           )}
 
-          {/* 에러 */}
           {error && (
             <div style={errorBoxStyle}>⚠ {error}</div>
           )}
         </div>
 
-        {/* ── 푸터 ───────────────────────── */}
         <div style={footerStyle}>
           <button onClick={onClose} disabled={uploading} style={cancelBtnStyle}>
             취소
           </button>
-          <button onClick={handleRegister} disabled={uploading || !file} style={saveBtnStyle}>
+          <button onClick={handleRegister} disabled={uploading || parsingExcel || (!file && !initialValue?.storagePath)} style={saveBtnStyle}>
             {uploading ? "업로드 중..." : "등록"}
           </button>
         </div>
@@ -275,7 +544,155 @@ export default function WorkProductRegisterModal({
   );
 }
 
-// ── 서브 컴포넌트 ──────────────────────────────────────────────
+// ─── 서브 컴포넌트 ─────────────────────────────────────────────
+
+function SheetRow({ sheet, onToggle, onGroupNameChange, isLast }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div style={{
+      borderBottom: isLast ? "none" : "1px solid var(--c-border)",
+      background: sheet.is_meta ? "var(--c-bg-soft)" : "#fff",
+      opacity: sheet.is_meta ? 0.6 : 1,
+    }}>
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "10px 12px",
+      }}>
+        <input
+          type="checkbox"
+          checked={sheet.selected && !sheet.is_meta}
+          disabled={sheet.is_meta}
+          onChange={onToggle}
+          style={{ flexShrink: 0, cursor: sheet.is_meta ? "not-allowed" : "pointer" }}
+        />
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: "var(--c-text)",
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}>
+            <span style={{ fontFamily: "monospace" }}>{sheet.sheet_name}</span>
+            {sheet.is_meta && (
+              <span style={{
+                fontSize: 9,
+                fontWeight: 700,
+                padding: "1px 6px",
+                background: "rgba(156, 163, 175, 0.20)",
+                color: "#6B6B6B",
+                borderRadius: 3,
+                letterSpacing: "0.04em",
+              }}>
+                META · 제외
+              </span>
+            )}
+          </div>
+          <div style={{
+            fontSize: 10,
+            color: "var(--c-text-muted)",
+            marginTop: 2,
+          }}>
+            {sheet.row_count}행 · {sheet.columns.length}열
+            {sheet.columns.length > 0 && ` · ${sheet.columns.slice(0, 3).join(", ")}${sheet.columns.length > 3 ? "..." : ""}`}
+          </div>
+        </div>
+
+        {!sheet.is_meta && (
+          <>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <label style={{ fontSize: 10, color: "var(--c-text-muted)" }}>그룹:</label>
+              <input
+                type="text"
+                value={sheet.group_name || ""}
+                onChange={(e) => onGroupNameChange(e.target.value)}
+                style={{
+                  width: 100,
+                  padding: "4px 6px",
+                  fontSize: 11,
+                  fontFamily: "monospace",
+                  border: "1px solid var(--c-border-strong)",
+                  borderRadius: 4,
+                  textTransform: "uppercase",
+                }}
+                disabled={!sheet.selected}
+              />
+            </div>
+            <button
+              onClick={() => setExpanded(!expanded)}
+              style={{
+                background: "transparent",
+                border: "1px solid var(--c-border-strong)",
+                borderRadius: 4,
+                padding: "3px 8px",
+                fontSize: 10,
+                cursor: "pointer",
+                color: "var(--c-text-soft)",
+              }}
+            >
+              {expanded ? "접기" : "미리보기"}
+            </button>
+          </>
+        )}
+      </div>
+
+      {expanded && !sheet.is_meta && sheet.preview.length > 0 && (
+        <div style={{
+          background: "var(--c-bg-soft)",
+          borderTop: "1px solid var(--c-border)",
+          padding: "8px 12px 10px",
+          fontSize: 10,
+          fontFamily: "monospace",
+          overflow: "auto",
+          maxHeight: 200,
+        }}>
+          <div style={{ marginBottom: 4, color: "var(--c-text-muted)" }}>
+            첫 3행 미리보기:
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}>
+            <thead>
+              <tr style={{ background: "rgba(0,0,0,0.04)" }}>
+                <th style={{ padding: 4, textAlign: "left", borderBottom: "1px solid var(--c-border)" }}>#</th>
+                {sheet.columns.slice(0, 6).map((col, i) => (
+                  <th key={i} style={{ padding: 4, textAlign: "left", borderBottom: "1px solid var(--c-border)" }}>
+                    {col}
+                  </th>
+                ))}
+                {sheet.columns.length > 6 && (
+                  <th style={{ padding: 4, color: "var(--c-text-muted)" }}>...+{sheet.columns.length - 6}</th>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {sheet.preview.map((row, i) => (
+                <tr key={i}>
+                  <td style={{ padding: 4, color: "var(--c-text-muted)" }}>{row.row_num}</td>
+                  {sheet.columns.slice(0, 6).map((col, ci) => (
+                    <td key={ci} style={{
+                      padding: 4,
+                      maxWidth: 120,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}>
+                      {row[col] || ""}
+                    </td>
+                  ))}
+                  {sheet.columns.length > 6 && <td />}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Field({ label, required, children }) {
   return (
@@ -314,7 +731,7 @@ function DropZone({ dragOver, onClick, onDragOver, onDragLeave, onDrop }) {
         클릭하거나 파일을 드래그하세요
       </div>
       <div style={{ fontSize: 11, color: "var(--c-text-muted)" }}>
-        Word, PDF, Excel, 텍스트 등 — 최대 {MAX_SIZE_MB}MB
+        Excel(.xlsx/.xls), Word, PDF, 텍스트 등 — 최대 {MAX_SIZE_MB}MB
       </div>
     </div>
   );
@@ -355,9 +772,7 @@ function FileChip({ file, isExisting, onRemove, disabled }) {
             fontSize: 18, padding: 4,
           }}
           aria-label="제거"
-        >
-          ×
-        </button>
+        >×</button>
       )}
     </div>
   );
@@ -366,7 +781,7 @@ function FileChip({ file, isExisting, onRemove, disabled }) {
 function getFileIcon(name = "") {
   const ext = name.toLowerCase().split(".").pop();
   if (["doc", "docx"].includes(ext)) return "📄";
-  if (["xls", "xlsx", "csv"].includes(ext)) return "📊";
+  if (["xls", "xlsx", "xlsm", "csv"].includes(ext)) return "📊";
   if (["ppt", "pptx"].includes(ext)) return "📽";
   if (["pdf"].includes(ext)) return "📕";
   if (["png", "jpg", "jpeg", "gif", "svg"].includes(ext)) return "🖼";
@@ -375,13 +790,11 @@ function getFileIcon(name = "") {
   return "📎";
 }
 
-// ── base64 헬퍼 ────────────────────────────────────────────────
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = String(reader.result || "");
-      // data:...;base64,XXXX → XXXX만
       const base64 = result.split(",")[1] || "";
       resolve(base64);
     };
@@ -390,7 +803,7 @@ function fileToBase64(file) {
   });
 }
 
-// ── 스타일 ──────────────────────────────────────────────────────
+// ─── 스타일 ──────────────────────────────────────────────────────
 const overlayStyle = {
   position: "fixed", inset: 0,
   background: "rgba(15, 23, 42, 0.55)",
@@ -405,6 +818,7 @@ const modalStyle = {
   display: "flex", flexDirection: "column",
   boxShadow: "0 20px 50px rgba(15, 23, 42, 0.25)",
   overflow: "hidden",
+  transition: "max-width 0.2s",
 };
 const headerStyle = {
   padding: "18px 22px",
