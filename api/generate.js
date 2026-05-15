@@ -128,9 +128,43 @@ Apply the checklists in each Skill BEFORE finalizing your response. Quality is t
 }
 
 // ──────────────────────────────────────────────────
-// Output Schema for SYS.1 (Phase 2-2a 의 첫 대상)
-// 화면설계서 v260506 SYS.1 + traceability-rules SKILL 기반
+// Output Schema for SYS.1 — Phase 2-2c Schema
+// 변경사항:
+//   - ID 패턴 확장: STK_REQ_NNN 또는 STK_REQ_<GROUP>_NNN 둘 다 허용
+//   - 신규 필드: group, sheet_source, source_row, source_item_id, clarification_needed
+//   - use_cases 제거 (Phase 2-2c)
+//   - coverage_matrix 추가 (스펙 보존 검증)
+//   - warnings 추가 (메타 시트 감지 등 안내)
+//   - 시트별 분할 호출 시 사용되는 partial schema 추가
 // ──────────────────────────────────────────────────
+
+// 전체 출력 스키마 (단일 호출 또는 병합된 최종 결과)
+const STK_REQ_ID_PATTERN = '^STK_REQ_([A-Z][A-Z0-9_]*_)?[0-9]{3}$';
+
+const STK_REQ_ITEM_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', pattern: STK_REQ_ID_PATTERN },
+    group: { type: ['string', 'null'] },
+    sheet_source: { type: ['string', 'null'] },
+    source_row: { type: ['integer', 'null'] },
+    source_item_id: { type: ['string', 'null'] },
+    category: { type: 'string', enum: ['functional', 'non_functional', 'interface', 'constraint'] },
+    statement: { type: 'string' },
+    rationale: { type: 'string' },
+    source_doc: { type: 'string' },
+    priority: { type: 'string', enum: ['must', 'should', 'could'] },
+    verification_method: { type: 'string', enum: ['test', 'analysis', 'inspection', 'demonstration'] },
+    clarification_needed: { type: 'boolean' },
+  },
+  required: [
+    'id', 'group', 'sheet_source', 'source_row', 'source_item_id',
+    'category', 'statement', 'rationale', 'source_doc',
+    'priority', 'verification_method', 'clarification_needed',
+  ],
+  additionalProperties: false,
+};
+
 const OUTPUT_SCHEMAS = {
   'SYS.1': {
     type: 'object',
@@ -139,41 +173,8 @@ const OUTPUT_SCHEMAS = {
       title: { type: 'string' },
       stakeholder_requirements: {
         type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            id: { type: 'string', pattern: '^STK_REQ_[0-9]{3}$' },
-            category: { type: 'string', enum: ['functional', 'non_functional', 'interface', 'constraint'] },
-            statement: { type: 'string' },
-            rationale: { type: 'string' },
-            source_doc: { type: 'string' },
-            priority: { type: 'string', enum: ['must', 'should', 'could'] },
-            verification_method: { type: 'string', enum: ['test', 'analysis', 'inspection', 'demonstration'] },
-          },
-          required: ['id', 'category', 'statement', 'rationale', 'source_doc', 'priority', 'verification_method'],
-          additionalProperties: false,
-        },
+        items: STK_REQ_ITEM_SCHEMA,
         minItems: 1,
-      },
-      use_cases: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            id: { type: 'string', pattern: '^UC_[0-9]{3}$' },
-            name: { type: 'string' },
-            actor: { type: 'string' },
-            preconditions: { type: 'array', items: { type: 'string' } },
-            main_flow: { type: 'array', items: { type: 'string' } },
-            postconditions: { type: 'array', items: { type: 'string' } },
-            linked_requirements: {
-              type: 'array',
-              items: { type: 'string', pattern: '^STK_REQ_[0-9]{3}$' },
-            },
-          },
-          required: ['id', 'name', 'actor', 'preconditions', 'main_flow', 'postconditions', 'linked_requirements'],
-          additionalProperties: false,
-        },
       },
       operational_context: {
         type: 'object',
@@ -185,20 +186,101 @@ const OUTPUT_SCHEMAS = {
         required: ['operating_conditions', 'regulatory_constraints', 'external_interfaces'],
         additionalProperties: false,
       },
+      coverage_matrix: {
+        type: 'object',
+        properties: {
+          by_group: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                group: { type: ['string', 'null'] },
+                sheet_source: { type: ['string', 'null'] },
+                input_rows: { type: 'integer' },
+                derived_stk_reqs: { type: 'integer' },
+                ratio: { type: 'number' },
+                unmapped_input_rows: { type: 'array', items: { type: 'integer' } },
+              },
+              required: ['group', 'sheet_source', 'input_rows', 'derived_stk_reqs', 'ratio', 'unmapped_input_rows'],
+              additionalProperties: false,
+            },
+          },
+          summary: {
+            type: 'object',
+            properties: {
+              total_input_rows: { type: 'integer' },
+              total_stk_reqs: { type: 'integer' },
+              overall_ratio: { type: 'number' },
+              status: { type: 'string', enum: ['compliant', 'spec_loss', 'over_decomposed'] },
+            },
+            required: ['total_input_rows', 'total_stk_reqs', 'overall_ratio', 'status'],
+            additionalProperties: false,
+          },
+        },
+        required: ['by_group', 'summary'],
+        additionalProperties: false,
+      },
       traceability_seeds: {
         type: 'object',
         properties: {
-          from_sw_req: { type: 'array', items: { type: 'string' } },
-          from_hw_req: { type: 'array', items: { type: 'string' } },
-          from_sow:    { type: 'array', items: { type: 'string' } },
+          from_customer_sw_req: { type: 'array', items: { type: 'string' } },
+          from_customer_hw_req: { type: 'array', items: { type: 'string' } },
+          from_sow:             { type: 'array', items: { type: 'string' } },
         },
-        required: ['from_sw_req', 'from_hw_req', 'from_sow'],
+        required: ['from_customer_sw_req', 'from_customer_hw_req', 'from_sow'],
         additionalProperties: false,
       },
+      warnings: { type: 'array', items: { type: 'string' } },
     },
-    required: ['process', 'title', 'stakeholder_requirements', 'use_cases', 'operational_context', 'traceability_seeds'],
+    required: [
+      'process', 'title', 'stakeholder_requirements',
+      'operational_context', 'coverage_matrix', 'traceability_seeds', 'warnings'
+    ],
     additionalProperties: false,
   },
+};
+
+// 시트별 분할 호출 시 사용 (부분 스키마)
+const PER_SHEET_SCHEMA = {
+  type: 'object',
+  properties: {
+    process: { type: 'string', enum: ['SYS.1'] },
+    group: { type: 'string' },
+    sheet_source: { type: 'string' },
+    stakeholder_requirements: {
+      type: 'array',
+      items: STK_REQ_ITEM_SCHEMA,
+      minItems: 0,  // 빈 시트 허용
+    },
+    coverage_matrix_partial: {
+      type: 'object',
+      properties: {
+        group: { type: 'string' },
+        sheet_source: { type: 'string' },
+        input_rows: { type: 'integer' },
+        derived_stk_reqs: { type: 'integer' },
+        ratio: { type: 'number' },
+        unmapped_input_rows: { type: 'array', items: { type: 'integer' } },
+      },
+      required: ['group', 'sheet_source', 'input_rows', 'derived_stk_reqs', 'ratio', 'unmapped_input_rows'],
+      additionalProperties: false,
+    },
+    operational_context_partial: {
+      type: 'object',
+      properties: {
+        regulatory_constraints: { type: 'array', items: { type: 'string' } },
+        external_interfaces: { type: 'array', items: { type: 'string' } },
+      },
+      required: ['regulatory_constraints', 'external_interfaces'],
+      additionalProperties: false,
+    },
+    warnings: { type: 'array', items: { type: 'string' } },
+  },
+  required: [
+    'process', 'group', 'sheet_source', 'stakeholder_requirements',
+    'coverage_matrix_partial', 'operational_context_partial', 'warnings'
+  ],
+  additionalProperties: false,
 };
 
 // ──────────────────────────────────────────────────
@@ -216,6 +298,8 @@ function estimateCost(inputTokens, outputTokens) {
 
 // ──────────────────────────────────────────────────
 // 사용자 입력 구조화 (work_products.content 를 Claude 가 읽기 좋게 변환)
+// Phase 2-2c: 라벨 매핑이 일반화됨 (sw_req/hw_req/sow → 사람이 읽는 라벨)
+//             엑셀 시트는 본 함수가 아닌 buildSheetUserPrompt 사용
 // ──────────────────────────────────────────────────
 function buildUserPrompt(processId, content, projectMeta) {
   const lines = [];
@@ -227,7 +311,11 @@ function buildUserPrompt(processId, content, projectMeta) {
   lines.push('');
   lines.push(`# Process: ${processId}`);
   lines.push('');
-  lines.push(`# Input Items`);
+  lines.push(`# Input Items (OEM Customer Documents — preserve all specs)`);
+  lines.push('');
+  lines.push(`⚠️ These input documents are CUSTOMER deliverables provided to the supplier.`);
+  lines.push(`Citing them in source_doc is NORMAL — NOT a circular reference.`);
+  lines.push(`The supplier MUST preserve all customer specifications (ratio 1.0-1.3).`);
   lines.push('');
 
   for (const [key, value] of Object.entries(content || {})) {
@@ -242,15 +330,176 @@ function buildUserPrompt(processId, content, projectMeta) {
   }
 
   lines.push(`# Task`);
-  lines.push(`Generate the ${processId} work product per the loaded Skills. Follow all checklists. Output strictly conforming JSON.`);
+  lines.push(`Generate the ${processId} work product per the loaded Skills (especially aspice-sys1-derivation).`);
+  lines.push(`Apply Spec-Preservation Principle: every customer input item → ≥1 STK_REQ.`);
+  lines.push(`Compute coverage_matrix with status "compliant" if ratio in [1.0, 1.3].`);
+  lines.push(`Output strictly conforming JSON.`);
+  return lines.join('\n');
+}
+
+// Phase 2-2c: 시트별 분할 호출용 사용자 프롬프트
+function buildSheetUserPrompt({
+  processId, sheetData, projectMeta, sheetIndex, totalSheets, customerSourceFileName, otherInputsSummary,
+}) {
+  const lines = [];
+  lines.push(`# Project Context`);
+  lines.push(`- Project: ${projectMeta.name || '(unnamed)'}`);
+  if (projectMeta.product_name) lines.push(`- Product: ${projectMeta.product_name}`);
+  if (projectMeta.organization) lines.push(`- Organization: ${projectMeta.organization}`);
+  if (projectMeta.description)  lines.push(`- Description: ${projectMeta.description}`);
+  lines.push('');
+  lines.push(`# Process: ${processId}`);
+  lines.push('');
+
+  // 다른 시트들 요약 (Claude가 전체 컨텍스트 인식하도록)
+  if (otherInputsSummary) {
+    lines.push(`# Other inputs in this project (for context only — do NOT derive STK_REQs from these in this call)`);
+    lines.push(otherInputsSummary);
+    lines.push('');
+  }
+
+  lines.push(`# ⚠️ SHEET-BASED GENERATION MODE / 시트 단위 생성 모드`);
+  lines.push('');
+  lines.push(`This call generates STK_REQs from ONE worksheet only.`);
+  lines.push(`Use the provided group_name for ALL STK_REQ IDs.`);
+  lines.push(`Counter starts at 001 for this group.`);
+  lines.push(`Output PER_SHEET_SCHEMA subset (process, group, sheet_source, stakeholder_requirements, coverage_matrix_partial, operational_context_partial, warnings).`);
+  lines.push('');
+
+  lines.push(`<sheet_context>`);
+  lines.push(`  <sheet_name>${sheetData.sheet_name}</sheet_name>`);
+  lines.push(`  <group_name>${sheetData.group_name}</group_name>`);
+  lines.push(`  <sheet_index>${sheetIndex}</sheet_index>`);
+  lines.push(`  <total_sheets>${totalSheets}</total_sheets>`);
+  lines.push(`  <is_meta>${sheetData.is_meta}</is_meta>`);
+  lines.push(`  <columns>${JSON.stringify(sheetData.columns)}</columns>`);
+  lines.push(`  <source_document>${customerSourceFileName || 'Customer Document'}</source_document>`);
+  lines.push(`  <rows>`);
+  for (const row of sheetData.rows) {
+    lines.push(`    ${JSON.stringify(row)}`);
+  }
+  lines.push(`  </rows>`);
+  lines.push(`</sheet_context>`);
+  lines.push('');
+
+  lines.push(`# Task`);
+  lines.push(`For each row in <sheet_context>.<rows>, derive 1 or more STK_REQs (1:1 for simple, 1:N for composite).`);
+  lines.push(`ID format: STK_REQ_${sheetData.group_name}_NNN (001, 002, ...).`);
+  lines.push(`Each STK_REQ MUST have:`);
+  lines.push(`  - group: "${sheetData.group_name}"`);
+  lines.push(`  - sheet_source: "${sheetData.sheet_name}"`);
+  lines.push(`  - source_row: <the row_num from rows array>`);
+  lines.push(`  - source_item_id: <the customer's ID field if present, else null>`);
+  lines.push(`  - source_doc: "${customerSourceFileName || 'Customer Document'} §${sheetData.sheet_name}, Row N (ID-XYZ)"`);
+  lines.push('');
+  lines.push(`Compute coverage_matrix_partial: input_rows=${sheetData.rows.length}, derived_stk_reqs=<your count>, ratio, unmapped_input_rows.`);
+  lines.push(`In operational_context_partial: include any regulations or interfaces SPECIFICALLY mentioned in this sheet only.`);
+  lines.push(`Use warnings array if you detect any anomalies.`);
+
   return lines.join('\n');
 }
 
 function labelOf(processId, key) {
   const map = {
-    'SYS.1': { sw_req: 'SW Requirements', hw_req: 'HW Requirements', sow: 'Statement of Work' },
+    'SYS.1': { sw_req: 'Customer SW Requirements', hw_req: 'Customer HW Requirements', sow: 'Statement of Work (SOW)' },
   };
   return (map[processId] && map[processId][key]) || key;
+}
+
+// Phase 2-2c: 시트별 호출 결과들을 최종 스키마로 병합
+function mergePerSheetOutputs(perSheetOutputs, processId, title) {
+  const merged = {
+    process: processId,
+    title,
+    stakeholder_requirements: [],
+    operational_context: {
+      operating_conditions: '',  // 시트별로 잘 정의되지 않음 — 후처리 또는 빈 문자열
+      regulatory_constraints: [],
+      external_interfaces: [],
+    },
+    coverage_matrix: {
+      by_group: [],
+      summary: {
+        total_input_rows: 0,
+        total_stk_reqs: 0,
+        overall_ratio: 0,
+        status: 'compliant',
+      },
+    },
+    traceability_seeds: {
+      from_customer_sw_req: [],
+      from_customer_hw_req: [],
+      from_sow: [],
+    },
+    warnings: [],
+  };
+
+  const allRegulations = new Set();
+  const allInterfaces = new Set();
+
+  for (const sheetOut of perSheetOutputs) {
+    if (!sheetOut) continue;
+
+    // STK_REQ 누적
+    if (Array.isArray(sheetOut.stakeholder_requirements)) {
+      merged.stakeholder_requirements.push(...sheetOut.stakeholder_requirements);
+    }
+
+    // Coverage matrix 누적
+    if (sheetOut.coverage_matrix_partial) {
+      merged.coverage_matrix.by_group.push(sheetOut.coverage_matrix_partial);
+    }
+
+    // 법규/인터페이스 dedupe
+    if (sheetOut.operational_context_partial) {
+      (sheetOut.operational_context_partial.regulatory_constraints || []).forEach(r => allRegulations.add(r));
+      (sheetOut.operational_context_partial.external_interfaces || []).forEach(i => allInterfaces.add(i));
+    }
+
+    // Warnings 누적
+    if (Array.isArray(sheetOut.warnings)) {
+      merged.warnings.push(...sheetOut.warnings);
+    }
+  }
+
+  merged.operational_context.regulatory_constraints = Array.from(allRegulations);
+  merged.operational_context.external_interfaces = Array.from(allInterfaces);
+  merged.operational_context.operating_conditions = 'See individual sheet contexts. Default automotive operating range: -40°C to +85°C, 9-16V nominal, EMC per ECE R10.';
+
+  // Summary 계산
+  let totalInputRows = 0;
+  let totalStkReqs = 0;
+  for (const g of merged.coverage_matrix.by_group) {
+    totalInputRows += g.input_rows || 0;
+    totalStkReqs += g.derived_stk_reqs || 0;
+  }
+  merged.coverage_matrix.summary.total_input_rows = totalInputRows;
+  merged.coverage_matrix.summary.total_stk_reqs = totalStkReqs;
+  const ratio = totalInputRows > 0 ? totalStkReqs / totalInputRows : 0;
+  merged.coverage_matrix.summary.overall_ratio = Math.round(ratio * 1000) / 1000;
+  if (totalInputRows === 0) {
+    merged.coverage_matrix.summary.status = 'compliant';
+  } else if (ratio < 1.0) {
+    merged.coverage_matrix.summary.status = 'spec_loss';
+  } else if (ratio > 1.3) {
+    merged.coverage_matrix.summary.status = 'over_decomposed';
+  } else {
+    merged.coverage_matrix.summary.status = 'compliant';
+  }
+
+  // Traceability seeds 자동 생성
+  for (const stk of merged.stakeholder_requirements) {
+    const arrow = `${stk.source_item_id || stk.sheet_source || 'Row ' + stk.source_row} → ${stk.id}`;
+    if (stk.source_doc && /sw\s*req/i.test(stk.source_doc)) {
+      merged.traceability_seeds.from_customer_sw_req.push(arrow);
+    } else if (stk.source_doc && /hw\s*req/i.test(stk.source_doc)) {
+      merged.traceability_seeds.from_customer_hw_req.push(arrow);
+    } else if (stk.source_doc && /sow/i.test(stk.source_doc)) {
+      merged.traceability_seeds.from_sow.push(arrow);
+    }
+  }
+
+  return merged;
 }
 
 // ──────────────────────────────────────────────────
@@ -383,51 +632,177 @@ export default async function handler(req, res) {
       reason: `AI generation triggered for ${process_id}`,
     }, 'return=minimal');
 
-    // 3. system + user prompt 구성
+    // 3. ⭐ Phase 2-2c: 엑셀 멀티시트 입력 감지
+    //    - 입력 항목 중 source_type === 'excel_multi_sheet' 가 있으면 시트별 분할 호출
+    //    - 없으면 기존 단일 호출 (백워드 호환)
+    const sheetBasedInputs = []; // [{ itemKey, label, fileName, sheet }]
+    for (const [key, value] of Object.entries(wp.content || {})) {
+      if (value?.source_type === 'excel_multi_sheet' && Array.isArray(value.sheets)) {
+        const label = labelOf(process_id, key);
+        for (const sheet of value.sheets) {
+          if (sheet.selected && !sheet.is_meta) {
+            sheetBasedInputs.push({
+              itemKey: key,
+              label,
+              fileName: value.fileName || label,
+              sheet,
+            });
+          }
+        }
+      }
+    }
+
+    const useSheetSplit = sheetBasedInputs.length > 0;
     const systemPrompt = composeSystemPrompt(process_id);
-    const userPrompt = buildUserPrompt(process_id, wp.content, project);
-    const schema = OUTPUT_SCHEMAS[process_id];
     const skillsUsed = SKILLS_INDEX[process_id] || [];
 
-    // 4. ai_generations 사전 row 생성 (실패해도 기록 남도록)
+    // 4. ai_generations master row 생성 (실패해도 기록 남도록)
+    const masterRowPrompt = useSheetSplit
+      ? `[Sheet-Split Mode] Will dispatch ${sheetBasedInputs.length} per-sheet calls`
+      : buildUserPrompt(process_id, wp.content, project);
+
     const [created] = await sb(`/ai_generations`, 'POST', {
       project_id,
       process_id,
       work_product_id: wp.id,
       agent_role: 'generator',
-      agent_step: 1,
+      agent_step: 0,  // master row (시트별 호출의 부모)
       model: MODEL,
       provider: PROVIDER,
-      system_prompt: systemPrompt.slice(0, 50000),  // 너무 크면 자름
-      user_prompt: userPrompt,
+      system_prompt: systemPrompt.slice(0, 50000),
+      user_prompt: masterRowPrompt.slice(0, 50000),
       skills_used: skillsUsed,
       status: 'pending',
     }, 'return=representation') || [];
     aiGenId = created?.id;
 
     // 5. Claude 호출
-    const claudeResult = await callClaude({ systemPrompt, userPrompt, schema });
+    let parsedOutput;
+    let totalInputTokens = 0;
+    let totalOutputTokens = 0;
+    let totalLatencyMs = 0;
+    let finishReason = 'success';
+    let rawOutputLog = '';
+
+    if (useSheetSplit) {
+      // ── 시트별 분할 호출 (순차) ──
+      console.log(`[generate] Sheet-split mode: ${sheetBasedInputs.length} sheets`);
+      const perSheetOutputs = [];
+
+      // 다른 시트들 요약 (전체 컨텍스트 제공용)
+      const otherInputsSummary = sheetBasedInputs
+        .map((si, i) => `Sheet ${i + 1}/${sheetBasedInputs.length}: "${si.sheet.sheet_name}" (group: ${si.sheet.group_name}, ${si.sheet.rows.length} rows)`)
+        .join('\n');
+
+      for (let i = 0; i < sheetBasedInputs.length; i++) {
+        const si = sheetBasedInputs[i];
+        const sheetUserPrompt = buildSheetUserPrompt({
+          processId: process_id,
+          sheetData: si.sheet,
+          projectMeta: project,
+          sheetIndex: i + 1,
+          totalSheets: sheetBasedInputs.length,
+          customerSourceFileName: si.fileName,
+          otherInputsSummary,
+        });
+
+        // 시트별 child row 생성
+        const [child] = await sb(`/ai_generations`, 'POST', {
+          project_id,
+          process_id,
+          work_product_id: wp.id,
+          agent_role: 'generator',
+          agent_step: i + 1,  // 시트별 step (1, 2, 3, ...)
+          model: MODEL,
+          provider: PROVIDER,
+          system_prompt: systemPrompt.slice(0, 50000),
+          user_prompt: sheetUserPrompt.slice(0, 50000),
+          skills_used: skillsUsed,
+          parent_generation_id: aiGenId,
+          status: 'pending',
+        }, 'return=representation') || [];
+        const childId = child?.id;
+
+        try {
+          const sheetResult = await callClaude({
+            systemPrompt,
+            userPrompt: sheetUserPrompt,
+            schema: PER_SHEET_SCHEMA,
+          });
+
+          totalInputTokens += sheetResult.inputTokens;
+          totalOutputTokens += sheetResult.outputTokens;
+          totalLatencyMs += sheetResult.latencyMs;
+          rawOutputLog += `\n=== Sheet ${i + 1}: ${si.sheet.sheet_name} ===\n${sheetResult.rawOutput}\n`;
+
+          perSheetOutputs.push(sheetResult.parsedOutput);
+
+          if (childId) {
+            const sheetCost = estimateCost(sheetResult.inputTokens, sheetResult.outputTokens);
+            await sb(`/ai_generations?id=eq.${childId}`, 'PATCH', {
+              raw_output: sheetResult.rawOutput,
+              parsed_output: sheetResult.parsedOutput,
+              finish_reason: sheetResult.finishReason,
+              input_tokens: sheetResult.inputTokens,
+              output_tokens: sheetResult.outputTokens,
+              cost_usd: sheetCost,
+              latency_ms: sheetResult.latencyMs,
+              status: 'success',
+            });
+          }
+
+          console.log(`[generate] Sheet ${i + 1}/${sheetBasedInputs.length} done: ${sheetResult.parsedOutput.stakeholder_requirements?.length || 0} STK_REQs`);
+        } catch (e) {
+          if (childId) {
+            await sb(`/ai_generations?id=eq.${childId}`, 'PATCH', {
+              status: 'failed',
+              error_message: e.message?.slice(0, 1000),
+            });
+          }
+          throw new Error(`시트 "${si.sheet.sheet_name}" 처리 실패: ${e.message}`);
+        }
+      }
+
+      // 결과 병합
+      const title = `Stakeholder Requirements for ${project.product_name || project.name || 'System'}`;
+      parsedOutput = mergePerSheetOutputs(perSheetOutputs, process_id, title);
+      finishReason = 'merged_from_sheets';
+    } else {
+      // ── 단일 호출 (기존 흐름, 백워드 호환) ──
+      const userPrompt = buildUserPrompt(process_id, wp.content, project);
+      const claudeResult = await callClaude({
+        systemPrompt,
+        userPrompt,
+        schema: OUTPUT_SCHEMAS[process_id],
+      });
+      parsedOutput = claudeResult.parsedOutput;
+      totalInputTokens = claudeResult.inputTokens;
+      totalOutputTokens = claudeResult.outputTokens;
+      totalLatencyMs = claudeResult.latencyMs;
+      finishReason = claudeResult.finishReason;
+      rawOutputLog = claudeResult.rawOutput;
+    }
 
     // 6. 5축 가드레일 검증
     const guardrailResult = await runGuardrails({
       processId: process_id,
-      output: claudeResult.parsedOutput,
+      output: parsedOutput,
       input: wp.content,
     });
 
     const passed = guardrailResult.overall_passed;
-    const cost = estimateCost(claudeResult.inputTokens, claudeResult.outputTokens);
+    const cost = estimateCost(totalInputTokens, totalOutputTokens);
 
-    // 7. ai_generations 업데이트
+    // 7. ai_generations master row 업데이트
     if (aiGenId) {
       await sb(`/ai_generations?id=eq.${aiGenId}`, 'PATCH', {
-        raw_output: claudeResult.rawOutput,
-        parsed_output: claudeResult.parsedOutput,
-        finish_reason: claudeResult.finishReason,
-        input_tokens: claudeResult.inputTokens,
-        output_tokens: claudeResult.outputTokens,
+        raw_output: rawOutputLog.slice(0, 100000),  // master는 log 형식
+        parsed_output: parsedOutput,
+        finish_reason: finishReason,
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
         cost_usd: cost,
-        latency_ms: claudeResult.latencyMs,
+        latency_ms: totalLatencyMs,
         guardrail_result: guardrailResult,
         guardrail_passed: passed,
         status: passed ? 'success' : 'blocked_by_guardrail',
@@ -437,7 +812,7 @@ export default async function handler(req, res) {
     // 8. work_products 업데이트
     const newState = passed ? 'GENERATED' : 'REJECTED';
     const newContent = passed
-      ? { ...wp.content, ai_generated: claudeResult.parsedOutput }
+      ? { ...wp.content, ai_generated: parsedOutput }
       : wp.content;
 
     await sb(`/work_products?id=eq.${wp.id}`, 'PATCH', {
@@ -467,7 +842,9 @@ export default async function handler(req, res) {
         ai_generation_id: aiGenId,
         passed,
         cost_usd: cost,
-        latency_ms: claudeResult.latencyMs,
+        latency_ms: totalLatencyMs,
+        sheet_split_mode: useSheetSplit,
+        sheet_count: useSheetSplit ? sheetBasedInputs.length : 0,
       },
     }, 'return=minimal');
 
@@ -477,15 +854,17 @@ export default async function handler(req, res) {
       passed,
       state: newState,
       ai_generation_id: aiGenId,
-      output: claudeResult.parsedOutput,
+      output: parsedOutput,
       guardrail_result: guardrailResult,
       meta: {
         model: MODEL,
         skills_used: skillsUsed,
-        input_tokens: claudeResult.inputTokens,
-        output_tokens: claudeResult.outputTokens,
+        input_tokens: totalInputTokens,
+        output_tokens: totalOutputTokens,
         cost_usd: cost,
-        latency_ms: claudeResult.latencyMs,
+        latency_ms: totalLatencyMs,
+        sheet_split_mode: useSheetSplit,
+        sheet_count: useSheetSplit ? sheetBasedInputs.length : 0,
       },
     });
   } catch (error) {
