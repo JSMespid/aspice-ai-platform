@@ -13,7 +13,7 @@
 //   - 카드별 [✏ 편집] 버튼
 
 import { useState, useRef, useEffect } from "react";
-import { exportJSON, exportCSV, exportMarkdown } from "../lib/exporters.js";
+import { exportJSON, exportCSV, exportMarkdown, exportDOCX } from "../lib/exporters.js";
 
 export default function GeneratedArtifactView({
   aiGenerated,
@@ -64,7 +64,9 @@ export default function GeneratedArtifactView({
     critique,
   };
 
-  function handleDownload(format) {
+  const [downloading, setDownloading] = useState(null); // null | 'docx' | 'xlsx' (큰 작업만)
+
+  async function handleDownload(format) {
     setDownloadMenuOpen(false);
     try {
       let result;
@@ -78,6 +80,12 @@ export default function GeneratedArtifactView({
         case 'markdown':
           result = exportMarkdown(aiGenerated, exportMeta);
           break;
+        case 'docx':
+          // DOCX 는 CDN 라이브러리 로드 + 생성 시간 필요 (3~10초)
+          setDownloading('docx');
+          result = await exportDOCX(aiGenerated, exportMeta);
+          setDownloading(null);
+          break;
         default:
           alert(`알 수 없는 형식: ${format}`);
           return;
@@ -85,6 +93,7 @@ export default function GeneratedArtifactView({
       console.log(`[export] ${format} 다운로드 완료:`, result);
     } catch (e) {
       console.error(`[export] ${format} 실패:`, e);
+      setDownloading(null);
       alert(`다운로드 실패: ${e.message}`);
     }
   }
@@ -164,18 +173,23 @@ export default function GeneratedArtifactView({
           <div ref={downloadMenuRef} style={{ position: "relative" }}>
             <button
               onClick={() => setDownloadMenuOpen(o => !o)}
-              title="산출물 다운로드 (JSON / CSV / Markdown)"
+              disabled={!!downloading}
+              title={downloading ? `${downloading.toUpperCase()} 파일 생성 중...` : "산출물 다운로드 (JSON / CSV / Markdown / DOCX)"}
               style={{
                 background: "#fff",
                 border: "1px solid var(--c-border-strong)",
                 borderRadius: 6,
                 padding: "7px 13px",
                 fontSize: 11, fontWeight: 600,
-                cursor: "pointer",
+                cursor: downloading ? "wait" : "pointer",
                 color: "var(--c-text)",
                 display: "flex", alignItems: "center", gap: 4,
+                opacity: downloading ? 0.6 : 1,
               }}>
-              📥 다운로드 <span style={{ fontSize: 9, marginLeft: 2 }}>▼</span>
+              {downloading
+                ? `⏳ ${downloading.toUpperCase()} 생성 중...`
+                : <>📥 다운로드 <span style={{ fontSize: 9, marginLeft: 2 }}>▼</span></>
+              }
             </button>
 
             {downloadMenuOpen && (
@@ -187,7 +201,7 @@ export default function GeneratedArtifactView({
                 border: "1px solid var(--c-border-strong)",
                 borderRadius: 6,
                 boxShadow: "0 8px 24px rgba(15, 23, 42, 0.15)",
-                minWidth: 200,
+                minWidth: 220,
                 zIndex: 10,
                 overflow: "hidden",
               }}>
@@ -209,6 +223,13 @@ export default function GeneratedArtifactView({
                   desc="보고서 (Notion/GitHub)"
                   onClick={() => handleDownload('markdown')}
                 />
+                <DownloadMenuItem
+                  icon="📃"
+                  title="Word (DOCX)"
+                  desc="ASPICE 평가관 제출용"
+                  onClick={() => handleDownload('docx')}
+                  primary
+                />
                 <div style={{
                   padding: "8px 12px",
                   fontSize: 10,
@@ -217,7 +238,7 @@ export default function GeneratedArtifactView({
                   background: "var(--c-bg-soft)",
                   fontStyle: "italic",
                 }}>
-                  Word (DOCX) · Excel (XLSX) 곧 제공
+                  Excel (XLSX) 곧 제공
                 </div>
               </div>
             )}
@@ -707,7 +728,7 @@ function chipStyle(bg, color, border) {
 // ──────────────────────────────────────────────────
 // 다운로드 메뉴 항목 (Phase 2-2b STEP C-3a)
 // ──────────────────────────────────────────────────
-function DownloadMenuItem({ icon, title, desc, onClick }) {
+function DownloadMenuItem({ icon, title, desc, onClick, primary }) {
   return (
     <button
       onClick={onClick}
@@ -715,19 +736,29 @@ function DownloadMenuItem({ icon, title, desc, onClick }) {
         display: "block",
         width: "100%",
         textAlign: "left",
-        background: "transparent",
+        background: primary ? "rgba(30, 39, 97, 0.04)" : "transparent",
         border: "none",
         padding: "10px 14px",
         cursor: "pointer",
         borderBottom: "1px solid var(--c-border)",
       }}
       onMouseEnter={e => e.currentTarget.style.background = 'var(--c-bg-soft)'}
-      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      onMouseLeave={e => e.currentTarget.style.background = primary ? 'rgba(30, 39, 97, 0.04)' : 'transparent'}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ fontSize: 14 }}>{icon}</span>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: "var(--c-text)" }}>{title}</div>
+          <div style={{
+            fontSize: 12, fontWeight: 600,
+            color: primary ? "var(--c-navy-deep)" : "var(--c-text)",
+          }}>
+            {title}
+            {primary && <span style={{
+              marginLeft: 6, fontSize: 9, fontWeight: 700,
+              padding: '1px 5px', borderRadius: 3,
+              background: 'var(--c-navy-deep)', color: '#fff',
+            }}>추천</span>}
+          </div>
           <div style={{ fontSize: 10, color: "var(--c-text-muted)", marginTop: 1 }}>{desc}</div>
         </div>
       </div>
