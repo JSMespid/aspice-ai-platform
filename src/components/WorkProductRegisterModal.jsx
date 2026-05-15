@@ -22,6 +22,14 @@ const EXCEL_EXTENSIONS = /\.(xlsx|xls|xlsm)$/i;
 // SheetJS CDN — 동적 로딩 (npm 의존성 회피)
 const SHEETJS_CDN = "https://esm.sh/xlsx@0.18.5";
 
+// ─── Phase 2-2c: 시트 수 임계값 ─────────────────────────────────
+// Vercel Hobby 함수 maxDuration = 300초 (5분)
+// 시트당 평균 30~45초 (Opus 4.7 + adaptive thinking)
+// 병렬 호출 시 가장 느린 시트가 전체 시간 결정 → 안전 한도 약 8시트
+// (Anthropic Tier 1 Opus rate limit 2026년 5월 인상으로 병렬 호출 안전)
+const SHEET_COUNT_SAFE_MAX = 8;
+const SHEET_COUNT_WARN_THRESHOLD = 5;
+
 // ─── Phase 2-2c: 메타 시트 식별 키워드 (SKILL Section 4.2) ──────
 const META_SHEET_KEYWORDS = [
   // English
@@ -74,6 +82,104 @@ function extractGroupName(sheetName, fallbackIndex) {
     return englishMatch[0].toUpperCase().slice(0, 12);
   }
   return `SHEET${fallbackIndex}`;
+}
+
+// ─── Phase 2-2c: 자동 그룹명 충돌 해결 ──────────────────────────
+// 같은 group_name 을 가진 시트들을 시트명에서 추가 단어 추출하여 disambiguate
+//
+// 예시:
+//   시트 "NAD Cellular", "NAD Bluetooth", "NAD WiFi" → 모두 NAD 로 추출됨
+//   → 자동 해결: NAD (첫번째 유지) / NADBT / NADWIFI 로 분리
+function autoResolveGroupConflicts(sheets) {
+  // 1. 그룹명별로 시트 인덱스 수집
+  const groupBuckets = new Map();
+  sheets.forEach((sheet, idx) => {
+    if (sheet.is_meta || !sheet.selected) return;
+    const g = sheet.group_name;
+    if (!groupBuckets.has(g)) groupBuckets.set(g, []);
+    groupBuckets.get(g).push(idx);
+  });
+
+  const newSheets = [...sheets];
+  const usedNames = new Set();
+  const changes = [];
+
+  // 충돌이 없는 그룹명은 그대로 사용
+  for (const [g, indices] of groupBuckets.entries()) {
+    if (indices.length === 1) {
+      usedNames.add(g);
+    }
+  }
+
+  // 충돌이 있는 그룹들 처리
+  for (const [g, indices] of groupBuckets.entries()) {
+    if (indices.length <= 1) continue;
+
+    // 충돌 시: 첫 번째는 원본 유지, 나머지는 시트명에서 disambiguator 추출
+    indices.forEach((sheetIdx, occurrence) => {
+      const sheet = sheets[sheetIdx];
+      if (occurrence === 0) {
+        // 첫 번째는 원본 유지
+        usedNames.add(g);
+        return;
+      }
+
+      // disambiguator 추출
+      const newName = generateDisambiguatedName(sheet.sheet_name, g, usedNames, occurrence);
+      newSheets[sheetIdx] = { ...sheet, group_name: newName };
+      usedNames.add(newName);
+      changes.push({
+        sheet_name: sheet.sheet_name,
+        from: g,
+        to: newName,
+      });
+    });
+  }
+
+  return { sheets: newSheets, changes };
+}
+
+// 시트명에서 disambiguator 추출하여 새 그룹명 생성
+function generateDisambiguatedName(sheetName, baseGroup, usedNames, occurrence) {
+  const cleaned = sheetName.trim();
+
+  // 전략 1: GROUP_ABBREVIATIONS에서 baseGroup 외의 다른 매칭이 있는지 찾기
+  //   예: "NAD Cellular" → CELLULAR (NAD 매칭 외에) → NADCELL 같은 합성
+  for (const [regex, abbr] of GROUP_ABBREVIATIONS) {
+    if (abbr === baseGroup) continue;
+    if (regex.test(cleaned)) {
+      // baseGroup + abbr 의 합성을 시도 (최대 12자)
+      const composed = (baseGroup + abbr).slice(0, 12);
+      if (!usedNames.has(composed)) return composed;
+      // 또는 abbr 만으로
+      if (!usedNames.has(abbr)) return abbr;
+    }
+  }
+
+  // 전략 2: 시트명에서 baseGroup 매칭 단어를 제거하고 남은 단어 첫 글자들 추출
+  const words = cleaned.split(/[\s\-_/&()]+/).filter(w => w.length > 0);
+  const meaningfulWords = words.filter(w => {
+    const u = w.toUpperCase();
+    return u !== baseGroup && !/^v?\d+$/i.test(w);  // 버전 번호 제외
+  });
+
+  if (meaningfulWords.length > 0) {
+    // 첫 단어 영문 부분
+    const firstMeaningful = meaningfulWords[0].match(/[A-Za-z][A-Za-z0-9]*/);
+    if (firstMeaningful) {
+      const upper = firstMeaningful[0].toUpperCase();
+      // 1) baseGroup + upper
+      const composed = (baseGroup + upper).slice(0, 12);
+      if (!usedNames.has(composed)) return composed;
+      // 2) upper 만으로
+      if (upper.length >= 2 && !usedNames.has(upper)) return upper.slice(0, 12);
+    }
+  }
+
+  // 전략 3: 숫자 접미사 (최후 수단)
+  let suffix = 2;
+  while (usedNames.has(`${baseGroup}${suffix}`)) suffix++;
+  return `${baseGroup}${suffix}`.slice(0, 12);
 }
 
 // ─── SheetJS 동적 로딩 ──────────────────────────────────────────
@@ -165,6 +271,7 @@ export default function WorkProductRegisterModal({
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState("");
+  const [infoMessage, setInfoMessage] = useState("");  // Phase 2-2c: 성공/안내 메시지
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
 
@@ -259,6 +366,28 @@ export default function WorkProductRegisterModal({
     setBody(serializeSheetsToBody(newSheets));
   }
 
+  // Phase 2-2c: 자동 그룹명 충돌 해결 핸들러
+  function handleAutoResolveConflicts() {
+    if (!excelData) return;
+    const { sheets: resolvedSheets, changes } = autoResolveGroupConflicts(excelData.sheets);
+    const newData = { ...excelData, sheets: resolvedSheets };
+    setExcelData(newData);
+    setBody(serializeSheetsToBody(resolvedSheets));
+
+    if (changes.length === 0) {
+      setInfoMessage("✓ 충돌이 발견되지 않았습니다.");
+      setTimeout(() => setInfoMessage(""), 4000);
+      return;
+    }
+    const summary = changes
+      .slice(0, 5)
+      .map(c => `  • "${c.sheet_name}": ${c.from} → ${c.to}`)
+      .join("\n");
+    const more = changes.length > 5 ? `\n  ... 외 ${changes.length - 5}개` : "";
+    setInfoMessage(`✓ ${changes.length}개 시트 그룹명 자동 정리:\n${summary}${more}`);
+    setTimeout(() => setInfoMessage(""), 10000);
+  }
+
   async function handleRegister() {
     if (!file && !initialValue?.storagePath) {
       setError("파일을 선택하세요.");
@@ -275,10 +404,15 @@ export default function WorkProductRegisterModal({
         setError("최소 1개의 워크시트를 선택하세요. (메타 시트는 자동 제외됨)");
         return;
       }
+      // Phase 2-2c: 시트 수 안전 한도
+      if (selectedSheets.length > SHEET_COUNT_SAFE_MAX) {
+        setError(`선택된 시트가 너무 많습니다 (${selectedSheets.length}개). Vercel 함수 타임아웃(300초) 위험으로 인해 최대 ${SHEET_COUNT_SAFE_MAX}개까지만 처리할 수 있습니다. 일부 시트의 선택을 해제하세요.`);
+        return;
+      }
       const groupNames = selectedSheets.map(s => s.group_name);
       const dupes = groupNames.filter((g, i) => groupNames.indexOf(g) !== i);
       if (dupes.length > 0) {
-        setError(`그룹명이 중복되었습니다: ${[...new Set(dupes)].join(", ")} — 각 시트마다 고유한 그룹명이 필요합니다.`);
+        setError(`그룹명이 중복되었습니다: ${[...new Set(dupes)].join(", ")} — 우측 [🔧 그룹명 자동 정리] 버튼을 사용하거나 각 시트마다 고유한 그룹명을 직접 입력하세요.`);
         return;
       }
     }
@@ -430,53 +564,148 @@ export default function WorkProductRegisterModal({
             <div style={errorBoxStyle}>⚠ {excelError}</div>
           )}
 
-          {excelData && !parsingExcel && (
-            <Field label={`워크시트 (${excelData.total_sheets}개 감지)`}>
-              <div style={{
-                fontSize: 11,
-                color: "var(--c-text-muted)",
-                marginBottom: 8,
-                lineHeight: 1.6,
-              }}>
-                AI 생성에 포함할 시트를 선택하세요. 메타 시트(표지, 변경이력, 범례 등)는 자동 제외됩니다.
-                그룹명은 STK_REQ ID에 사용됩니다 (예: STK_REQ_CELLULAR_001).
-              </div>
+          {excelData && !parsingExcel && (() => {
+            // 선택된 비-메타 시트
+            const activeSheets = excelData.sheets.filter(s => s.selected && !s.is_meta);
+            const totalRows = activeSheets.reduce((sum, s) => sum + s.row_count, 0);
 
-              <div style={{
-                border: "1px solid var(--c-border-strong)",
-                borderRadius: 8,
-                overflow: "hidden",
-              }}>
-                {excelData.sheets.map((sheet, idx) => (
-                  <SheetRow
-                    key={idx}
-                    sheet={sheet}
-                    onToggle={() => toggleSheetSelection(idx)}
-                    onGroupNameChange={(name) => updateGroupName(idx, name)}
-                    isLast={idx === excelData.sheets.length - 1}
-                  />
-                ))}
-              </div>
+            // 그룹명 충돌 감지
+            const groupNames = activeSheets.map(s => s.group_name);
+            const groupCounts = groupNames.reduce((acc, g) => {
+              acc[g] = (acc[g] || 0) + 1;
+              return acc;
+            }, {});
+            const conflictGroups = Object.entries(groupCounts).filter(([, n]) => n > 1).map(([g]) => g);
+            const hasConflicts = conflictGroups.length > 0;
 
-              <div style={{
-                marginTop: 8,
-                fontSize: 11,
-                color: "var(--c-text-soft)",
-                display: "flex",
-                justifyContent: "space-between",
-              }}>
-                <span>
-                  선택됨: {excelData.sheets.filter(s => s.selected && !s.is_meta).length}개 시트
-                </span>
-                <span>
-                  총 데이터 행: {excelData.sheets
-                    .filter(s => s.selected && !s.is_meta)
-                    .reduce((sum, s) => sum + s.row_count, 0)}
-                  개
-                </span>
-              </div>
-            </Field>
-          )}
+            // 시트 수 경고 상태
+            const sheetCount = activeSheets.length;
+            const sheetCountStatus =
+              sheetCount > SHEET_COUNT_SAFE_MAX ? 'danger' :
+              sheetCount > SHEET_COUNT_WARN_THRESHOLD ? 'warn' :
+              'ok';
+
+            return (
+              <Field label={`워크시트 (${excelData.total_sheets}개 감지)`}>
+                <div style={{
+                  fontSize: 11,
+                  color: "var(--c-text-muted)",
+                  marginBottom: 8,
+                  lineHeight: 1.6,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-end",
+                  gap: 12,
+                }}>
+                  <div>
+                    AI 생성에 포함할 시트를 선택하세요. 메타 시트(표지, 변경이력, 범례 등)는 자동 제외됩니다.
+                    그룹명은 STK_REQ ID에 사용됩니다 (예: STK_REQ_CELLULAR_001).
+                  </div>
+                  {hasConflicts && (
+                    <button
+                      onClick={handleAutoResolveConflicts}
+                      disabled={uploading}
+                      style={{
+                        flexShrink: 0,
+                        background: "#2383E2",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: 5,
+                        padding: "5px 10px",
+                        fontSize: 11,
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      🔧 그룹명 자동 정리
+                    </button>
+                  )}
+                </div>
+
+                {/* Phase 2-2c: 시트 수 경고 */}
+                {sheetCountStatus !== 'ok' && (
+                  <div style={{
+                    padding: "8px 12px",
+                    background: sheetCountStatus === 'danger'
+                      ? "rgba(224, 62, 62, 0.08)"
+                      : "rgba(199, 125, 26, 0.08)",
+                    border: `1px solid ${sheetCountStatus === 'danger'
+                      ? "rgba(224, 62, 62, 0.30)"
+                      : "rgba(199, 125, 26, 0.30)"}`,
+                    borderRadius: 6,
+                    marginBottom: 8,
+                    fontSize: 11,
+                    color: sheetCountStatus === 'danger' ? "#991B1B" : "#92400E",
+                    lineHeight: 1.6,
+                  }}>
+                    {sheetCountStatus === 'danger' ? (
+                      <>
+                        <strong>⚠️ 시트 수 초과 ({sheetCount}개 선택)</strong> — 최대 안전 한도 {SHEET_COUNT_SAFE_MAX}개를 초과했습니다.
+                        Vercel 함수 타임아웃(300초) 위험이 있습니다. <strong>{sheetCount - SHEET_COUNT_SAFE_MAX}개 이상</strong> 체크 해제를 권장합니다.
+                      </>
+                    ) : (
+                      <>
+                        <strong>ℹ️ 시트 수 안내 ({sheetCount}개 선택)</strong> — 병렬 호출로 처리되며 약 30~90초 소요됩니다.
+                        시트가 많을수록 비용도 증가합니다 (시트당 약 $0.3~$1.0).
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {/* Phase 2-2c: 그룹명 충돌 경고 */}
+                {hasConflicts && (
+                  <div style={{
+                    padding: "8px 12px",
+                    background: "rgba(224, 62, 62, 0.08)",
+                    border: "1px solid rgba(224, 62, 62, 0.30)",
+                    borderRadius: 6,
+                    marginBottom: 8,
+                    fontSize: 11,
+                    color: "#991B1B",
+                    lineHeight: 1.6,
+                  }}>
+                    <strong>⚠ 그룹명 중복</strong> — {conflictGroups.join(", ")} — 우측 <strong>[🔧 자동 정리]</strong> 버튼을 클릭하거나, 각 시트의 그룹명을 직접 수정하세요.
+                  </div>
+                )}
+
+                <div style={{
+                  border: "1px solid var(--c-border-strong)",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                }}>
+                  {excelData.sheets.map((sheet, idx) => (
+                    <SheetRow
+                      key={idx}
+                      sheet={sheet}
+                      onToggle={() => toggleSheetSelection(idx)}
+                      onGroupNameChange={(name) => updateGroupName(idx, name)}
+                      isLast={idx === excelData.sheets.length - 1}
+                      isConflicted={conflictGroups.includes(sheet.group_name) && sheet.selected && !sheet.is_meta}
+                    />
+                  ))}
+                </div>
+
+                <div style={{
+                  marginTop: 8,
+                  fontSize: 11,
+                  color: "var(--c-text-soft)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}>
+                  <span>
+                    선택됨: <strong style={{
+                      color: sheetCountStatus === 'danger' ? "#E03E3E" : "var(--c-text)"
+                    }}>{sheetCount}</strong>개 시트
+                    {sheetCount > 0 && ` (안전 한도 ${SHEET_COUNT_SAFE_MAX}개)`}
+                  </span>
+                  <span>
+                    총 데이터 행: <strong style={{ color: "var(--c-text)" }}>{totalRows}</strong>개
+                  </span>
+                </div>
+              </Field>
+            );
+          })()}
 
           <Field label="본문 내용" required>
             <textarea
@@ -529,6 +758,22 @@ export default function WorkProductRegisterModal({
           {error && (
             <div style={errorBoxStyle}>⚠ {error}</div>
           )}
+
+          {infoMessage && (
+            <div style={{
+              marginTop: 12,
+              padding: "10px 12px",
+              background: "rgba(35, 131, 226, 0.06)",
+              border: "1px solid rgba(35, 131, 226, 0.25)",
+              borderRadius: 6,
+              fontSize: 12,
+              color: "#1A6DC4",
+              lineHeight: 1.6,
+              whiteSpace: "pre-wrap",
+            }}>
+              {infoMessage}
+            </div>
+          )}
         </div>
 
         <div style={footerStyle}>
@@ -546,14 +791,17 @@ export default function WorkProductRegisterModal({
 
 // ─── 서브 컴포넌트 ─────────────────────────────────────────────
 
-function SheetRow({ sheet, onToggle, onGroupNameChange, isLast }) {
+function SheetRow({ sheet, onToggle, onGroupNameChange, isLast, isConflicted }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <div style={{
       borderBottom: isLast ? "none" : "1px solid var(--c-border)",
-      background: sheet.is_meta ? "var(--c-bg-soft)" : "#fff",
+      background: sheet.is_meta
+        ? "var(--c-bg-soft)"
+        : (isConflicted ? "rgba(224, 62, 62, 0.04)" : "#fff"),
       opacity: sheet.is_meta ? 0.6 : 1,
+      borderLeft: isConflicted ? "3px solid #E03E3E" : "3px solid transparent",
     }}>
       <div style={{
         display: "flex",
@@ -616,9 +864,13 @@ function SheetRow({ sheet, onToggle, onGroupNameChange, isLast }) {
                   padding: "4px 6px",
                   fontSize: 11,
                   fontFamily: "monospace",
-                  border: "1px solid var(--c-border-strong)",
+                  border: isConflicted
+                    ? "1px solid #E03E3E"
+                    : "1px solid var(--c-border-strong)",
                   borderRadius: 4,
                   textTransform: "uppercase",
+                  background: isConflicted ? "rgba(224, 62, 62, 0.06)" : "#fff",
+                  color: isConflicted ? "#991B1B" : "inherit",
                 }}
                 disabled={!sheet.selected}
               />
