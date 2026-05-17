@@ -25,7 +25,8 @@
 //   audit_logs 행 기록
 
 const TIMEOUT_MS = 280_000; // 4분 40초 (Vercel Hobby maxDuration 300초 한도 내 안전 마진)
-const MAX_TOKENS = 16000;   // 한글 풍부한 ASPICE 산출물 충분히 담을 크기
+const MAX_TOKENS = 64000;  // Phase 2-2c: 시트별 스펙 보존 모드로 출력 크기 증가 (Opus 4.7 최대 128000)
+                            // 16000은 시트당 100+ STK_REQ 생성 시 부족하여 잘림 발생
 const MODEL = 'claude-opus-4-7';  // 최상위 reasoning 모델 (품질 우선)
 const PROVIDER = 'anthropic';
 
@@ -599,7 +600,7 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
         throw new Error(
           `Claude 응답이 max_tokens(${MAX_TOKENS})에 도달해 잘렸습니다. ` +
           `생성된 ${rawOutput.length}자가 JSON으로 완결되지 못함. ` +
-          `해결책: api/generate.js 의 MAX_TOKENS 를 더 크게 (예: 16000) 늘리세요.`
+          `이 시트의 입력 항목이 너무 많거나, MAX_TOKENS 를 더 크게 늘리세요 (Opus 4.7 최대 128000).`
         );
       }
       throw new Error(`Failed to parse JSON from Claude (stop=${stopReason}): ${e.message}`);
