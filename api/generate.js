@@ -554,10 +554,14 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
         max_tokens: MAX_TOKENS,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
-        // Adaptive thinking — Opus 4.7 의 깊은 reasoning 활성화 (품질 극대화)
+        // Phase 2-2c: Adaptive thinking + effort: low
+        // SYS.1 은 구조화된 추출 작업이라 깊은 추론 불필요
+        // SKILL 이 매우 상세하므로 모델이 빠르게 따라가도록 함
+        // 이전 'adaptive' 단독 사용 시 시트당 4분 소요 → effort 'low' 로 1~2분 단축
         thinking: { type: 'adaptive' },
         // Structured Outputs (GA — 별도 beta header 불필요)
         output_config: {
+          effort: 'low',
           format: {
             type: 'json_schema',
             schema,
