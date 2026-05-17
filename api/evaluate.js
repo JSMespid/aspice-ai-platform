@@ -604,3 +604,12 @@ export default async function handler(req, res) {
     });
   }
 }
+
+// ──────────────────────────────────────────────────
+// Phase 2-2c (Pro): Vercel 함수 maxDuration 설정
+// Gemini Flash 는 보통 30~60초 내 완료되지만 fallback model 사용 시 더 걸릴 수 있음
+// 안전하게 300초로 설정
+// ──────────────────────────────────────────────────
+export const config = {
+  maxDuration: 300,
+};

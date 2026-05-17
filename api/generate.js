@@ -24,7 +24,8 @@
 //   state_transitions 행 기록 (INITIAL → GENERATING → GENERATED/REJECTED)
 //   audit_logs 행 기록
 
-const TIMEOUT_MS = 280_000; // 4분 40초 (Vercel Hobby maxDuration 300초 한도 내 안전 마진)
+const TIMEOUT_MS = 750_000; // Phase 2-2c (Pro): 12분 30초 — Vercel Pro maxDuration 800초 한도 내 안전 마진
+                             // 시트당 깊은 reasoning 5~6분도 충분히 처리 가능
 const MAX_TOKENS = 64000;  // Phase 2-2c: 시트별 스펙 보존 모드로 출력 크기 증가 (Opus 4.7 최대 128000)
                             // 16000은 시트당 100+ STK_REQ 생성 시 부족하여 잘림 발생
 const MODEL = 'claude-opus-4-7';  // 최상위 reasoning 모델 (품질 우선)
@@ -554,14 +555,12 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
         max_tokens: MAX_TOKENS,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
-        // Phase 2-2c: Adaptive thinking + effort: low
-        // SYS.1 은 구조화된 추출 작업이라 깊은 추론 불필요
-        // SKILL 이 매우 상세하므로 모델이 빠르게 따라가도록 함
-        // 이전 'adaptive' 단독 사용 시 시트당 4분 소요 → effort 'low' 로 1~2분 단축
+        // Phase 2-2c (Pro): Adaptive thinking 기본 (깊은 reasoning)
+        // Vercel Pro maxDuration 800초로 시트당 4~6분의 깊은 추론도 안전
+        // 자동차 OEM ASPICE 평가 통과를 위한 품질 우선
         thinking: { type: 'adaptive' },
         // Structured Outputs (GA — 별도 beta header 불필요)
         output_config: {
-          effort: 'low',
           format: {
             type: 'json_schema',
             schema,
@@ -967,3 +966,13 @@ export default async function handler(req, res) {
     });
   }
 }
+
+// ──────────────────────────────────────────────────
+// Phase 2-2c (Pro): Vercel 함수 maxDuration 설정
+// Vercel Pro 플랜은 최대 800초까지 가능
+// 시트별 분할 호출 + 깊은 adaptive thinking 충분히 처리
+// 참고: https://vercel.com/docs/functions/configuring-functions/duration
+// ──────────────────────────────────────────────────
+export const config = {
+  maxDuration: 800,
+};
