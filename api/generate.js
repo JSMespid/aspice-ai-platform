@@ -542,32 +542,54 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
   const t0 = Date.now();
 
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.ANTHROPIC_API_KEY,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-        // Phase 2-2c (Pro): Adaptive thinking 기본 (깊은 reasoning)
-        // Vercel Pro maxDuration 800초로 시트당 4~6분의 깊은 추론도 안전
-        // 자동차 OEM ASPICE 평가 통과를 위한 품질 우선
-        thinking: { type: 'adaptive' },
-        // Structured Outputs (GA — 별도 beta header 불필요)
-        output_config: {
-          format: {
-            type: 'json_schema',
-            schema,
-          },
+    let res;
+    try {
+      res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        signal: ctrl.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': process.env.ANTHROPIC_API_KEY,
+          'anthropic-version': '2023-06-01',
         },
-      }),
-    });
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: MAX_TOKENS,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+          // Phase 2-2c (Pro): Adaptive thinking 기본 (깊은 reasoning)
+          // Vercel Pro maxDuration 800초로 시트당 4~6분의 깊은 추론도 안전
+          // 자동차 OEM ASPICE 평가 통과를 위한 품질 우선
+          thinking: { type: 'adaptive' },
+          // Structured Outputs (GA — 별도 beta header 불필요)
+          output_config: {
+            format: {
+              type: 'json_schema',
+              schema,
+            },
+          },
+        }),
+      });
+    } catch (fetchError) {
+      // Phase 2-2c: 네트워크 레벨 에러 (fetch failed, ECONNRESET, ENOTFOUND 등) 자동 재시도
+      // Anthropic API 일시 장애 또는 네트워크 일시 끊김에 대응
+      const isNetworkError = fetchError.message?.includes('fetch failed') ||
+                              fetchError.message?.includes('ECONNRESET') ||
+                              fetchError.message?.includes('ENOTFOUND') ||
+                              fetchError.message?.includes('ETIMEDOUT') ||
+                              fetchError.code === 'UND_ERR_SOCKET' ||
+                              fetchError.cause?.code === 'ECONNRESET';
+
+      if (isNetworkError && attempt < MAX_RETRIES) {
+        const waitMs = (attempt + 1) * 3000;  // 3초, 6초 백오프
+        console.log(`[callClaude] Network error: ${fetchError.message}, retry after ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        clearTimeout(timeoutId);
+        await new Promise(r => setTimeout(r, waitMs));
+        return callClaude({ systemPrompt, userPrompt, schema, attempt: attempt + 1 });
+      }
+      // 재시도 한도 초과 또는 다른 종류 에러는 그대로 throw
+      throw fetchError;
+    }
 
     // Phase 2-2c: 429 (Rate Limit) 또는 529 (Overloaded) 자동 재시도
     if ((res.status === 429 || res.status === 529) && attempt < MAX_RETRIES) {
@@ -967,12 +989,4 @@ export default async function handler(req, res) {
   }
 }
 
-// ──────────────────────────────────────────────────
-// Phase 2-2c (Pro): Vercel 함수 maxDuration 설정
-// Vercel Pro 플랜은 최대 800초까지 가능
-// 시트별 분할 호출 + 깊은 adaptive thinking 충분히 처리
-// 참고: https://vercel.com/docs/functions/configuring-functions/duration
-// ──────────────────────────────────────────────────
-export const config = {
-  maxDuration: 800,
-};
+// Phase 2-2c (Pro): Vercel 함수 maxDuration = 800초 (vercel.json에서 설정)
