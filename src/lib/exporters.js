@@ -123,15 +123,20 @@ function csvLine(fields) {
 export function exportCSV(aiGenerated, meta = {}) {
   const stkReqs = aiGenerated.stakeholder_requirements || [];
 
-  // 헤더
+  // Phase 2-2c: 헤더에 새 필드 추가 (Group, Sheet_Source, Source_Row, Source_Item_ID, Clarification_Needed)
   const header = [
     'ID',
+    'Group',
     'Category',
     'Priority',
     'Verification_Method',
     'Statement',
     'Rationale',
     'Source_Doc',
+    'Sheet_Source',
+    'Source_Row',
+    'Source_Item_ID',
+    'Clarification_Needed',
     'User_Modified',
     'Modified_At',
   ];
@@ -141,12 +146,17 @@ export function exportCSV(aiGenerated, meta = {}) {
   for (const r of stkReqs) {
     lines.push(csvLine([
       r.id,
+      r.group || '',
       r.category,
       r.priority,
       r.verification_method,
       r.statement,
       r.rationale,
       r.source_doc,
+      r.sheet_source || '',
+      r.source_row != null ? r.source_row : '',
+      r.source_item_id || '',
+      r.clarification_needed === true ? 'YES' : '',
       r.modified === true ? 'YES' : '',
       r.modified_at || '',
     ]));
@@ -245,12 +255,22 @@ export function exportMarkdown(aiGenerated, meta = {}) {
     lines.push('');
   }
 
-  // 2. Stakeholder Requirements
+  // 2. Stakeholder Requirements (Phase 2-2c: 카테고리별 분류)
   lines.push('## 2. Stakeholder Requirements');
   lines.push('');
-  for (const r of stkReqs) {
+
+  // 카테고리 정의 (ASPICE 표준 분류 순서)
+  const MD_CATEGORY_GROUPS = [
+    { key: 'functional',     title: 'Functional Requirements',     subSection: '2.1' },
+    { key: 'non_functional', title: 'Non-Functional Requirements', subSection: '2.2' },
+    { key: 'constraint',     title: 'Constraints',                 subSection: '2.3' },
+    { key: 'interface',      title: 'Interface Requirements',      subSection: '2.4' },
+  ];
+
+  function renderMdStkReq(r) {
     const modifiedBadge = r.modified ? ' ✏ **(사용자 수정)**' : '';
-    lines.push(`### ${r.id} — ${r.category}, ${r.priority.toUpperCase()}${modifiedBadge}`);
+    const clarifyBadge = r.clarification_needed ? ' ❓ **(CLARIFICATION NEEDED)**' : '';
+    lines.push(`#### ${r.id} — ${r.category}, ${r.priority.toUpperCase()}${clarifyBadge}${modifiedBadge}`);
     lines.push('');
     lines.push(`**Statement**: ${r.statement}`);
     lines.push('');
@@ -270,6 +290,27 @@ export function exportMarkdown(aiGenerated, meta = {}) {
     }
     lines.push('---');
     lines.push('');
+  }
+
+  // 카테고리별 그룹화
+  const mdKnownCategories = new Set(MD_CATEGORY_GROUPS.map(g => g.key));
+  const mdOtherReqs = stkReqs.filter(r => !mdKnownCategories.has(r.category));
+
+  for (const group of MD_CATEGORY_GROUPS) {
+    const reqsInGroup = stkReqs.filter(r => r.category === group.key);
+    if (reqsInGroup.length === 0) continue;
+    lines.push(`### ${group.subSection} ${group.title} (${reqsInGroup.length})`);
+    lines.push('');
+    for (const r of reqsInGroup) {
+      renderMdStkReq(r);
+    }
+  }
+  if (mdOtherReqs.length > 0) {
+    lines.push(`### 2.5 Other (${mdOtherReqs.length})`);
+    lines.push('');
+    for (const r of mdOtherReqs) {
+      renderMdStkReq(r);
+    }
   }
 
   // 3. Use Cases
@@ -298,11 +339,56 @@ export function exportMarkdown(aiGenerated, meta = {}) {
     }
   }
 
-  // 4. Traceability Matrix
+  // 4. Traceability Matrix (Phase 2-2c)
+  const mdCoverageMatrix = aiGenerated.coverage_matrix || null;
   lines.push('## 4. Traceability Matrix');
   lines.push('');
+
+  // 4.1 Coverage Matrix
+  if (mdCoverageMatrix && (mdCoverageMatrix.sheets?.length > 0 || mdCoverageMatrix.total_input_items)) {
+    lines.push('### 4.1 Coverage Matrix (Sheet → STK_REQ Distribution)');
+    lines.push('');
+    if (mdCoverageMatrix.total_input_items != null && mdCoverageMatrix.total_stk_reqs != null) {
+      const ratio = mdCoverageMatrix.total_input_items > 0
+        ? (mdCoverageMatrix.total_stk_reqs / mdCoverageMatrix.total_input_items)
+        : 0;
+      lines.push(`- **Total Input Items**: ${mdCoverageMatrix.total_input_items}`);
+      lines.push(`- **Total STK_REQ Generated**: ${mdCoverageMatrix.total_stk_reqs}`);
+      lines.push(`- **Coverage Ratio**: ${ratio.toFixed(2)}× (target 1.0–1.3)`);
+      lines.push('');
+    }
+    if (mdCoverageMatrix.sheets?.length > 0) {
+      lines.push('| Sheet Name | Group | Input Items | STK_REQ | Ratio |');
+      lines.push('|---|---|---:|---:|---:|');
+      for (const s of mdCoverageMatrix.sheets) {
+        const r = s.input_items > 0 ? (s.stk_req_count / s.input_items) : 0;
+        lines.push(`| ${s.sheet_name || '—'} | ${s.group || '—'} | ${s.input_items ?? 0} | ${s.stk_req_count ?? 0} | ${r.toFixed(2)}× |`);
+      }
+      lines.push('');
+    }
+  }
+
+  // 4.2 STK_REQ → Source 매핑
+  lines.push('### 4.2 Stakeholder Requirements → Source Mapping');
+  lines.push('');
+  if (stkReqs.length > 0) {
+    lines.push('| STK_REQ ID | Category | Source Document | Sheet | Row / Item | Verification |');
+    lines.push('|---|---|---|---|---|---|');
+    for (const r of stkReqs) {
+      const rowItem = [
+        r.source_row != null ? `Row ${r.source_row}` : null,
+        r.source_item_id || null,
+      ].filter(Boolean).join(' / ') || '—';
+      // 셀 안의 파이프 문자(|) escape
+      const esc = (s) => String(s || '—').replace(/\|/g, '\\|');
+      lines.push(`| **${esc(r.id)}** | ${esc(r.category)} | ${esc(r.source_doc)} | ${esc(r.sheet_source)} | ${esc(rowItem)} | ${esc(r.verification_method)} |`);
+    }
+    lines.push('');
+  }
+
+  // 4.3+ Forward Traceability Seeds (백워드 호환)
   if (traceSeeds.from_sw_req?.length > 0) {
-    lines.push('### SW Requirements → STK_REQ');
+    lines.push('### 4.3 SW Requirements → STK_REQ (Seeds)');
     lines.push('');
     lines.push('```');
     for (const t of traceSeeds.from_sw_req) lines.push(t);
@@ -310,7 +396,7 @@ export function exportMarkdown(aiGenerated, meta = {}) {
     lines.push('');
   }
   if (traceSeeds.from_hw_req?.length > 0) {
-    lines.push('### HW Requirements → STK_REQ');
+    lines.push('### 4.4 HW Requirements → STK_REQ (Seeds)');
     lines.push('');
     lines.push('```');
     for (const t of traceSeeds.from_hw_req) lines.push(t);
@@ -318,7 +404,7 @@ export function exportMarkdown(aiGenerated, meta = {}) {
     lines.push('');
   }
   if (traceSeeds.from_sow?.length > 0) {
-    lines.push('### Statement of Work → STK_REQ');
+    lines.push('### 4.5 Statement of Work → STK_REQ (Seeds)');
     lines.push('');
     lines.push('```');
     for (const t of traceSeeds.from_sow) lines.push(t);
@@ -594,7 +680,7 @@ export async function exportDOCX(aiGenerated, meta = {}) {
     ),
   ];
 
-  // ──── 4. Section 2: Stakeholder Requirements ────
+  // ──── 4. Section 2: Stakeholder Requirements (Phase 2-2c: 카테고리별 분류) ────
   const stkReqSection = [
     new Paragraph({
       children: [new PageBreak()],
@@ -604,10 +690,24 @@ export async function exportDOCX(aiGenerated, meta = {}) {
     }),
   ];
 
-  for (const r of stkReqs) {
+  // Phase 2-2c: 카테고리 정의 (ASPICE 표준 분류 순서)
+  const CATEGORY_GROUPS = [
+    { key: 'functional',     title: 'Functional Requirements',     subSection: '2.1' },
+    { key: 'non_functional', title: 'Non-Functional Requirements', subSection: '2.2' },
+    { key: 'constraint',     title: 'Constraints',                 subSection: '2.3' },
+    { key: 'interface',      title: 'Interface Requirements',      subSection: '2.4' },
+  ];
+
+  // 알 수 없는 카테고리는 'Other'로 묶음
+  const knownCategories = new Set(CATEGORY_GROUPS.map(g => g.key));
+  const otherReqs = stkReqs.filter(r => !knownCategories.has(r.category));
+
+  // STK_REQ 카드 1개를 그리는 헬퍼 (재사용)
+  function renderStkReqCard(r) {
     const isModified = r.modified === true;
-    // 카드 1개당 미니 표
-    stkReqSection.push(
+    const cardElements = [];
+
+    cardElements.push(
       new Paragraph({
         children: [
           new TextRun({ text: r.id, bold: true, size: 26, color: '1E2761' }),
@@ -617,6 +717,10 @@ export async function exportDOCX(aiGenerated, meta = {}) {
           new TextRun({ text: r.priority?.toUpperCase() || '—', bold: true, size: 20, color: priorityColor(r.priority) }),
           new TextRun({ text: '  ' }),
           new TextRun({ text: `🔍 ${r.verification_method || '—'}`, size: 18, color: '888888' }),
+          ...(r.clarification_needed ? [
+            new TextRun({ text: '   ' }),
+            new TextRun({ text: '❓ CLARIFICATION NEEDED', bold: true, size: 18, color: 'C77D1A' }),
+          ] : []),
           ...(isModified ? [
             new TextRun({ text: '   ' }),
             new TextRun({ text: '✏ USER MODIFIED', bold: true, size: 18, color: '92400E' }),
@@ -626,7 +730,7 @@ export async function exportDOCX(aiGenerated, meta = {}) {
       })
     );
 
-    stkReqSection.push(new Table({
+    cardElements.push(new Table({
       width: { size: 100, type: WidthType.PERCENTAGE },
       rows: [
         new TableRow({ children: [
@@ -648,7 +752,38 @@ export async function exportDOCX(aiGenerated, meta = {}) {
       ],
     }));
 
-    stkReqSection.push(p('', { spacingAfter: 100 }));
+    cardElements.push(p('', { spacingAfter: 100 }));
+    return cardElements;
+  }
+
+  // 카테고리별로 STK_REQ 그룹화하여 출력
+  for (const group of CATEGORY_GROUPS) {
+    const reqsInGroup = stkReqs.filter(r => r.category === group.key);
+    if (reqsInGroup.length === 0) continue;
+
+    // 하위 섹션 헤더
+    stkReqSection.push(
+      p(`${group.subSection} ${group.title} (${reqsInGroup.length})`, {
+        heading: HeadingLevel.HEADING_2, spacingAfter: 160,
+      })
+    );
+
+    // 그룹 내 STK_REQ 카드들
+    for (const r of reqsInGroup) {
+      stkReqSection.push(...renderStkReqCard(r));
+    }
+  }
+
+  // 알 수 없는 카테고리는 'Other'로 별도 섹션 (있을 때만)
+  if (otherReqs.length > 0) {
+    stkReqSection.push(
+      p(`2.5 Other (${otherReqs.length})`, {
+        heading: HeadingLevel.HEADING_2, spacingAfter: 160,
+      })
+    );
+    for (const r of otherReqs) {
+      stkReqSection.push(...renderStkReqCard(r));
+    }
   }
 
   // ──── 5. Section 3: Use Cases ────
@@ -689,12 +824,110 @@ export async function exportDOCX(aiGenerated, meta = {}) {
     }
   }
 
-  // ──── 6. Section 4: Traceability Matrix ────
+  // ──── 6. Section 4: Traceability Matrix (Phase 2-2c) ────
+  // 새 스키마: coverage_matrix (시트별 입력→출력 매핑) + STK_REQ별 source_doc/source_row/source_item_id/sheet_source
+  const coverageMatrix = aiGenerated.coverage_matrix || null;
   const traceSection = [
     new Paragraph({ children: [new PageBreak()] }),
     p('4. Traceability Matrix', { heading: HeadingLevel.HEADING_1, spacingAfter: 240 }),
   ];
 
+  // 4.1 Coverage Matrix (시트별 입력→출력 비율) — Phase 2-2c 신규
+  if (coverageMatrix && (coverageMatrix.sheets?.length > 0 || coverageMatrix.total_input_items)) {
+    traceSection.push(
+      p('4.1 Coverage Matrix (Sheet → STK_REQ Distribution)', {
+        heading: HeadingLevel.HEADING_2, spacingAfter: 160,
+      })
+    );
+
+    // 전체 요약
+    if (coverageMatrix.total_input_items != null && coverageMatrix.total_stk_reqs != null) {
+      const ratio = coverageMatrix.total_input_items > 0
+        ? (coverageMatrix.total_stk_reqs / coverageMatrix.total_input_items)
+        : 0;
+      traceSection.push(
+        labelValue('Total Input Items', `${coverageMatrix.total_input_items}`),
+        labelValue('Total STK_REQ Generated', `${coverageMatrix.total_stk_reqs}`),
+        labelValue('Coverage Ratio', `${ratio.toFixed(2)}× (target 1.0–1.3)`),
+        p('', { spacingAfter: 120 }),
+      );
+    }
+
+    // 시트별 표
+    if (coverageMatrix.sheets?.length > 0) {
+      traceSection.push(new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        rows: [
+          // 헤더 행
+          new TableRow({ children: [
+            cell('Sheet Name', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 20 }),
+            cell('Group', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 20 }),
+            cell('Input Items', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 20, alignment: AlignmentType.CENTER }),
+            cell('STK_REQ', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 20, alignment: AlignmentType.CENTER }),
+            cell('Ratio', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 20, alignment: AlignmentType.CENTER }),
+          ]}),
+          // 데이터 행
+          ...coverageMatrix.sheets.map((s, idx) => {
+            const ratio = s.input_items > 0 ? (s.stk_req_count / s.input_items) : 0;
+            const bg = idx % 2 === 0 ? 'FFFFFF' : 'F8F9FB';
+            return new TableRow({ children: [
+              cell(s.sheet_name || '—', { bg, size: 18 }),
+              cell(s.group || '—', { bg, size: 18 }),
+              cell(`${s.input_items ?? 0}`, { bg, size: 18, alignment: AlignmentType.CENTER }),
+              cell(`${s.stk_req_count ?? 0}`, { bg, size: 18, alignment: AlignmentType.CENTER }),
+              cell(`${ratio.toFixed(2)}×`, { bg, size: 18, alignment: AlignmentType.CENTER }),
+            ]});
+          }),
+        ],
+      }));
+      traceSection.push(p('', { spacingAfter: 200 }));
+    }
+  }
+
+  // 4.2 STK_REQ → Source 매핑 표 (Phase 2-2c 핵심 추적성)
+  traceSection.push(
+    p('4.2 Stakeholder Requirements → Source Mapping', {
+      heading: HeadingLevel.HEADING_2, spacingAfter: 160,
+    })
+  );
+
+  if (stkReqs.length > 0) {
+    traceSection.push(new Table({
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      rows: [
+        // 헤더 행
+        new TableRow({ children: [
+          cell('STK_REQ ID', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 18, width: 22 }),
+          cell('Category', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 18, width: 14 }),
+          cell('Source Document', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 18, width: 32 }),
+          cell('Sheet', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 18, width: 18 }),
+          cell('Row / Item', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 18, width: 8 }),
+          cell('Verification', { bold: true, bg: '1E2761', color: 'FFFFFF', size: 18, width: 6 }),
+        ]}),
+        // 데이터 행
+        ...stkReqs.map((r, idx) => {
+          const bg = idx % 2 === 0 ? 'FFFFFF' : 'F8F9FB';
+          const rowItem = [
+            r.source_row != null ? `Row ${r.source_row}` : null,
+            r.source_item_id || null,
+          ].filter(Boolean).join(' / ') || '—';
+          return new TableRow({ children: [
+            cell(r.id || '—', { bg, size: 16, bold: true, color: '1E2761' }),
+            cell(r.category || '—', { bg, size: 16 }),
+            cell(r.source_doc || '—', { bg, size: 16 }),
+            cell(r.sheet_source || '—', { bg, size: 16 }),
+            cell(rowItem, { bg, size: 16, alignment: AlignmentType.CENTER }),
+            cell(r.verification_method || '—', { bg, size: 16, alignment: AlignmentType.CENTER }),
+          ]});
+        }),
+      ],
+    }));
+    traceSection.push(p('', { spacingAfter: 200 }));
+  } else {
+    traceSection.push(p('No stakeholder requirements found.', { italics: true, color: '888888' }));
+  }
+
+  // 4.3 Forward Traceability Seeds (다음 프로세스로의 추적 시드) — Phase 2-2b 호환 유지
   function traceBlock(title, items) {
     if (!items?.length) return [];
     return [
@@ -708,9 +941,10 @@ export async function exportDOCX(aiGenerated, meta = {}) {
       p('', { spacingAfter: 200 }),
     ];
   }
-  traceSection.push(...traceBlock('4.1 SW Requirements → STK_REQ', traceSeeds.from_sw_req));
-  traceSection.push(...traceBlock('4.2 HW Requirements → STK_REQ', traceSeeds.from_hw_req));
-  traceSection.push(...traceBlock('4.3 Statement of Work → STK_REQ', traceSeeds.from_sow));
+  // 옛 traceability_seeds 도 있으면 표시 (백워드 호환)
+  traceSection.push(...traceBlock('4.3 SW Requirements → STK_REQ (Seeds)', traceSeeds.from_sw_req));
+  traceSection.push(...traceBlock('4.4 HW Requirements → STK_REQ (Seeds)', traceSeeds.from_hw_req));
+  traceSection.push(...traceBlock('4.5 Statement of Work → STK_REQ (Seeds)', traceSeeds.from_sow));
 
   // ──── 7. Section 5: AI Generation Metadata ────
   const metaSection = [
