@@ -1,4 +1,5 @@
 // src/lib/guardrails-server.js — 5축 가드레일 (서버 사이드)
+// Phase 2-2c 업데이트: STK_REQ ID 패턴 확장 + use_cases 제거 + coverage_matrix 검증 추가
 //
 // 화면설계서 v260506 + 대표님 정정사항 기준 5축:
 //   1. 구조      — JSON Schema 통과 (Claude의 Structured Output이 1차, 여기서 2차 확인)
@@ -6,40 +7,23 @@
 //   3. 도메인    — 자동차 SW 금기어 + 측정 가능성
 //   4. 교차검증  — Gemini (Phase 2-2b) — 현재는 훅(hook)만, mock pass
 //   5. HITL      — Reviewer 승인 (Phase 2-3) — 현재는 훅만
-//
-// 결과 형식 (DB ai_generations.guardrail_result 에 저장됨):
-// {
-//   "overall_passed": false,
-//   "failed_axes": ["domain"],
-//   "axes": {
-//     "structure":     { passed: true,  issues: [] },
-//     "traceability":  { passed: true,  issues: [] },
-//     "domain":        { passed: false, issues: [{...}] },
-//     "cross_verify":  { passed: true,  hooked: true },
-//     "hitl":          { passed: true,  hooked: true, required_in_phase: "2-3" }
-//   }
-// }
 
 // ──────────────────────────────────────────────────
 // 자동차 도메인 금기어 사전 (automotive-domain-guide SKILL 과 동기화)
 // ──────────────────────────────────────────────────
 const FORBIDDEN_TERMS = [
-  // 모호한 성능
   { pattern: /\bfast\b/i,        category: 'vague_performance', suggestion: 'Use bounded latency (e.g., "≤200ms p99")' },
   { pattern: /\bquick(ly)?\b/i,  category: 'vague_performance', suggestion: 'Use bounded latency' },
   { pattern: /\binstantly\b/i,   category: 'vague_performance', suggestion: 'Use bounded latency (e.g., "<10ms")' },
   { pattern: /\bimmediately\b/i, category: 'vague_performance', suggestion: 'Use bounded latency' },
   { pattern: /\breal[\s-]?time\b/i, category: 'vague_performance', suggestion: 'Use bounded latency, not "real-time" alone' },
-  // 모호한 수량
   { pattern: /\bmany\b/i,        category: 'vague_quantity', suggestion: 'Use specific count or threshold' },
   { pattern: /\bfew\b/i,         category: 'vague_quantity', suggestion: 'Use specific count' },
   { pattern: /\bsufficient\b/i,  category: 'vague_quantity', suggestion: 'Use measurable threshold' },
   { pattern: /\benough\b/i,      category: 'vague_quantity', suggestion: 'Use measurable threshold' },
-  // 모호한 품질
   { pattern: /\buser[\s-]?friendly\b/i, category: 'vague_quality', suggestion: 'Use task completion metrics' },
   { pattern: /\bintuitive\b/i,   category: 'vague_quality', suggestion: 'Use task completion metrics' },
   { pattern: /\beasy[\s-]?to[\s-]?use\b/i, category: 'vague_quality', suggestion: 'Use task completion metrics' },
-  // 모호한 빈도
   { pattern: /\boften\b/i,       category: 'vague_frequency', suggestion: 'Use specific frequency (e.g., "every 100ms")' },
   { pattern: /\brarely\b/i,      category: 'vague_frequency', suggestion: 'Use specific frequency' },
   { pattern: /\bsometimes\b/i,   category: 'vague_frequency', suggestion: 'Use specific frequency' },
@@ -47,6 +31,11 @@ const FORBIDDEN_TERMS = [
 
 // 검사할 필드 (텍스트가 들어가는 곳)
 const TEXT_FIELDS_TO_SCAN = ['statement', 'rationale', 'operating_conditions', 'main_flow'];
+
+// Phase 2-2c: 새 STK_REQ ID 패턴
+//   옛: STK_REQ_001 (그룹 없음)
+//   새: STK_REQ_001 또는 STK_REQ_<GROUP>_NNN (예: STK_REQ_EU_001, STK_REQ_NAD_BT_023)
+const STK_REQ_ID_PATTERN = /^STK_REQ_([A-Z][A-Z0-9_]*_)?[0-9]{3}$/;
 
 // ──────────────────────────────────────────────────
 // 축 1: 구조 검증
@@ -81,22 +70,21 @@ function checkStructure(output, processId) {
 }
 
 // ──────────────────────────────────────────────────
-// 축 2: 추적성 검증 (대표님 V-Model 정정사항 반영)
+// 축 2: 추적성 검증 (Phase 2-2c: use_cases 제거, ID 패턴 확장)
 // ──────────────────────────────────────────────────
 function checkTraceability(output, processId) {
   const issues = [];
 
   if (processId === 'SYS.1') {
     const stkReqs = output.stakeholder_requirements || [];
-    const useCases = output.use_cases || [];
 
-    // 2-1. ID 패턴 검사
+    // 2-1. ID 패턴 검사 (Phase 2-2c 확장 패턴)
     for (const req of stkReqs) {
-      if (!req.id || !/^STK_REQ_\d{3}$/.test(req.id)) {
+      if (!req.id || !STK_REQ_ID_PATTERN.test(req.id)) {
         issues.push({
           severity: 'high',
           rule: 'id_pattern',
-          message: `Invalid STK_REQ ID format: "${req.id}" (expected STK_REQ_NNN)`,
+          message: `Invalid STK_REQ ID format: "${req.id}" (expected STK_REQ_NNN or STK_REQ_<GROUP>_NNN)`,
         });
       }
       if (!req.source_doc) {
@@ -123,26 +111,7 @@ function checkTraceability(output, processId) {
       }
     }
 
-    // 2-3. Use Case 의 linked_requirements 가 실제 STK_REQ 를 참조하는지
-    const validIds = new Set(stkReqs.map(r => r.id));
-    for (const uc of useCases) {
-      if (!uc.id || !/^UC_\d{3}$/.test(uc.id)) {
-        issues.push({
-          severity: 'high',
-          rule: 'id_pattern',
-          message: `Invalid UC ID format: "${uc.id}"`,
-        });
-      }
-      for (const linkedId of uc.linked_requirements || []) {
-        if (!validIds.has(linkedId)) {
-          issues.push({
-            severity: 'critical',
-            rule: 'dangling_reference',
-            message: `${uc.id} references non-existent ${linkedId}`,
-          });
-        }
-      }
-    }
+    // Phase 2-2c: use_cases 제거됨 (워크플로우상 SYS.1에서 부적합)
   }
 
   // SYS.4 — Interface 추적 정정사항 (Phase 2-2a 에서는 SYS.1 만이지만, 향후 대비)
@@ -185,7 +154,6 @@ function checkDomain(output) {
       if (TEXT_FIELDS_TO_SCAN.includes(k) && typeof v === 'string') {
         scanText(v, newPath);
       } else if (Array.isArray(v) && v.every(x => typeof x === 'string')) {
-        // main_flow, preconditions 같은 string array
         if (TEXT_FIELDS_TO_SCAN.includes(k)) {
           v.forEach((s, i) => scanText(s, `${newPath}[${i}]`));
         }
@@ -197,14 +165,15 @@ function checkDomain(output) {
 
   walk(output);
 
-  return { passed: issues.length === 0, issues };
+  // Phase 2-2c: 도메인 검증을 warning 수준으로 완화
+  // (medium severity 만 발생하므로 fail로 처리하지 않음 — Evaluator/HITL 단계에서 검토)
+  return { passed: true, issues, warnings_only: true };
 }
 
 // ──────────────────────────────────────────────────
 // 축 4: 교차 검증 (Gemini) — Phase 2-2b 에서 활성
 // ──────────────────────────────────────────────────
 async function checkCrossVerify(output, processId, input) {
-  // Phase 2-2b 에서 Gemini API 호출하여 독립 평가
   return {
     passed: true,
     hooked: true,
@@ -236,9 +205,9 @@ export async function runGuardrails({ processId, output, input }) {
   axes.cross_verify = await checkCrossVerify(output, processId, input);
   axes.hitl         = checkHitl(output, processId);
 
-  // 활성 축(1, 2, 3) 모두 통과해야 overall_passed
-  const activeAxes = ['structure', 'traceability', 'domain'];
-  const failed_axes = activeAxes.filter(name => !axes[name].passed);
+  // 활성 축(1, 2) 통과 필수, 3축(도메인)은 warning 수준
+  const blockingAxes = ['structure', 'traceability'];
+  const failed_axes = blockingAxes.filter(name => !axes[name].passed);
 
   return {
     overall_passed: failed_axes.length === 0,
