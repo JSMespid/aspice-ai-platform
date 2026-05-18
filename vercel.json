@@ -4,11 +4,11 @@
   ],
   "functions": {
     "api/generate.js": {
-      "maxDuration": 300,
+      "maxDuration": 800,
       "includeFiles": "skills/**"
     },
     "api/evaluate.js": {
-      "maxDuration": 90
+      "maxDuration": 300
     }
   }
 }
