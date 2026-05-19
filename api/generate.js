@@ -317,11 +317,22 @@ const PER_SHEET_SCHEMA = {
 import { runGuardrails } from '../src/lib/guardrails-server.js';
 
 // ──────────────────────────────────────────────────
-// 비용 추정 (Sonnet 4.6 가격 기준)
+// 비용 추정 (Claude Opus 4.7 + Prompt Caching 가격)
 // ──────────────────────────────────────────────────
-function estimateCost(inputTokens, outputTokens) {
-  // Opus 4.7: $15 / MTok input, $75 / MTok output (Sonnet 대비 5배, 품질 우선이라 OK)
-  return (inputTokens * 15 / 1_000_000) + (outputTokens * 75 / 1_000_000);
+//
+// Anthropic Opus 4.7 가격 (per million tokens):
+//   - Input (regular):        $15
+//   - Input (cache write):    $18.75 (Input × 1.25, 캐시 생성 시 25% 추가)
+//   - Input (cache read/HIT): $1.50  (Input × 0.10, 90% 할인)
+//   - Output:                 $75
+//
+// Phase 2-2d: Prompt Caching 적용으로 정확한 비용 계산
+function estimateCost(inputTokens, outputTokens, cacheCreationTokens = 0, cacheReadTokens = 0) {
+  const inputCost = (inputTokens * 15) / 1_000_000;
+  const cacheWriteCost = (cacheCreationTokens * 18.75) / 1_000_000;
+  const cacheReadCost = (cacheReadTokens * 1.50) / 1_000_000;
+  const outputCost = (outputTokens * 75) / 1_000_000;
+  return inputCost + cacheWriteCost + cacheReadCost + outputCost;
 }
 
 // ──────────────────────────────────────────────────
@@ -555,7 +566,18 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
         body: JSON.stringify({
           model: MODEL,
           max_tokens: MAX_TOKENS,
-          system: systemPrompt,
+          // Phase 2-2d: Prompt Caching 활성화
+          // 시스템 프롬프트(SKILL 30KB)는 매번 동일하므로 캐시
+          // - 첫 호출: 캐시 생성 (+25% 비용)
+          // - 5분 이내 재호출: 캐시 HIT (-90% 비용)
+          // - 두 시트 병렬 처리에서 두 번째 시트가 캐시 활용
+          system: [
+            {
+              type: 'text',
+              text: systemPrompt,
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
           messages: [{ role: 'user', content: userPrompt }],
           // Phase 2-2c (Pro): Adaptive thinking 기본 (깊은 reasoning)
           // Vercel Pro maxDuration 800초로 시트당 4~6분의 깊은 추론도 안전
@@ -608,6 +630,23 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
       throw new Error(`Claude API ${res.status}: ${JSON.stringify(data).slice(0, 500)}`);
     }
 
+    // Phase 2-2d: Prompt Caching 통계 로깅
+    // - cache_creation_input_tokens: 캐시에 새로 저장된 토큰 (첫 호출)
+    // - cache_read_input_tokens: 캐시에서 읽은 토큰 (재호출, 비용 90% 할인)
+    // - input_tokens: 캐시되지 않은 새로운 입력 토큰 (사용자 프롬프트 등)
+    const usage = data.usage || {};
+    const cacheCreated = usage.cache_creation_input_tokens || 0;
+    const cacheRead = usage.cache_read_input_tokens || 0;
+    const inputTokens = usage.input_tokens || 0;
+    const outputTokens = usage.output_tokens || 0;
+    const cacheHit = cacheRead > 0;
+    console.log(
+      `[callClaude] tokens: input=${inputTokens}, ` +
+      `cache_created=${cacheCreated}, cache_read=${cacheRead} ` +
+      `(${cacheHit ? '✓ CACHE HIT' : 'no cache'}), ` +
+      `output=${outputTokens}, latency=${latency}ms`
+    );
+
     // 응답 파싱
     const textBlock = (data.content || []).find(c => c.type === 'text');
     if (!textBlock) {
@@ -635,8 +674,11 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
       rawOutput,
       parsedOutput,
       finishReason: stopReason,
-      inputTokens: data.usage?.input_tokens || 0,
-      outputTokens: data.usage?.output_tokens || 0,
+      inputTokens,
+      outputTokens,
+      cacheCreationTokens: cacheCreated,
+      cacheReadTokens: cacheRead,
+      cacheHit,
       latencyMs: latency,
     };
   } finally {
@@ -645,33 +687,144 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
 }
 
 // ──────────────────────────────────────────────────
+// Phase 2-2d: SSE (Server-Sent Events) Streaming Helpers
+// ──────────────────────────────────────────────────
+//
+// Vercel Edge Proxy 5분 침묵 타임아웃 해결:
+//   - 함수 시작 즉시 SSE 헤더 + 첫 이벤트 전송 (25초 룰 만족)
+//   - 처리 단계마다 progress 이벤트로 keep-alive
+//   - 최종 결과는 complete 이벤트로 전송
+//   - maxDuration 800초 풀 활용 가능
+//
+// 백워드 호환:
+//   - 기존 JSON 응답 모드도 유지 (Accept 헤더로 결정)
+//   - 클라이언트가 SSE 미지원 시 자동 폴백
+
+/**
+ * 요청이 SSE streaming 응답을 원하는지 판단.
+ * Accept 헤더가 'text/event-stream'을 포함하거나
+ * query string에 stream=true 가 있으면 SSE.
+ */
+function wantsStreaming(req) {
+  const accept = String(req.headers?.accept || '').toLowerCase();
+  if (accept.includes('text/event-stream')) return true;
+  // URL query 로도 강제 지정 가능 (디버깅/테스트 편의)
+  try {
+    const url = new URL(req.url, 'http://localhost');
+    if (url.searchParams.get('stream') === 'true') return true;
+  } catch (_) { /* req.url 형식이 다를 수 있어 무시 */ }
+  return false;
+}
+
+/**
+ * SSE 응답 헤더 설정 + 첫 이벤트 전송 (Vercel proxy 25초 룰 만족).
+ */
+function initSSE(res) {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');  // 일부 proxy에서 버퍼링 방지
+  // 일부 환경에서 응답 헤더가 첫 write까지 flush 안 됨 — 빈 코멘트로 강제
+  res.write(': ASPICE AI streaming started\n\n');
+  // Express/Vercel Node 환경에서 즉시 flush
+  if (typeof res.flushHeaders === 'function') {
+    try { res.flushHeaders(); } catch (_) { /* noop */ }
+  }
+}
+
+/**
+ * SSE 이벤트 전송. 한 이벤트는 'event: type\ndata: json\n\n' 형식.
+ * JSON 안에 줄바꿈이 있으면 SSE 파서가 깨지므로 stringify 결과만 사용.
+ */
+function sseSend(res, eventType, payload) {
+  try {
+    res.write(`event: ${eventType}\n`);
+    res.write(`data: ${JSON.stringify(payload)}\n\n`);
+  } catch (e) {
+    console.error('[sse] write failed:', e.message);
+  }
+}
+
+/**
+ * Streaming/non-streaming 양 모드를 같은 코드로 다룰 emitter factory.
+ *
+ * mode='stream':
+ *   - emit(eventType, payload) -> SSE 이벤트 전송 (즉시 전달)
+ * mode='buffer':
+ *   - emit(eventType, payload) -> 메모리에 누적 (기존 JSON 응답에서는 사용 안 함)
+ */
+function createEmitter({ streaming, res }) {
+  if (streaming) {
+    return {
+      streaming: true,
+      emit: (eventType, payload) => sseSend(res, eventType, payload),
+    };
+  }
+  return {
+    streaming: false,
+    emit: () => { /* noop in non-streaming mode */ },
+  };
+}
+
+// ──────────────────────────────────────────────────
 // Main Handler
 // ──────────────────────────────────────────────────
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  // Phase 2-2d: Streaming 모드 판정 + 즉시 SSE 헤더 전송 (Vercel proxy 25초 룰 만족)
+  const streaming = wantsStreaming(req);
+  if (streaming) {
+    initSSE(res);
+    // 즉시 첫 이벤트 — Vercel Edge Proxy가 연결을 살아있다고 인식
+    sseSend(res, 'started', {
+      ts: Date.now(),
+      message: 'AI 생성 시작',
+    });
+  }
+  const emitter = createEmitter({ streaming, res });
+  const emit = emitter.emit;
+
   const { project_id, process_id, work_product_id } = req.body || {};
   if (!project_id || !process_id) {
+    if (streaming) {
+      sseSend(res, 'error', { error: 'Missing project_id or process_id' });
+      return res.end();
+    }
     return res.status(400).json({ error: 'Missing project_id or process_id' });
   }
 
   // 지원하는 프로세스인지 확인 (Phase 2-2a 는 SYS.1만)
   if (!OUTPUT_SCHEMAS[process_id]) {
-    return res.status(400).json({
-      error: `Process ${process_id} not yet supported in Phase 2-2a. Currently supports: ${Object.keys(OUTPUT_SCHEMAS).join(', ')}`,
-    });
+    const msg = `Process ${process_id} not yet supported. Currently supports: ${Object.keys(OUTPUT_SCHEMAS).join(', ')}`;
+    if (streaming) {
+      sseSend(res, 'error', { error: msg });
+      return res.end();
+    }
+    return res.status(400).json({ error: msg });
   }
 
   let aiGenId = null;
 
+  // Phase 2-2d: streaming/non-streaming 공통 에러 응답 헬퍼
+  const sendError = (statusCode, errMsg, extra = {}) => {
+    if (streaming) {
+      sseSend(res, 'error', { error: errMsg, ...extra });
+      return res.end();
+    }
+    return res.status(statusCode).json({ error: errMsg, ...extra });
+  };
+
   try {
+    emit('progress', { step: 'loading_input', message: '입력 검증 및 Skills 로딩' });
+
     // 1. 프로젝트 + work_product 조회
     const [project] = await sb(`/projects?id=eq.${project_id}&select=id,name,product_name,organization,description`);
-    if (!project) return res.status(404).json({ error: 'Project not found' });
+    if (!project) return sendError(404, 'Project not found');
 
     let wp = null;
     if (work_product_id) {
@@ -682,9 +835,9 @@ export default async function handler(req, res) {
       const wps = await sb(`/work_products?project_id=eq.${project_id}&process_id=eq.${process_id}&select=*&order=updated_at.desc&limit=1`);
       wp = wps && wps[0];
     }
-    if (!wp) return res.status(404).json({ error: 'Work product not found' });
+    if (!wp) return sendError(404, 'Work product not found');
     if (!wp.content || Object.keys(wp.content).length === 0) {
-      return res.status(400).json({ error: 'Work product has no input content yet' });
+      return sendError(400, 'Work product has no input content yet');
     }
 
     // 2. state: GENERATING
@@ -721,6 +874,24 @@ export default async function handler(req, res) {
     const systemPrompt = composeSystemPrompt(process_id);
     const skillsUsed = SKILLS_INDEX[process_id] || [];
 
+    // Phase 2-2d: 시트 개수 + 모드 알림
+    emit('progress', {
+      step: 'mode_detected',
+      message: useSheetSplit
+        ? `시트별 분할 처리 모드 (${sheetBasedInputs.length}개 시트)`
+        : '단일 호출 모드',
+      sheet_split_mode: useSheetSplit,
+      sheet_count: sheetBasedInputs.length,
+      sheets: useSheetSplit
+        ? sheetBasedInputs.map((si, idx) => ({
+            idx: idx + 1,
+            name: si.sheet.sheet_name,
+            group: si.sheet.group_name || null,
+            rows: si.sheet.row_count || null,
+          }))
+        : [],
+    });
+
     // 4. ai_generations master row 생성 (실패해도 기록 남도록)
     const masterRowPrompt = useSheetSplit
       ? `[Sheet-Split Mode] Will dispatch ${sheetBasedInputs.length} per-sheet calls`
@@ -745,6 +916,9 @@ export default async function handler(req, res) {
     let parsedOutput;
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
+    // Phase 2-2d: Prompt Caching 토큰 누적
+    let totalCacheCreationTokens = 0;
+    let totalCacheReadTokens = 0;
     let totalLatencyMs = 0;
     let finishReason = 'success';
     let rawOutputLog = '';
@@ -792,6 +966,19 @@ export default async function handler(req, res) {
 
       // 병렬 Claude 호출 — Promise.allSettled 로 부분 실패 허용
       const callPromises = sheetTasks.map(async ({ si, sheetUserPrompt, childId }, i) => {
+        const sheetIdx = i + 1;
+        const sheetName = si.sheet.sheet_name;
+        const sheetGroup = si.sheet.group_name || null;
+
+        // Phase 2-2d: 시트 시작 알림
+        emit('progress', {
+          step: 'sheet_start',
+          message: `시트 ${sheetIdx}/${sheetBasedInputs.length} 시작: ${sheetName}`,
+          sheet_idx: sheetIdx,
+          sheet_name: sheetName,
+          sheet_group: sheetGroup,
+        });
+
         try {
           const sheetResult = await callClaude({
             systemPrompt,
@@ -799,9 +986,17 @@ export default async function handler(req, res) {
             schema: PER_SHEET_SCHEMA,
           });
 
+          const stkCount = sheetResult.parsedOutput.stakeholder_requirements?.length || 0;
+
           // child row 성공 업데이트
           if (childId) {
-            const sheetCost = estimateCost(sheetResult.inputTokens, sheetResult.outputTokens);
+            // Phase 2-2d: Prompt Caching 반영한 정확한 비용 계산
+            const sheetCost = estimateCost(
+              sheetResult.inputTokens,
+              sheetResult.outputTokens,
+              sheetResult.cacheCreationTokens,
+              sheetResult.cacheReadTokens
+            );
             await sb(`/ai_generations?id=eq.${childId}`, 'PATCH', {
               raw_output: sheetResult.rawOutput,
               parsed_output: sheetResult.parsedOutput,
@@ -814,7 +1009,28 @@ export default async function handler(req, res) {
             });
           }
 
-          console.log(`[generate] Sheet ${i + 1}/${sheetBasedInputs.length} done: ${sheetResult.parsedOutput.stakeholder_requirements?.length || 0} STK_REQs`);
+          console.log(
+            `[generate] Sheet ${sheetIdx}/${sheetBasedInputs.length} done: ` +
+            `${stkCount} STK_REQs ` +
+            `(cache: ${sheetResult.cacheHit ? '✓ HIT' : 'miss'})`
+          );
+
+          // Phase 2-2d: 시트 완료 알림
+          emit('progress', {
+            step: 'sheet_done',
+            message: `시트 ${sheetIdx}/${sheetBasedInputs.length} 완료: ${stkCount}개 STK_REQ ${sheetResult.cacheHit ? '✓캐시HIT' : ''}`,
+            sheet_idx: sheetIdx,
+            sheet_name: sheetName,
+            sheet_group: sheetGroup,
+            stk_count: stkCount,
+            cache_hit: sheetResult.cacheHit,
+            input_tokens: sheetResult.inputTokens,
+            output_tokens: sheetResult.outputTokens,
+            cache_creation_tokens: sheetResult.cacheCreationTokens,
+            cache_read_tokens: sheetResult.cacheReadTokens,
+            latency_ms: sheetResult.latencyMs,
+          });
+
           return { success: true, si, sheetResult };
         } catch (e) {
           if (childId) {
@@ -823,7 +1039,15 @@ export default async function handler(req, res) {
               error_message: e.message?.slice(0, 1000),
             }).catch(() => {});
           }
-          console.error(`[generate] Sheet ${i + 1} failed:`, e.message);
+          console.error(`[generate] Sheet ${sheetIdx} failed:`, e.message);
+          // Phase 2-2d: 시트 실패 알림
+          emit('progress', {
+            step: 'sheet_failed',
+            message: `시트 ${sheetIdx}/${sheetBasedInputs.length} 실패: ${e.message?.slice(0, 200)}`,
+            sheet_idx: sheetIdx,
+            sheet_name: sheetName,
+            error: e.message?.slice(0, 500),
+          });
           return { success: false, si, error: e.message };
         }
       });
@@ -848,16 +1072,25 @@ export default async function handler(req, res) {
         f => `시트 "${f.si.sheet.sheet_name}" 처리 실패: ${f.error}`
       );
 
-      // 토큰/비용/지연 누적
+      // 토큰/비용/지연 누적 (Phase 2-2d: cache 토큰도 누적)
       for (const r of successResults) {
         totalInputTokens += r.sheetResult.inputTokens;
         totalOutputTokens += r.sheetResult.outputTokens;
+        totalCacheCreationTokens += r.sheetResult.cacheCreationTokens;
+        totalCacheReadTokens += r.sheetResult.cacheReadTokens;
         rawOutputLog += `\n=== Sheet: ${r.si.sheet.sheet_name} ===\n${r.sheetResult.rawOutput}\n`;
       }
       // 병렬이므로 latency 는 가장 긴 시트 기준 (실제 wall-clock time)
       totalLatencyMs = Math.max(0, ...successResults.map(r => r.sheetResult.latencyMs));
 
       // 결과 병합
+      // Phase 2-2d: 병합 단계 알림
+      emit('progress', {
+        step: 'merging',
+        message: `${successResults.length}개 시트 결과 병합 중`,
+        success_count: successResults.length,
+        failed_count: failedResults.length,
+      });
       const title = `Stakeholder Requirements for ${project.product_name || project.name || 'System'}`;
       parsedOutput = mergePerSheetOutputs(perSheetOutputs, process_id, title);
 
@@ -870,6 +1103,11 @@ export default async function handler(req, res) {
         : 'merged_from_sheets';
     } else {
       // ── 단일 호출 (기존 흐름, 백워드 호환) ──
+      // Phase 2-2d: 단일 호출 시작 알림
+      emit('progress', {
+        step: 'single_call_start',
+        message: 'Claude Opus 4.7 단일 호출 시작 (adaptive thinking)',
+      });
       const userPrompt = buildUserPrompt(process_id, wp.content, project);
       const claudeResult = await callClaude({
         systemPrompt,
@@ -879,12 +1117,29 @@ export default async function handler(req, res) {
       parsedOutput = claudeResult.parsedOutput;
       totalInputTokens = claudeResult.inputTokens;
       totalOutputTokens = claudeResult.outputTokens;
+      // Phase 2-2d: cache 토큰 누적
+      totalCacheCreationTokens = claudeResult.cacheCreationTokens;
+      totalCacheReadTokens = claudeResult.cacheReadTokens;
       totalLatencyMs = claudeResult.latencyMs;
       finishReason = claudeResult.finishReason;
       rawOutputLog = claudeResult.rawOutput;
+
+      // Phase 2-2d: 단일 호출 완료 알림
+      emit('progress', {
+        step: 'single_call_done',
+        message: `단일 호출 완료: ${parsedOutput.stakeholder_requirements?.length || 0}개 STK_REQ`,
+        stk_count: parsedOutput.stakeholder_requirements?.length || 0,
+        cache_hit: claudeResult.cacheHit,
+        latency_ms: claudeResult.latencyMs,
+      });
     }
 
     // 6. 5축 가드레일 검증
+    // Phase 2-2d: 가드레일 시작 알림
+    emit('progress', {
+      step: 'guardrail_running',
+      message: '5축 가드레일 검증 중 (① 구조 / ② 추적성 / ③ 도메인)',
+    });
     const guardrailResult = await runGuardrails({
       processId: process_id,
       output: parsedOutput,
@@ -892,7 +1147,53 @@ export default async function handler(req, res) {
     });
 
     const passed = guardrailResult.overall_passed;
-    const cost = estimateCost(totalInputTokens, totalOutputTokens);
+    // Phase 2-2d: 가드레일 결과 알림
+    emit('progress', {
+      step: 'guardrail_done',
+      message: passed
+        ? '5축 가드레일 통과'
+        : `5축 가드레일 차단: ${(guardrailResult.failed_axes || []).join(', ')}`,
+      passed,
+      failed_axes: guardrailResult.failed_axes || [],
+    });
+
+    // Phase 2-2d: Prompt Caching 반영 비용
+    const cost = estimateCost(
+      totalInputTokens,
+      totalOutputTokens,
+      totalCacheCreationTokens,
+      totalCacheReadTokens
+    );
+
+    // Phase 2-2d: 캐시 효과 로깅
+    if (totalCacheReadTokens > 0 || totalCacheCreationTokens > 0) {
+      const cachedTokens = totalCacheReadTokens + totalCacheCreationTokens;
+      const totalTokensSeen = totalInputTokens + cachedTokens;
+      const cacheRatio = totalTokensSeen > 0
+        ? ((totalCacheReadTokens / totalTokensSeen) * 100).toFixed(1)
+        : '0.0';
+      // 캐시 없이의 추정 비용 (cache_read도 정가로 친 경우)
+      const noCacheInputCost =
+        ((totalInputTokens + totalCacheCreationTokens + totalCacheReadTokens) * 15) / 1_000_000;
+      const noCacheCost = noCacheInputCost + (totalOutputTokens * 75) / 1_000_000;
+      const savings = noCacheCost - cost;
+      console.log(
+        `[generate] cache stats: read=${totalCacheReadTokens}, created=${totalCacheCreationTokens}, ` +
+        `regular_input=${totalInputTokens}, hit_ratio=${cacheRatio}%, ` +
+        `cost=$${cost.toFixed(4)} (saved ~$${savings.toFixed(4)} vs no-cache)`
+      );
+    }
+
+    // Phase 2-2d: 저장 시작 알림
+    emit('progress', {
+      step: 'saving',
+      message: '산출물 저장 중',
+      cost_usd: cost,
+      total_input_tokens: totalInputTokens,
+      total_output_tokens: totalOutputTokens,
+      cache_read_tokens: totalCacheReadTokens,
+      cache_creation_tokens: totalCacheCreationTokens,
+    });
 
     // 7. ai_generations master row 업데이트
     if (aiGenId) {
@@ -950,7 +1251,8 @@ export default async function handler(req, res) {
     }, 'return=minimal');
 
     // 10. 응답
-    return res.status(200).json({
+    // Phase 2-2d: streaming/non-streaming 분기
+    const finalPayload = {
       success: true,
       passed,
       state: newState,
@@ -963,12 +1265,22 @@ export default async function handler(req, res) {
         skills_used: skillsUsed,
         input_tokens: totalInputTokens,
         output_tokens: totalOutputTokens,
+        // Phase 2-2d: cache 정보도 포함
+        cache_creation_tokens: totalCacheCreationTokens,
+        cache_read_tokens: totalCacheReadTokens,
         cost_usd: cost,
         latency_ms: totalLatencyMs,
         sheet_split_mode: useSheetSplit,
         sheet_count: useSheetSplit ? sheetBasedInputs.length : 0,
       },
-    });
+    };
+
+    if (streaming) {
+      // SSE: complete 이벤트로 전체 결과 전송 후 종료
+      sseSend(res, 'complete', finalPayload);
+      return res.end();
+    }
+    return res.status(200).json(finalPayload);
   } catch (error) {
     console.error('[generate]', error);
 
@@ -982,6 +1294,14 @@ export default async function handler(req, res) {
       } catch (e) { /* swallow */ }
     }
 
+    // Phase 2-2d: streaming 모드에서는 error 이벤트로
+    if (streaming) {
+      sseSend(res, 'error', {
+        error: error.message,
+        ai_generation_id: aiGenId,
+      });
+      return res.end();
+    }
     return res.status(500).json({
       error: error.message,
       ai_generation_id: aiGenId,
