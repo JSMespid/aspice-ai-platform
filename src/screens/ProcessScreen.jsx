@@ -113,6 +113,30 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
     if (onWorkProductChange) await onWorkProductChange();
   }
 
+  // Phase 2-2d: 산출물 항목 삭제 핸들러
+  // - content 객체에서 해당 itemKey 제거 (Supabase Storage 의 업로드 파일은 그대로 둠 — 복구 가능)
+  // - work_product 자체는 삭제하지 않음 (다른 항목들은 유지)
+  // - 사용 시나리오:
+  //   1. 잘못된 시트로 등록했을 때 → 삭제 후 재등록
+  //   2. 직접 입력 내용을 비우고 싶을 때
+  //   3. AI 생성 후 입력을 교체하고 싶을 때
+  async function handleItemDelete(itemKey) {
+    if (!wp || !wp.content || !(itemKey in wp.content)) {
+      // 등록된 게 없으면 아무 것도 안 함
+      return;
+    }
+    // 객체에서 itemKey 만 제거 (다른 키는 유지)
+    const updatedContent = { ...wp.content };
+    delete updatedContent[itemKey];
+
+    await apiCall(
+      `/api/projects?resource=work_products&id=${wp.id}`,
+      "PATCH",
+      { content: updatedContent }
+    );
+    if (onWorkProductChange) await onWorkProductChange();
+  }
+
   function getItemValue(itemKey) {
     return wp?.content?.[itemKey] || null;
   }
@@ -431,6 +455,31 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               disabled={missingDeps.length > 0}
               onRegister={() => setRegisterModal({ open: true, item })}
               onDirect={() => setDirectModal({ open: true, item })}
+              // Phase 2-2d: 삭제 — 확인 후 content[item.key] 제거
+              onDelete={async () => {
+                const v = getItemValue(item.key);
+                if (!v) return;
+                // 상황별 확인 메시지
+                const desc = v.source === "register"
+                  ? `등록된 파일 "${v.fileName || "산출물"}"`
+                  : v.source === "direct"
+                    ? "직접 입력 내용"
+                    : "등록 내용";
+                const ok = window.confirm(
+                  `${item.label}의 ${desc}을(를) 삭제하시겠습니까?\n\n` +
+                  `· 이 작업은 work_products 의 입력만 제거합니다.\n` +
+                  `· 업로드된 파일은 Storage 에 보존됩니다 (복구 가능).\n` +
+                  `· 이미 생성된 AI 산출물(stakeholder_requirements)은 영향받지 않습니다.\n\n` +
+                  `계속하시려면 [확인] 을 누르세요.`
+                );
+                if (!ok) return;
+                try {
+                  await handleItemDelete(item.key);
+                } catch (e) {
+                  console.error("[handleItemDelete] failed:", e);
+                  alert("삭제 중 오류: " + (e?.message || String(e)));
+                }
+              }}
             />
           ))}
           {(!cfg.items || cfg.items.length === 0) && (
@@ -600,7 +649,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   );
 }
 
-function ItemRow({ item, value, disabled, onRegister, onDirect }) {
+function ItemRow({ item, value, disabled, onRegister, onDirect, onDelete }) {
   const hasValue = value && value.body && value.body.trim().length > 0;
   const preview = hasValue
     ? truncate(value.body, 80)
@@ -608,6 +657,10 @@ function ItemRow({ item, value, disabled, onRegister, onDirect }) {
 
   // 출처 라벨 + 다운로드 가능 여부
   const isUploaded = value?.source === "register" && value?.storagePath;
+  const isDirect = value?.source === "direct";
+  // Phase 2-2d: 무엇이 등록되었는지 (register | direct | none) — 버튼 상태 결정에 사용
+  const hasRegistered = hasValue && (isUploaded || value?.source === "register");
+  const hasDirect = hasValue && isDirect;
   const sourceLabel = isUploaded
     ? `📎 ${value.fileName || "산출물"}`
     : value?.source === "register"
@@ -664,11 +717,13 @@ function ItemRow({ item, value, disabled, onRegister, onDirect }) {
         fontStyle: hasValue ? "normal" : "italic",
         display: "flex", flexDirection: "column", justifyContent: "center",
         gap: 4,
+        position: "relative",
       }}>
         {sourceLabel && (
           <div style={{
             fontSize: 10, fontWeight: 600, fontStyle: "normal",
             display: "flex", alignItems: "center", gap: 8,
+            paddingRight: 28, // 삭제 버튼 자리
           }}>
             <span style={{ color: "var(--c-navy-mid)" }}>{sourceLabel}</span>
             {isUploaded && (
@@ -696,13 +751,64 @@ function ItemRow({ item, value, disabled, onRegister, onDirect }) {
           </div>
         )}
         <div style={{ lineHeight: 1.5 }}>{preview}</div>
+
+        {/*
+          Phase 2-2d: 삭제 버튼 (등록된 값 있을 때만)
+          - 카드 우측 상단에 작게 — 항상 보이되 눈에 거슬리지 않게
+          - 클릭 시 ProcessScreen 의 onDelete (확인 다이얼로그 포함)
+        */}
+        {hasValue && onDelete && !disabled && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
+            title="이 항목 삭제"
+            aria-label={`${item.label} 삭제`}
+            style={{
+              position: "absolute",
+              top: 6, right: 8,
+              width: 22, height: 22,
+              padding: 0,
+              background: "transparent",
+              border: "1px solid var(--c-border-strong)",
+              borderRadius: 4,
+              color: "var(--c-text-muted)",
+              fontSize: 13, fontWeight: 600,
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              lineHeight: 1,
+              transition: "all 0.15s ease",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "rgba(220, 38, 38, 0.08)";
+              e.currentTarget.style.borderColor = "rgba(220, 38, 38, 0.4)";
+              e.currentTarget.style.color = "#DC2626";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+              e.currentTarget.style.borderColor = "var(--c-border-strong)";
+              e.currentTarget.style.color = "var(--c-text-muted)";
+            }}
+          >
+            🗑
+          </button>
+        )}
       </div>
 
-      {/* 산출물 등록 버튼 */}
+      {/*
+        Phase 2-2d: 산출물 등록 버튼
+        - 등록된 파일이 이미 있으면 "교체" 로 표시 — 사용자가 의도를 명확히 알 수 있음
+        - 클릭 동작은 동일 (onRegister): 모달이 열려 새로 업로드하면 기존 항목을 덮어쓰기
+        - 직접 입력만 되어 있으면 그대로 "산출물 등록"
+      */}
       <button
         disabled={disabled || !canRegister}
         onClick={onRegister}
-        title={!canRegister ? "이 항목은 직접 입력만 가능합니다" : undefined}
+        title={
+          !canRegister
+            ? "이 항목은 직접 입력만 가능합니다"
+            : hasRegistered
+              ? "기존 등록을 새 파일/시트로 교체"
+              : "파일 업로드 또는 시트 선택"
+        }
         style={{
           background: disabled || !canRegister ? "var(--c-bg-mid)" : "var(--c-navy-deep)",
           color: disabled || !canRegister ? "var(--c-text-muted)" : "#fff",
@@ -711,13 +817,14 @@ function ItemRow({ item, value, disabled, onRegister, onDirect }) {
           cursor: disabled || !canRegister ? "not-allowed" : "pointer",
           opacity: !canRegister ? 0.5 : 1,
         }}>
-        산출물 등록
+        {hasRegistered ? "📎 교체" : "산출물 등록"}
       </button>
 
-      {/* 직접 입력 버튼 */}
+      {/* 직접 입력 버튼 — 직접 입력 내용이 이미 있으면 "수정" 으로 표시 */}
       <button
         disabled={disabled}
         onClick={onDirect}
+        title={hasDirect ? "직접 입력 내용 수정" : "직접 텍스트 입력"}
         style={{
           background: "#fff",
           color: disabled ? "var(--c-text-muted)" : "var(--c-navy-deep)",
@@ -726,7 +833,7 @@ function ItemRow({ item, value, disabled, onRegister, onDirect }) {
           fontSize: 11, fontWeight: 600,
           cursor: disabled ? "not-allowed" : "pointer",
         }}>
-        직접 입력
+        {hasDirect ? "✍ 수정" : "직접 입력"}
       </button>
     </div>
   );
