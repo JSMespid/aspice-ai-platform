@@ -355,6 +355,37 @@ export default function WorkProductRegisterModal({
     setBody(serializeSheetsToBody(newSheets));
   }
 
+  // Phase 2-2e: 비-META 시트 모두 선택 / 모두 해제
+  //
+  // - selectAllNonMeta(): META 가 아닌 시트만 selected=true 로
+  //   META 시트는 무조건 selected=false 유지 (AI 처리 대상 아님)
+  // - deselectAll(): 모든 시트 selected=false (META는 이미 false라 그대로)
+  //
+  // 사용 시나리오:
+  //   1. 시트 수 초과 경고 → "모두 해제" → 필요한 것만 다시 체크
+  //   2. 시트 29개 중 데이터 시트만 빠르게 토글
+  function selectAllNonMeta() {
+    if (!excelData) return;
+    const newSheets = excelData.sheets.map(s => ({
+      ...s,
+      selected: s.is_meta ? false : true,
+    }));
+    const newData = { ...excelData, sheets: newSheets };
+    setExcelData(newData);
+    setBody(serializeSheetsToBody(newSheets));
+  }
+
+  function deselectAll() {
+    if (!excelData) return;
+    const newSheets = excelData.sheets.map(s => ({
+      ...s,
+      selected: false,
+    }));
+    const newData = { ...excelData, sheets: newSheets };
+    setExcelData(newData);
+    setBody(serializeSheetsToBody(newSheets));
+  }
+
   function updateGroupName(sheetIdx, newGroupName) {
     if (!excelData) return;
     const cleaned = newGroupName.toUpperCase().replace(/[^A-Z0-9_]/g, "").slice(0, 12);
@@ -601,26 +632,98 @@ export default function WorkProductRegisterModal({
                     AI 생성에 포함할 시트를 선택하세요. 메타 시트(표지, 변경이력, 범례 등)는 자동 제외됩니다.
                     그룹명은 STK_REQ ID에 사용됩니다 (예: STK_REQ_CELLULAR_001).
                   </div>
-                  {hasConflicts && (
-                    <button
-                      onClick={handleAutoResolveConflicts}
-                      disabled={uploading}
-                      style={{
-                        flexShrink: 0,
-                        background: "#2383E2",
-                        color: "#fff",
-                        border: "none",
-                        borderRadius: 5,
-                        padding: "5px 10px",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      🔧 그룹명 자동 정리
-                    </button>
-                  )}
+                  {/*
+                    Phase 2-2e: 버튼 그룹 (모두 선택 / 모두 해제 / 그룹명 자동 정리)
+                    - 시트 29개 같은 큰 케이스에서 빠르게 토글
+                    - 모두 선택: META 제외 전체 토글 (META 는 무조건 제외 유지)
+                    - 모두 해제: 전체 해제
+                    - disabled 조건: 이미 그 상태면 비활성화 (시각적 피드백)
+                  */}
+                  <div style={{
+                    display: "flex",
+                    gap: 6,
+                    flexShrink: 0,
+                  }}>
+                    {(() => {
+                      // 비-META 시트 통계
+                      const nonMetaSheets = excelData.sheets.filter(s => !s.is_meta);
+                      const allNonMetaSelected = nonMetaSheets.length > 0 &&
+                        nonMetaSheets.every(s => s.selected);
+                      const noneSelected = excelData.sheets.every(s => !s.selected);
+
+                      return (
+                        <>
+                          <button
+                            onClick={selectAllNonMeta}
+                            disabled={uploading || allNonMetaSelected || nonMetaSheets.length === 0}
+                            title={
+                              nonMetaSheets.length === 0
+                                ? "선택 가능한 데이터 시트가 없습니다"
+                                : allNonMetaSelected
+                                  ? "모든 데이터 시트가 이미 선택되어 있습니다"
+                                  : `데이터 시트 ${nonMetaSheets.length}개 모두 선택 (META 제외)`
+                            }
+                            style={{
+                              background: "#fff",
+                              border: "1px solid var(--c-navy-deep)",
+                              color: allNonMetaSelected ? "var(--c-text-muted)" : "var(--c-navy-deep)",
+                              borderRadius: 5,
+                              padding: "5px 10px",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: (allNonMetaSelected || nonMetaSheets.length === 0) ? "not-allowed" : "pointer",
+                              opacity: (allNonMetaSelected || nonMetaSheets.length === 0) ? 0.5 : 1,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            ☑ 모두 선택
+                          </button>
+                          <button
+                            onClick={deselectAll}
+                            disabled={uploading || noneSelected}
+                            title={
+                              noneSelected
+                                ? "이미 모두 해제되어 있습니다"
+                                : "모든 시트 선택 해제"
+                            }
+                            style={{
+                              background: "#fff",
+                              border: "1px solid var(--c-border-strong)",
+                              color: noneSelected ? "var(--c-text-muted)" : "var(--c-text)",
+                              borderRadius: 5,
+                              padding: "5px 10px",
+                              fontSize: 11,
+                              fontWeight: 600,
+                              cursor: noneSelected ? "not-allowed" : "pointer",
+                              opacity: noneSelected ? 0.5 : 1,
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            ☐ 모두 해제
+                          </button>
+                        </>
+                      );
+                    })()}
+                    {hasConflicts && (
+                      <button
+                        onClick={handleAutoResolveConflicts}
+                        disabled={uploading}
+                        style={{
+                          background: "#2383E2",
+                          color: "#fff",
+                          border: "none",
+                          borderRadius: 5,
+                          padding: "5px 10px",
+                          fontSize: 11,
+                          fontWeight: 600,
+                          cursor: "pointer",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        🔧 그룹명 자동 정리
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Phase 2-2c: 시트 수 경고 */}
