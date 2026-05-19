@@ -27,6 +27,10 @@ export const AgentStep = Object.freeze({
   GEN_SHEET_FAILED:      'gen_sheet_failed',    // 시트별 실패
   GEN_MERGING:           'gen_merging',         // 결과 병합
   GEN_SAVING:            'gen_saving',          // 저장 중
+  // Phase 2-2e: Batch 처리 단계 (Anthropic Tier 한도 회피)
+  GEN_BATCH_PLAN:        'gen_batch_plan',      // 배치 계획 (N개씩 M배치)
+  GEN_BATCH_START:       'gen_batch_start',     // 배치 시작
+  GEN_BATCH_DONE:        'gen_batch_done',      // 배치 완료
   // Evaluator 단계
   EVAL_PREPARING:        'eval_preparing',
   EVAL_EVALUATING:       'eval_evaluating',
@@ -133,6 +137,37 @@ export async function runGenerator({ projectId, processId, workProductId, onProg
               sheet_idx: payload.sheet_idx,
               sheet_name: payload.sheet_name,
               error: payload.error,
+              raw: payload,
+            });
+          } else if (step === 'batch_plan') {
+            // Phase 2-2e: 배치 계획 정보 (배치 N개, 시트 M개씩)
+            emit(AgentStep.GEN_BATCH_PLAN, {
+              message: payload.message,
+              batch_size: payload.batch_size,
+              total_batches: payload.total_batches,
+              total_sheets: payload.total_sheets,
+              raw: payload,
+            });
+          } else if (step === 'batch_start') {
+            // Phase 2-2e: 배치 시작 (배치 N/M 시작)
+            emit(AgentStep.GEN_BATCH_START, {
+              message: payload.message,
+              batch_idx: payload.batch_idx,
+              batch_total: payload.batch_total,
+              sheets_in_batch: payload.sheets_in_batch,
+              sheets_start_idx: payload.sheets_start_idx,
+              sheets_end_idx: payload.sheets_end_idx,
+              raw: payload,
+            });
+          } else if (step === 'batch_done') {
+            // Phase 2-2e: 배치 완료
+            emit(AgentStep.GEN_BATCH_DONE, {
+              message: payload.message,
+              batch_idx: payload.batch_idx,
+              batch_total: payload.batch_total,
+              batch_succeeded: payload.batch_succeeded,
+              batch_failed: payload.batch_failed,
+              batch_duration_ms: payload.batch_duration_ms,
               raw: payload,
             });
           } else if (step === 'merging') {
@@ -441,6 +476,10 @@ export function isGenerating(step) {
     AgentStep.GEN_SHEET_FAILED,
     AgentStep.GEN_MERGING,
     AgentStep.GEN_SAVING,
+    // Phase 2-2e: batch 처리 단계도 활성
+    AgentStep.GEN_BATCH_PLAN,
+    AgentStep.GEN_BATCH_START,
+    AgentStep.GEN_BATCH_DONE,
   ].includes(step);
 }
 
