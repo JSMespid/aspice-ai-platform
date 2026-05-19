@@ -14,12 +14,17 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
   //   - liveCost: 실시간 누적 비용 (단계별로 들어옴)
   //   - liveTokens: { input, output, cache_read, cache_creation }
   //   - guardrailLive: 가드레일 진행 상황 (running/done)
+  // Phase 2-2e: batch 진행 정보 추가
+  //   - batchPlan: { batch_size, total_batches, total_sheets }
+  //   - batches: { [batch_idx]: { status, succeeded, failed, duration_ms, sheets_range } }
   const [progressState, setProgressState] = useState({
     sheets: {},
     sheetCount: 0,
     liveCost: null,
     liveTokens: null,
     guardrailLive: null,
+    batchPlan: null,
+    batches: {},
     history: [],  // { ts, step, message }
     startedAt: null,
   });
@@ -104,6 +109,43 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
             error: raw.error,
           },
         };
+      } else if (backendStep === 'batch_plan' && raw) {
+        // Phase 2-2e: 배치 계획 저장
+        next.batchPlan = {
+          batch_size: raw.batch_size,
+          total_batches: raw.total_batches,
+          total_sheets: raw.total_sheets,
+        };
+      } else if (backendStep === 'batch_start' && raw) {
+        // Phase 2-2e: 배치 시작
+        next.batches = {
+          ...prev.batches,
+          [raw.batch_idx]: {
+            ...(prev.batches[raw.batch_idx] || {}),
+            idx: raw.batch_idx,
+            total: raw.batch_total,
+            status: 'running',
+            sheets_in_batch: raw.sheets_in_batch,
+            sheets_start_idx: raw.sheets_start_idx,
+            sheets_end_idx: raw.sheets_end_idx,
+            startedAt: now,
+          },
+        };
+      } else if (backendStep === 'batch_done' && raw) {
+        // Phase 2-2e: 배치 완료
+        next.batches = {
+          ...prev.batches,
+          [raw.batch_idx]: {
+            ...(prev.batches[raw.batch_idx] || {}),
+            idx: raw.batch_idx,
+            total: raw.batch_total,
+            status: raw.batch_failed > 0 ? 'partial' : 'done',
+            succeeded: raw.batch_succeeded,
+            failed: raw.batch_failed,
+            duration_ms: raw.batch_duration_ms,
+            doneAt: now,
+          },
+        };
       } else if (backendStep === 'guardrail_running') {
         next.guardrailLive = { status: 'running' };
       } else if (backendStep === 'guardrail_done') {
@@ -138,6 +180,8 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
         liveCost: null,
         liveTokens: null,
         guardrailLive: null,
+        batchPlan: null,
+        batches: {},
         history: [],
         startedAt: null,
       });
@@ -197,6 +241,18 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 22px' }}>
           <ProgressSection step={step} detail={detail} hasGenerator={!!generator} hasEvaluator={!!evaluator} />
+
+          {/*
+            Phase 2-2e: 배치 처리 진행 카드
+            - 배치 계획이 도착했을 때만 표시 (단일 시트는 배치 없음)
+            - 시트 진행 카드 위에 표시 (큰 그림 → 세부)
+          */}
+          {progressState.batchPlan && (
+            <BatchProgressSection
+              plan={progressState.batchPlan}
+              batches={progressState.batches}
+            />
+          )}
 
           {/* Phase 2-2d: streaming 시트 진행 카드 */}
           {Object.keys(progressState.sheets).length > 0 && (
@@ -270,12 +326,16 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
 
 // Phase 2-2d: streaming 단계 → 기존 4개 step row 매핑
 //   - SHEET_START, SHEET_DONE, SHEET_FAILED, MERGING, SAVING => 'generating' 또는 'validating' 진행 중
+// Phase 2-2e: BATCH_* 도 generating 활성으로 매핑
 function mapStreamingStepToBase(step) {
   switch (step) {
     case AgentStep.GEN_SHEET_START:
     case AgentStep.GEN_SHEET_DONE:
     case AgentStep.GEN_SHEET_FAILED:
     case AgentStep.GEN_MERGING:
+    case AgentStep.GEN_BATCH_PLAN:
+    case AgentStep.GEN_BATCH_START:
+    case AgentStep.GEN_BATCH_DONE:
       return AgentStep.GEN_GENERATING;
     case AgentStep.GEN_SAVING:
       // 저장은 가드레일 통과 후의 단계 — 구조 검증 이후이므로 VALIDATING 활성으로 보임
@@ -777,6 +837,109 @@ function IssueCard({ issue }) {
         }}>
           💡 {issue.suggested_fix}
         </div>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────
+// Phase 2-2e: 배치 처리 진행 카드
+// ──────────────────────────────────────────────────
+// 큰 그림 (예: "배치 2/3 진행 중") 을 시트 카드 위에 표시.
+// Anthropic Tier 1 rate limit 회피를 위해 백엔드가 BATCH_SIZE 씩 묶어서 처리하는 상황.
+function BatchProgressSection({ plan, batches }) {
+  if (!plan) return null;
+  const batchList = Array.from({ length: plan.total_batches }, (_, i) => {
+    const idx = i + 1;
+    return batches[idx] || { idx, status: 'pending' };
+  });
+  const doneCount = batchList.filter(b => b.status === 'done' || b.status === 'partial').length;
+  const runningCount = batchList.filter(b => b.status === 'running').length;
+  const progressPercent = plan.total_batches > 0
+    ? Math.round((doneCount / plan.total_batches) * 100)
+    : 0;
+
+  return (
+    <Section title={`배치 처리 (${doneCount}/${plan.total_batches})`}>
+      <div style={{
+        fontSize: 11, color: 'var(--c-text-muted)',
+        marginBottom: 10,
+      }}>
+        시트 {plan.total_sheets}개를 한 번에 <strong>{plan.batch_size}개씩</strong>{' '}
+        {plan.total_batches}배치로 순차 처리 — Anthropic Tier 한도 회피
+      </div>
+
+      {/* 배치 progress bar */}
+      <div style={{
+        position: 'relative',
+        height: 8,
+        background: 'var(--c-bg-soft)',
+        borderRadius: 4,
+        overflow: 'hidden',
+        marginBottom: 12,
+      }}>
+        <div style={{
+          position: 'absolute',
+          left: 0, top: 0, bottom: 0,
+          width: `${progressPercent}%`,
+          background: '#3A4B8C',  // navy - 큰 그림용 색
+          transition: 'width 0.4s ease',
+        }} />
+      </div>
+
+      {/* 배치 칩 (Pill) 리스트 */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: 6,
+      }}>
+        {batchList.map(b => (
+          <BatchChip key={b.idx} batch={b} />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function BatchChip({ batch }) {
+  const statusStyle = {
+    pending: { bg: 'var(--c-bg-soft)', border: 'var(--c-border)', color: 'var(--c-text-muted)', icon: '○' },
+    running: { bg: 'rgba(59, 130, 246, 0.10)', border: 'rgba(59, 130, 246, 0.4)', color: '#1D4ED8', icon: '⟳' },
+    done: { bg: 'rgba(16, 185, 129, 0.08)', border: 'rgba(16, 185, 129, 0.4)', color: '#047857', icon: '✓' },
+    partial: { bg: 'rgba(245, 158, 11, 0.10)', border: 'rgba(245, 158, 11, 0.4)', color: '#B45309', icon: '⚠' },
+  };
+  const s = statusStyle[batch.status] || statusStyle.pending;
+
+  return (
+    <div
+      title={
+        batch.status === 'done' || batch.status === 'partial'
+          ? `배치 ${batch.idx}: 성공 ${batch.succeeded}, 실패 ${batch.failed || 0}, ${Math.round((batch.duration_ms || 0) / 1000)}s`
+          : batch.status === 'running'
+            ? `배치 ${batch.idx}: 시트 ${batch.sheets_start_idx}~${batch.sheets_end_idx} 진행 중`
+            : `배치 ${batch.idx}: 대기 중`
+      }
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center', gap: 4,
+        padding: '3px 8px',
+        background: s.bg,
+        border: `1px solid ${s.border}`,
+        borderRadius: 12,
+        fontSize: 10, fontWeight: 600,
+        color: s.color,
+        cursor: 'help',
+      }}
+    >
+      <span style={batch.status === 'running' ? {
+        display: 'inline-block',
+        animation: 'spin 1.4s linear infinite',
+      } : {}}>
+        {s.icon}
+      </span>
+      배치 {batch.idx}
+      {(batch.status === 'done' || batch.status === 'partial') && batch.succeeded !== undefined && (
+        <span style={{ fontWeight: 400, opacity: 0.8 }}>
+          · {batch.succeeded}{batch.failed > 0 ? `/${batch.failed}실패` : ''}
+        </span>
       )}
     </div>
   );
