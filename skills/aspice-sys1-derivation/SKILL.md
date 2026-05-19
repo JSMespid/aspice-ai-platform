@@ -34,6 +34,20 @@ This SKILL operates alongside `automotive-domain-guide` and `traceability-rules`
 - 공통 도메인 규칙(금기어, ASIL, 법규)은 `automotive-domain-guide` 적용
 - 프로세스 간 추적성은 `traceability-rules` 적용
 
+### 1.2 ⭐ Output Language at a Glance / 출력 언어 정책 한눈에 보기
+
+**Quick reference for the most language-sensitive fields. 자세한 정책은 Section 7 참조.**
+
+| Field | Language | Note |
+|---|---|---|
+| `statement` | **English (IEEE 830)** | "The NAD shall ..." |
+| `rationale` | **한글 (Korean)** | 한국 리뷰어 가독성 |
+| `warnings` | **한글 (Korean)** ⭐ | 영문 표준 용어(AEC-Q100, 3GPP 등)는 보존 — 자세한 가이드는 Section 7.1 |
+| `id`, `category`, `priority`, `verification_method` | English (enum) | Schema 고정 |
+
+⚠️ **`warnings` 배열의 모든 항목은 반드시 한글로 작성합니다.** 영문 warnings 는 더 이상 허용되지 않습니다 (Phase 2-2d, 2026-05-19~).
+⚠️ **All `warnings` items MUST be written in Korean.** English warnings are no longer acceptable (Phase 2-2d, 2026-05-19~).
+
 ---
 
 ## 2. ⭐ CRITICAL: OEM-Supplier Workflow Context / OEM-공급사 워크플로우 컨텍스트
@@ -221,7 +235,7 @@ These sheets are NOT requirement sources and MUST be excluded from STK_REQ deriv
 **Detection rule / 감지 규칙**:
 - Case-insensitive substring match on sheet name / 시트명 부분 일치 (대소문자 무시)
 - If matched, the system marks the sheet as `is_meta: true` and excludes it BEFORE invoking SKILL
-- If somehow a meta-sheet reaches the SKILL (e.g., user manually checked it), produce zero STK_REQs from it and add a `warnings` entry: `"Sheet '<name>' appears to be meta — no requirements derived"`
+- If somehow a meta-sheet reaches the SKILL (e.g., user manually checked it), produce zero STK_REQs from it and add a `warnings` entry: `"시트 '<name>'는 메타 시트로 판단되어 요구사항 도출에서 제외되었습니다 (Meta-sheet: no requirements derived)"`
 
 ### 4.3 Group Name Extraction / 그룹명 추출
 
@@ -390,7 +404,7 @@ You MUST produce JSON matching this schema (validated by structured_output).
   },
 
   "warnings": [
-    "Sheet 'Cover' detected as meta-sheet — excluded from derivation"
+    "시트 'Cover'는 메타 시트로 감지되어 요구사항 도출에서 제외되었습니다."
   ]
 }
 ```
@@ -444,7 +458,46 @@ The following field from the previous schema is **REMOVED** in Phase 2-2c:
 | `regulatory_constraints` | Mixed / 혼용 | 영문 표준 (ECE/ISO) + 한국 법규는 한글 |
 | `operating_conditions` | English with Korean units OK | 표준 단위는 영문 |
 | `external_interfaces` | English | 프로토콜명·표준명은 영문 |
-| `warnings` | Mixed | Whichever clearer for the warning |
+| `warnings` | **Korean preferred (한글 우선)** | 한국 리뷰어 가독성. AI 생성 시 한글로 작성. 단, 영문 표준 용어 (e.g., AEC-Q100, 3GPP, ASIL-D, SoC) 는 영문 그대로 유지 |
+
+### 7.1 ⭐ Warnings 한글 작성 가이드 / Korean Warnings Guidelines
+
+**핵심 원칙 / Core Principle**:
+`warnings` 배열의 각 항목은 **한국어로 작성**합니다. 한국 자동차 OEM/Tier 1/Tier 2 엔지니어가 직접 읽고 즉시 이해할 수 있도록 합니다.
+
+Each item in the `warnings` array MUST be written in Korean. Korean automotive OEM/Tier 1/Tier 2 engineers should be able to read and immediately understand them.
+
+**한글 문장 패턴 / Korean Sentence Patterns**:
+
+| 영문 패턴 | ❌ 잘못된 예 (영문) | ✅ 올바른 예 (한글) |
+|---|---|---|
+| Row N contains... | "Row 41 and Row 42 contain identical text..." | "행 41과 행 42에 동일한 요구사항 텍스트가 있어 스펙 보존 원칙에 따라 모두 보존했습니다 — 의도적 중복인지 또는 별개 조건/축인지 고객 확인 권장." |
+| N rows are marked... | "15 rows are marked 'N/A' by the customer..." | "15개 행(행 12, 13, 14, 19, 21, 22, 25, 32, 33, 38, 39, 40, 45, 46, 82)이 고객에 의해 'N/A'로 표시되어 placeholder STK_REQ로 보존(clarification_needed=true) — 원본 요구사항 컬럼에 서술 텍스트가 없어 N/A 처리만 가능." |
+| Several rows contain... | "Several rows contain only 'Yes' without description" | "여러 행(24, 26, 27, 36, 47)이 Requirement 컬럼에 서술 없이 'Yes'만 포함 — 원본 feature 설명이 SKILL이 보지 못한 다른 컬럼에 있을 가능성. clarification_needed=true로 보존." |
+| Coverage ratio reflects... | "Coverage ratio 0.958 reflects..." | "Coverage ratio 0.958은 90개 실제 요구사항 행(행 2~91) 중 92개 STK_REQ를 도출한 결과 (메타 행 92~97 제외 시 92/90 = 1.022, 준수)." |
+| Row #N is composite... | "Row #1 is composite (3 distinct clauses): split into..." | "행 #1 (row_num=2)은 3개의 별도 조항(Linux 업그레이드 / CVE 정정 / 알려진 취약점 없음)을 포함하는 복합 문장 — 1:N 규칙에 따라 STK_REQ_NAD_001~003으로 분할." |
+| Row N: ... clarification | "Row 23 (China eCall): Tier 2 comment notes..." | "행 23 (중국 eCall): Tier 2 코멘트가 EU 규제 기준임을 명시 — 중국 전용 eCall 요구사항은 별도 명세 필요로 플래그 표시." |
+| Multiple rows (Tier 2 status 'N/A')... | "Multiple rows (Tier 2 status 'N/A'): #19, #20..." | "다수 행(Tier 2 상태 'N/A'): #19, #20, #36, #37, #38, #39, #40 (HPLMN timer, SAR, MIPI, NV 항목) 및 #55-#58 (RTT) — 스펙 보존 원칙에 따라 priority='could' + clarification_needed=true로 STK_REQ 생성. |
+| Requirements marked 'Supported w/ NRE'... | "Several requirements marked 'Supported w/ NRE' or 'Supported w/ Restrictions'..." | "Tier 2(LGIT)가 'Supported w/ NRE' 또는 'Supported w/ Restrictions'로 표시한 여러 요구사항을 원문 그대로 보존 — 상업적 범위에 대한 고객 확인은 kickoff 시 권장." |
+
+**중요 규칙 / Key Rules**:
+
+1. **영문 표준 용어는 유지**: `AEC-Q100`, `3GPP Release 16`, `ASIL-D`, `IEEE 830`, `MIPI`, `eCall`, `SoC`, `eUICC`, `SIM`, `DRX`, `HPLMN`, `SAR`, `RTT`, `NRE` 등 자동차/통신 표준 약어 및 영문 ID 는 그대로 유지.
+
+2. **행/열 표기는 한글**: "Row N" → "행 N", "Column" → "컬럼", "rows" → "행들"
+
+3. **자연스러운 한글 문장**: 영문 직역이 아닌 자연스러운 한국어. 예: "are preserved" → "보존했습니다", "is composite" → "복합 문장"
+
+4. **종결어미 일관성**: 한 warning 안에서 종결어미 통일. 예: "~보존했습니다" / "~필요합니다" / "~권장" (명사형 종결도 OK).
+
+5. **숫자/단위는 영문**: "104.2~164.2 kHz", "<-10 dBuV", "≤200ms p99" 등 측정값은 영문 그대로.
+
+6. **추적성 정보 보존**: 영문 ID/행 번호/시트명은 그대로 인용. "행 23 (China eCall)" — 영문 식별자 보존하면서 한글 설명 추가.
+
+**Output expectation**:
+모든 신규 AI 생성에서 `warnings` 배열의 모든 항목은 한글로 작성됩니다. 영문 warnings 는 더 이상 허용되지 않습니다.
+
+All new AI generations MUST produce Korean `warnings`. English warnings are no longer acceptable.
 
 ---
 
@@ -548,6 +601,7 @@ Before producing output, verify ALL items / 출력 전 모두 확인:
 17. ☐ All ID counters per group are sequential without gaps (001, 002, 003 — not 001, 003, 005)
 18. ☐ No `use_cases` field (removed in Phase 2-2c)
 19. ☐ `warnings` array populated if any meta-sheets were detected or any unusual cases occurred
+20. ☐ ⭐ All `warnings` items are written in Korean (한글) per Section 7.1 (영문 표준 용어 보존 OK; e.g., AEC-Q100, 3GPP, ASIL)
 
 **If ANY check fails, fix before responding. / 하나라도 실패 시 수정 후 응답.**
 
