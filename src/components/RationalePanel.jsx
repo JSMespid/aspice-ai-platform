@@ -1,8 +1,149 @@
-// src/components/RationalePanel.jsx — Phase 2-2b STEP C-2
+// src/components/RationalePanel.jsx — Phase 2-2d
+// 변경 사항 (vs 2-2b STEP C-2):
+//   - SSE streaming 진행 단계를 받아 시트별 진행 카드 표시
+//   - 실시간 비용/토큰/캐시 HIT 표시
+//   - progressHistory 로 시간순 누적 (어떤 단계든 step prop으로 들어와도 OK)
+//   - streaming 단계(GEN_SHEET_*, GEN_MERGING, GEN_SAVING)는 '생성' / '구조 검증' 행으로 매핑
 
+import { useEffect, useRef, useState } from 'react';
 import { AgentStep } from '../lib/agent-harness.js';
 
 export default function RationalePanel({ open, onClose, step, detail, result }) {
+  // Phase 2-2d: streaming 진행 정보 누적
+  //   - sheets: { [idx]: { name, group, status, stk_count, cache_hit, latency_ms } }
+  //   - liveCost: 실시간 누적 비용 (단계별로 들어옴)
+  //   - liveTokens: { input, output, cache_read, cache_creation }
+  //   - guardrailLive: 가드레일 진행 상황 (running/done)
+  const [progressState, setProgressState] = useState({
+    sheets: {},
+    sheetCount: 0,
+    liveCost: null,
+    liveTokens: null,
+    guardrailLive: null,
+    history: [],  // { ts, step, message }
+    startedAt: null,
+  });
+  const startedAtRef = useRef(null);
+
+  useEffect(() => {
+    if (!step) return;
+    const raw = detail?.raw;
+    const now = Date.now();
+
+    setProgressState(prev => {
+      let next = { ...prev };
+      // 첫 활성 단계에 startedAt 기록
+      if (!startedAtRef.current && (step === AgentStep.GEN_PREPARING || step === AgentStep.GEN_GENERATING)) {
+        startedAtRef.current = now;
+        next.startedAt = now;
+      }
+
+      // history 누적 (메시지 있는 단계만, 최근 30개)
+      if (detail?.message) {
+        next.history = [
+          ...prev.history,
+          { ts: now, step, message: detail.message },
+        ].slice(-30);
+      }
+
+      // SSE 백엔드 step
+      const backendStep = raw?.step;
+
+      if (backendStep === 'mode_detected') {
+        next.sheetCount = raw.sheet_count || 0;
+        // 사전에 시트 placeholder 채우기
+        if (Array.isArray(raw.sheets)) {
+          const placeholders = {};
+          for (const s of raw.sheets) {
+            placeholders[s.idx] = {
+              idx: s.idx,
+              name: s.name,
+              group: s.group,
+              status: 'pending',
+            };
+          }
+          next.sheets = placeholders;
+        }
+      } else if (step === AgentStep.GEN_SHEET_START && raw) {
+        next.sheets = {
+          ...prev.sheets,
+          [raw.sheet_idx]: {
+            ...(prev.sheets[raw.sheet_idx] || {}),
+            idx: raw.sheet_idx,
+            name: raw.sheet_name,
+            group: raw.sheet_group,
+            status: 'running',
+            startedAt: now,
+          },
+        };
+      } else if (step === AgentStep.GEN_SHEET_DONE && raw) {
+        next.sheets = {
+          ...prev.sheets,
+          [raw.sheet_idx]: {
+            ...(prev.sheets[raw.sheet_idx] || {}),
+            idx: raw.sheet_idx,
+            name: raw.sheet_name,
+            group: raw.sheet_group,
+            status: 'done',
+            stk_count: raw.stk_count,
+            cache_hit: raw.cache_hit,
+            latency_ms: raw.latency_ms,
+            cache_read_tokens: raw.cache_read_tokens,
+            cache_creation_tokens: raw.cache_creation_tokens,
+            doneAt: now,
+          },
+        };
+      } else if (step === AgentStep.GEN_SHEET_FAILED && raw) {
+        next.sheets = {
+          ...prev.sheets,
+          [raw.sheet_idx]: {
+            ...(prev.sheets[raw.sheet_idx] || {}),
+            idx: raw.sheet_idx,
+            name: raw.sheet_name,
+            status: 'failed',
+            error: raw.error,
+          },
+        };
+      } else if (backendStep === 'guardrail_running') {
+        next.guardrailLive = { status: 'running' };
+      } else if (backendStep === 'guardrail_done') {
+        next.guardrailLive = {
+          status: 'done',
+          passed: raw.passed,
+          failed_axes: raw.failed_axes || [],
+        };
+      } else if (backendStep === 'saving' && raw) {
+        if (typeof raw.cost_usd === 'number') {
+          next.liveCost = raw.cost_usd;
+        }
+        next.liveTokens = {
+          input: raw.total_input_tokens || 0,
+          output: raw.total_output_tokens || 0,
+          cache_read: raw.cache_read_tokens || 0,
+          cache_creation: raw.cache_creation_tokens || 0,
+        };
+      }
+
+      return next;
+    });
+  }, [step, detail]);
+
+  // 패널이 닫힌 후 다시 열리는 경우는 progress 초기화 (새 호출 시작)
+  useEffect(() => {
+    if (!open) {
+      startedAtRef.current = null;
+      setProgressState({
+        sheets: {},
+        sheetCount: 0,
+        liveCost: null,
+        liveTokens: null,
+        guardrailLive: null,
+        history: [],
+        startedAt: null,
+      });
+    }
+  }, [open]);
+
   if (!open) return null;
 
   const generator = result?.generator;
@@ -57,6 +198,23 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 22px' }}>
           <ProgressSection step={step} detail={detail} hasGenerator={!!generator} hasEvaluator={!!evaluator} />
 
+          {/* Phase 2-2d: streaming 시트 진행 카드 */}
+          {Object.keys(progressState.sheets).length > 0 && (
+            <SheetProgressSection
+              sheets={progressState.sheets}
+              sheetCount={progressState.sheetCount}
+              startedAt={progressState.startedAt}
+            />
+          )}
+
+          {/* Phase 2-2d: 실시간 비용/토큰 (저장 단계에 들어왔을 때) */}
+          {progressState.liveCost !== null && !generator && (
+            <LiveCostSection
+              cost={progressState.liveCost}
+              tokens={progressState.liveTokens}
+            />
+          )}
+
           {generator?.meta && (
             <MetaSection
               meta={generator.meta}
@@ -110,7 +268,27 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
   );
 }
 
+// Phase 2-2d: streaming 단계 → 기존 4개 step row 매핑
+//   - SHEET_START, SHEET_DONE, SHEET_FAILED, MERGING, SAVING => 'generating' 또는 'validating' 진행 중
+function mapStreamingStepToBase(step) {
+  switch (step) {
+    case AgentStep.GEN_SHEET_START:
+    case AgentStep.GEN_SHEET_DONE:
+    case AgentStep.GEN_SHEET_FAILED:
+    case AgentStep.GEN_MERGING:
+      return AgentStep.GEN_GENERATING;
+    case AgentStep.GEN_SAVING:
+      // 저장은 가드레일 통과 후의 단계 — 구조 검증 이후이므로 VALIDATING 활성으로 보임
+      return AgentStep.GEN_VALIDATING;
+    default:
+      return step;
+  }
+}
+
 function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
+  // Phase 2-2d: streaming 단계는 4개 step row 중 적절한 것에 매핑
+  const baseStep = mapStreamingStepToBase(step);
+
   const genSteps = [
     { id: AgentStep.GEN_PREPARING,  label: '준비',       desc: '입력 검증 + Skills 로딩' },
     { id: AgentStep.GEN_GENERATING, label: '생성',       desc: 'Claude Opus 4.7 (adaptive thinking)' },
@@ -126,13 +304,13 @@ function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
 
   function getStepState(stepId, group) {
     const groupSteps = group === 'gen' ? genSteps : evalSteps;
-    const currentIndex = groupSteps.findIndex(s => s.id === step);
+    const currentIndex = groupSteps.findIndex(s => s.id === baseStep);
     const stepIndex = groupSteps.findIndex(s => s.id === stepId);
-    const isFailed = (group === 'gen' && step === AgentStep.GEN_FAILED) ||
-                     (group === 'eval' && step === AgentStep.EVAL_FAILED);
-    const isBlocked = step === AgentStep.GEN_BLOCKED ||
-                      step === AgentStep.EVAL_REJECTED;
-    const isWarning = step === AgentStep.EVAL_NEEDS_REFINEMENT;
+    const isFailed = (group === 'gen' && baseStep === AgentStep.GEN_FAILED) ||
+                     (group === 'eval' && baseStep === AgentStep.EVAL_FAILED);
+    const isBlocked = baseStep === AgentStep.GEN_BLOCKED ||
+                      baseStep === AgentStep.EVAL_REJECTED;
+    const isWarning = baseStep === AgentStep.EVAL_NEEDS_REFINEMENT;
 
     // 우선 순위 1: 현재 활성 단계
     if (currentIndex === stepIndex && currentIndex >= 0) {
@@ -602,6 +780,203 @@ function IssueCard({ issue }) {
       )}
     </div>
   );
+}
+
+// ──────────────────────────────────────────────────
+// Phase 2-2d: 시트별 진행 카드 (streaming 전용)
+// ──────────────────────────────────────────────────
+function SheetProgressSection({ sheets, sheetCount, startedAt }) {
+  const sheetList = Object.values(sheets).sort((a, b) => (a.idx || 0) - (b.idx || 0));
+  const doneCount = sheetList.filter(s => s.status === 'done').length;
+  const failedCount = sheetList.filter(s => s.status === 'failed').length;
+  const totalCount = sheetCount || sheetList.length;
+  const progressPercent = totalCount > 0
+    ? Math.round((doneCount + failedCount) / totalCount * 100)
+    : 0;
+
+  // 경과 시간 (간이)
+  const elapsedSec = startedAt ? Math.floor((Date.now() - startedAt) / 1000) : 0;
+
+  return (
+    <Section title={`시트 처리 (${doneCount + failedCount}/${totalCount})`}>
+      {/* Progress bar */}
+      <div style={{
+        position: 'relative',
+        height: 8,
+        background: 'var(--c-bg-soft)',
+        borderRadius: 4,
+        overflow: 'hidden',
+        marginBottom: 14,
+      }}>
+        <div style={{
+          position: 'absolute',
+          left: 0, top: 0, bottom: 0,
+          width: `${progressPercent}%`,
+          background: failedCount > 0 ? '#F59E0B' : '#10B981',
+          transition: 'width 0.4s ease',
+        }} />
+      </div>
+
+      {/* 경과 시간 */}
+      {elapsedSec > 0 && (
+        <div style={{
+          fontSize: 11,
+          color: 'var(--c-text-muted)',
+          marginBottom: 10,
+        }}>
+          ⏱ 경과 시간: {formatElapsed(elapsedSec)}
+        </div>
+      )}
+
+      {/* 시트별 카드 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {sheetList.map(s => (
+          <SheetCard key={s.idx} sheet={s} />
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+function SheetCard({ sheet }) {
+  const statusColor = {
+    pending: { bg: 'var(--c-bg-soft)', border: 'var(--c-border)', icon: '⏳', label: '대기' },
+    running: { bg: 'rgba(59, 130, 246, 0.08)', border: 'rgba(59, 130, 246, 0.3)', icon: '⟳', label: '진행 중' },
+    done: { bg: 'rgba(16, 185, 129, 0.06)', border: 'rgba(16, 185, 129, 0.3)', icon: '✓', label: '완료' },
+    failed: { bg: 'rgba(220, 38, 38, 0.06)', border: 'rgba(220, 38, 38, 0.3)', icon: '✗', label: '실패' },
+  };
+  const c = statusColor[sheet.status] || statusColor.pending;
+
+  return (
+    <div style={{
+      padding: '10px 12px',
+      background: c.bg,
+      border: `1px solid ${c.border}`,
+      borderRadius: 6,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+    }}>
+      <div style={{
+        width: 24, height: 24,
+        borderRadius: '50%',
+        background: '#fff',
+        border: `1px solid ${c.border}`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 13, fontWeight: 700,
+        flexShrink: 0,
+      }}>
+        {sheet.status === 'running' ? (
+          <span style={{ animation: 'spin 1.4s linear infinite', display: 'inline-block' }}>{c.icon}</span>
+        ) : c.icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{
+          fontSize: 12, fontWeight: 600,
+          color: 'var(--c-text)',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          시트 {sheet.idx} · {sheet.name}
+          {sheet.group && (
+            <span style={{
+              marginLeft: 6, fontSize: 10,
+              color: 'var(--c-text-muted)',
+              fontWeight: 500,
+            }}>
+              [{sheet.group}]
+            </span>
+          )}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--c-text-muted)', marginTop: 2 }}>
+          {sheet.status === 'done' && (
+            <>
+              {sheet.stk_count ?? 0}개 STK_REQ
+              {' · '}
+              {formatLatency(sheet.latency_ms)}
+              {sheet.cache_hit && (
+                <span style={{
+                  marginLeft: 6,
+                  padding: '1px 6px',
+                  background: '#10B981',
+                  color: '#fff',
+                  borderRadius: 3,
+                  fontSize: 9,
+                  fontWeight: 700,
+                }}>
+                  ✓ CACHE HIT
+                </span>
+              )}
+            </>
+          )}
+          {sheet.status === 'running' && '처리 중…'}
+          {sheet.status === 'pending' && '대기 중'}
+          {sheet.status === 'failed' && (
+            <span style={{ color: '#B91C1C' }}>
+              {sheet.error?.slice(0, 80) || '실패'}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────
+// Phase 2-2d: 실시간 비용/토큰 표시 (저장 단계 전)
+// ──────────────────────────────────────────────────
+function LiveCostSection({ cost, tokens }) {
+  return (
+    <Section title="실시간 비용">
+      <div style={{
+        padding: '12px 14px',
+        background: 'rgba(59, 130, 246, 0.05)',
+        border: '1px solid rgba(59, 130, 246, 0.25)',
+        borderRadius: 8,
+      }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--c-text)' }}>
+          ${(cost || 0).toFixed(4)}
+        </div>
+        {tokens && (
+          <div style={{
+            fontSize: 11,
+            color: 'var(--c-text-muted)',
+            marginTop: 6,
+            display: 'flex', flexWrap: 'wrap', gap: 12,
+          }}>
+            <span>입력: {tokens.input?.toLocaleString() || 0}</span>
+            <span>출력: {tokens.output?.toLocaleString() || 0}</span>
+            {tokens.cache_read > 0 && (
+              <span style={{ color: '#059669' }}>
+                ✓ 캐시 읽음: {tokens.cache_read.toLocaleString()}
+              </span>
+            )}
+            {tokens.cache_creation > 0 && (
+              <span>캐시 저장: {tokens.cache_creation.toLocaleString()}</span>
+            )}
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+// 보조: 경과 시간 포맷 (초 -> "1m 23s")
+function formatElapsed(seconds) {
+  if (!Number.isFinite(seconds) || seconds < 0) return '0s';
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${s}s`;
+}
+
+function formatLatency(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  const sec = Math.round(ms / 100) / 10;
+  if (sec < 60) return `${sec}s`;
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return `${m}m ${s}s`;
 }
 
 function Section({ title, children }) {
