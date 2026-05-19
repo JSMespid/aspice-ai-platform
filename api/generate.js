@@ -31,6 +31,17 @@ const MAX_TOKENS = 64000;  // Phase 2-2c: 시트별 스펙 보존 모드로 출�
 const MODEL = 'claude-opus-4-7';  // 최상위 reasoning 모델 (품질 우선)
 const PROVIDER = 'anthropic';
 
+// Phase 2-2e: 시트별 호출 batch 크기
+// Anthropic Tier 1 Opus 한도 (50 RPM, 30K ITPM) 안전 마진 + Vercel proxy 침묵 타임아웃 회피
+// - 1: 완전 직렬 (안전하지만 느림 — 시트 N개 = N × 5분)
+// - 2: 권장 (Tier 1 안전 + 적절한 병렬성)
+// - 3: Tier 1 한도 빠듯 (Tier 2 이상부터 권장)
+// - 4+: Tier 1에서 rate limit hit 가능성 높음
+// 환경 변수 SHEET_BATCH_SIZE 로 운영 중 조정 가능
+const SHEET_BATCH_SIZE = Math.max(1, Math.min(8,
+  parseInt(process.env.SHEET_BATCH_SIZE || '2', 10) || 2
+));
+
 // ──────────────────────────────────────────────────
 // Supabase REST 헬퍼
 // ──────────────────────────────────────────────────
@@ -964,8 +975,10 @@ export default async function handler(req, res) {
       });
       const sheetTasks = await Promise.all(childRowPromises);
 
-      // 병렬 Claude 호출 — Promise.allSettled 로 부분 실패 허용
-      const callPromises = sheetTasks.map(async ({ si, sheetUserPrompt, childId }, i) => {
+      // Phase 2-2e: callPromise를 즉시 만들지 않고 factory 함수로 만들어 batch loop에서 호출
+      // 이전: callPromises는 .map(async) 결과라 즉시 4개 모두 시작 → Anthropic Tier 1 한도 초과
+      // 변경: makeCallTask 는 호출되기 전엔 fetch 안 함 → batch loop가 BATCH_SIZE씩 트리거
+      const makeCallTask = ({ si, sheetUserPrompt, childId }, i) => async () => {
         const sheetIdx = i + 1;
         const sheetName = si.sheet.sheet_name;
         const sheetGroup = si.sheet.group_name || null;
@@ -1050,9 +1063,75 @@ export default async function handler(req, res) {
           });
           return { success: false, si, error: e.message };
         }
+      };  // makeCallTask end
+
+      // Phase 2-2e: Batch 처리 — Anthropic Tier 1 한도 + Vercel proxy 침묵 타임아웃 회피
+      //
+      // 동시에 모든 시트를 fetch 시작하면 Anthropic Tier 1 한도(50 RPM / 30K ITPM) 초과로 일부 시트가 큐 대기.
+      // 큐 대기 중에는 SSE 이벤트가 안 나가서 Vercel proxy 가 침묵 타임아웃으로 연결을 끊을 수 있음.
+      //
+      // 해결: SHEET_BATCH_SIZE (기본 2) 씩 묶어서 순차 처리.
+      //   - 각 batch 내부: 병렬 (BATCH_SIZE 만큼)
+      //   - batch 간: 순차 (이전 batch 완료 대기)
+      //   - 각 batch 시작/완료 시 SSE 이벤트 emit → proxy 연결 유지
+      //
+      // 예시 (시트 4개, BATCH_SIZE=2):
+      //   batch 1: 시트 1, 2 동시 (~5분)  → batch_done emit
+      //   batch 2: 시트 3, 4 동시 (~5분)  → batch_done emit
+      //   total: ~10분 (Vercel 800초 안전, Tier 1 안전)
+      const callTaskFactories = sheetTasks.map((task, i) => makeCallTask(task, i));
+      const totalBatches = Math.ceil(callTaskFactories.length / SHEET_BATCH_SIZE);
+      const callResults = [];
+
+      emit('progress', {
+        step: 'batch_plan',
+        message: `시트 ${callTaskFactories.length}개를 ${SHEET_BATCH_SIZE}개씩 ${totalBatches}배치로 순차 처리`,
+        batch_size: SHEET_BATCH_SIZE,
+        total_batches: totalBatches,
+        total_sheets: callTaskFactories.length,
       });
 
-      const callResults = await Promise.all(callPromises);
+      for (let b = 0; b < totalBatches; b++) {
+        const start = b * SHEET_BATCH_SIZE;
+        const end = Math.min(start + SHEET_BATCH_SIZE, callTaskFactories.length);
+        const batchIdx = b + 1;
+
+        emit('progress', {
+          step: 'batch_start',
+          message: `배치 ${batchIdx}/${totalBatches} 시작 (시트 ${start + 1}~${end})`,
+          batch_idx: batchIdx,
+          batch_total: totalBatches,
+          sheets_in_batch: end - start,
+          sheets_start_idx: start + 1,
+          sheets_end_idx: end,
+        });
+
+        const batchStartTime = Date.now();
+        // 이 batch 의 task 들을 동시에 실행 (BATCH_SIZE 만큼만 — Tier 한도 안전)
+        const batchResults = await Promise.all(
+          callTaskFactories.slice(start, end).map(fn => fn())
+        );
+        const batchDuration = Date.now() - batchStartTime;
+
+        callResults.push(...batchResults);
+
+        const batchSucceeded = batchResults.filter(r => r.success).length;
+        const batchFailed = batchResults.filter(r => !r.success).length;
+        emit('progress', {
+          step: 'batch_done',
+          message: `배치 ${batchIdx}/${totalBatches} 완료 (성공 ${batchSucceeded}, 실패 ${batchFailed}, ${Math.round(batchDuration / 1000)}s)`,
+          batch_idx: batchIdx,
+          batch_total: totalBatches,
+          batch_succeeded: batchSucceeded,
+          batch_failed: batchFailed,
+          batch_duration_ms: batchDuration,
+        });
+
+        console.log(
+          `[generate] Batch ${batchIdx}/${totalBatches} done: ` +
+          `${batchSucceeded} success, ${batchFailed} failed, ${Math.round(batchDuration / 1000)}s`
+        );
+      }
 
       // 성공/실패 분리
       const successResults = callResults.filter(r => r.success);
