@@ -493,6 +493,33 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
             }}>
             {generating ? "⚡ 생성 중..." : "⚡ AI 생성"}
           </button>
+
+          {/*
+            Phase 2-2d: 진행/결과 보기 버튼
+            - 산출물 영역과 무관하게 언제든 RationalePanel 다시 열기
+            - 생성 중 / 실패 / 결과 있음 / 미시작 어떤 상태든 의미 있음
+            - 미시작 상태에서는 비활성화 (보여줄 게 없음)
+          */}
+          {(generating || evaluating || agentResult || agentStep !== AgentStep.IDLE) && (
+            <button
+              onClick={() => setPanelOpen(true)}
+              title={
+                generating || evaluating
+                  ? "현재 진행 상황 보기"
+                  : "마지막 AI 생성 결과 / 가드레일 / Rationale 보기"
+              }
+              style={{
+                background: "#fff",
+                border: "1px solid var(--c-navy-deep)",
+                color: "var(--c-navy-deep)",
+                borderRadius: 6,
+                padding: "9px 14px",
+                fontSize: 12, fontWeight: 600,
+                cursor: "pointer",
+              }}>
+              📊 {(generating || evaluating) ? "진행 보기" : "Rationale 보기"}
+            </button>
+          )}
         </div>
       </div>
 
