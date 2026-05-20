@@ -36,15 +36,12 @@ const AI_GENERATE_SUPPORTED = new Set(["SYS.1"]);
 // Phase 2-2g (옵션 G): 시트 수에 따라 legacy / chunked 경로 분기
 // 결정 #1 (인수인계 권장): 시트 ≥3 chunked, ≤2 legacy
 //
-// ⚠️ Anthropic Tier 1 rate limit (40K input tokens/min) 회피:
-//   배치 안의 시트는 backend 가 Promise.all 로 parallel 처리하므로
-//   batch_size > 1 이면 동시 시트 호출이 발생.
-//   시트당 입력 ~18K 토큰이면 시트 2개 동시 = 36K 토큰 — 한도 매우 근접.
-//   안전을 위해 batch_size=1 (1배치 = 1시트), concurrency=1 (배치 직렬).
-//   시트 4개면 4 batch × ~5분 = 약 20분.
-//   Tier 업그레이드 후 batch_size=2, concurrency=2 로 시간 단축 가능.
+// Tier 1 rate limit (40K input tokens/min) 회피를 위해 한 wave 에 시트 2개만 호출.
+//   batch_size × concurrency = 동시 호출 시트 수 = 2 (안전)
+//   batch 단위는 순차 (concurrency=1) — frontend orchestrator 가 직렬로 호출
+//   4시트면 2 batch × ~5분 = ~10분 (정상 범위)
 const CHUNKED_THRESHOLD = 3;
-const CHUNKED_BATCH_SIZE = 1;
+const CHUNKED_BATCH_SIZE = 2;
 const CHUNKED_CONCURRENCY = 1;
 
 async function apiCall(path, method = "GET", body = null) {
