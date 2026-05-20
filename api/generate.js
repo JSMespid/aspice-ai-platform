@@ -634,8 +634,54 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
       return callClaude({ systemPrompt, userPrompt, schema, attempt: attempt + 1 });
     }
 
-    const data = await res.json();
+    // Phase 2-2e: 응답 본문 안전 파싱
+    // ── 문제 ──
+    // 이전 코드: const data = await res.json()
+    //   → Anthropic 게이트웨이/Envoy가 일시 장애 시 200/502/503 어느 상태든
+    //     본문에 "upstream connect error..." 같은 plain text 를 반환할 수 있음
+    //   → res.json() 이 SyntaxError ("Unexpected token 'u'") 로 폭발
+    //   → 사용자에게 "not valid JSON" 메시지로 노출됨 (실제로는 Anthropic 인프라 에러)
+    //
+    // ── 해결 ──
+    // 1) 본문을 먼저 text 로 받음
+    // 2) JSON 파싱 시도
+    // 3) 파싱 실패 시: upstream/proxy 에러 패턴이면 retry, 아니면 명확한 에러로 throw
+    const rawBody = await res.text();
     const latency = Date.now() - t0;
+
+    let data;
+    try {
+      data = JSON.parse(rawBody);
+    } catch (parseErr) {
+      // 본문이 JSON 이 아닌 경우 — Anthropic 게이트웨이 에러 패턴 검사
+      const bodyPreview = rawBody.slice(0, 200);
+      const isUpstreamError =
+        /upstream\s+(connect|request|response|service)\s+(error|timeout|unavailable)/i.test(bodyPreview) ||
+        /^upstream/i.test(bodyPreview) ||
+        /service unavailable/i.test(bodyPreview) ||
+        /bad gateway/i.test(bodyPreview) ||
+        /gateway timeout/i.test(bodyPreview) ||
+        /Cloudflare/i.test(bodyPreview) ||
+        rawBody.startsWith('<');  // HTML 에러 페이지
+
+      if (isUpstreamError && attempt < MAX_RETRIES) {
+        const waitMs = (attempt + 1) * 5000;  // 5초, 10초 백오프 (게이트웨이 회복 시간)
+        console.log(
+          `[callClaude] Upstream/gateway error (status=${res.status}, body="${bodyPreview.slice(0, 80)}..."), ` +
+          `retry after ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`
+        );
+        clearTimeout(timeoutId);
+        await new Promise(r => setTimeout(r, waitMs));
+        return callClaude({ systemPrompt, userPrompt, schema, attempt: attempt + 1 });
+      }
+
+      // 재시도 한도 초과 또는 다른 종류 파싱 에러 — 명확한 에러로 throw
+      throw new Error(
+        `Anthropic API 응답이 유효한 JSON 이 아닙니다 (HTTP ${res.status}). ` +
+        `Anthropic 게이트웨이 장애로 추정되며 ${MAX_RETRIES}회 재시도 후에도 회복 안 됨. ` +
+        `응답 본문 미리보기: "${bodyPreview}"`
+      );
+    }
 
     if (!res.ok) {
       throw new Error(`Claude API ${res.status}: ${JSON.stringify(data).slice(0, 500)}`);
@@ -1091,46 +1137,83 @@ export default async function handler(req, res) {
         total_sheets: callTaskFactories.length,
       });
 
-      for (let b = 0; b < totalBatches; b++) {
-        const start = b * SHEET_BATCH_SIZE;
-        const end = Math.min(start + SHEET_BATCH_SIZE, callTaskFactories.length);
-        const batchIdx = b + 1;
+      // ──────────────────────────────────────────────────
+      // Phase 2-2f: SSE Keep-alive (25초마다 ping)
+      // ──────────────────────────────────────────────────
+      // 문제: 시트 4개 시나리오에서 `await callClaude(...)` 가 4~5분 걸리는 동안
+      //       SSE 이벤트가 전혀 안 나가서 Vercel Edge Proxy 가 침묵 타임아웃
+      //       (~30~60초)으로 연결을 끊는 경우 발생 (오늘 NAD060520.08:49 사고).
+      //
+      // 해결: 25초마다 `ping` 이벤트를 emit → proxy 가 연결을 살아있다고 판단.
+      //   - 25초 = Vercel 침묵 임계값보다 안전한 마진
+      //   - 비용: 25s 마다 ~60B → 10분 배치당 ~1.4KB (무시 가능)
+      //   - streaming 모드일 때만 활성 (JSON 모드 timer 낭비 방지)
+      //   - try/finally 로 어떤 경로(success/throw/abort)든 cleanup 보장
+      //
+      // 주의: 프론트엔드는 'ping' 이벤트를 무시(또는 디버그 로그)만 함 — UI 영향 없음
+      let pingCount = 0;
+      const KEEPALIVE_INTERVAL_MS = 25000;
+      const keepAliveInterval = emitter.streaming
+        ? setInterval(() => {
+            pingCount += 1;
+            try {
+              sseSend(res, 'ping', { ts: Date.now(), seq: pingCount });
+            } catch (e) {
+              console.error('[keepalive] ping write failed:', e.message);
+            }
+          }, KEEPALIVE_INTERVAL_MS)
+        : null;
 
-        emit('progress', {
-          step: 'batch_start',
-          message: `배치 ${batchIdx}/${totalBatches} 시작 (시트 ${start + 1}~${end})`,
-          batch_idx: batchIdx,
-          batch_total: totalBatches,
-          sheets_in_batch: end - start,
-          sheets_start_idx: start + 1,
-          sheets_end_idx: end,
-        });
+      try {
+        for (let b = 0; b < totalBatches; b++) {
+          const start = b * SHEET_BATCH_SIZE;
+          const end = Math.min(start + SHEET_BATCH_SIZE, callTaskFactories.length);
+          const batchIdx = b + 1;
 
-        const batchStartTime = Date.now();
-        // 이 batch 의 task 들을 동시에 실행 (BATCH_SIZE 만큼만 — Tier 한도 안전)
-        const batchResults = await Promise.all(
-          callTaskFactories.slice(start, end).map(fn => fn())
-        );
-        const batchDuration = Date.now() - batchStartTime;
+          emit('progress', {
+            step: 'batch_start',
+            message: `배치 ${batchIdx}/${totalBatches} 시작 (시트 ${start + 1}~${end})`,
+            batch_idx: batchIdx,
+            batch_total: totalBatches,
+            sheets_in_batch: end - start,
+            sheets_start_idx: start + 1,
+            sheets_end_idx: end,
+          });
 
-        callResults.push(...batchResults);
+          const batchStartTime = Date.now();
+          // 이 batch 의 task 들을 동시에 실행 (BATCH_SIZE 만큼만 — Tier 한도 안전)
+          const batchResults = await Promise.all(
+            callTaskFactories.slice(start, end).map(fn => fn())
+          );
+          const batchDuration = Date.now() - batchStartTime;
 
-        const batchSucceeded = batchResults.filter(r => r.success).length;
-        const batchFailed = batchResults.filter(r => !r.success).length;
-        emit('progress', {
-          step: 'batch_done',
-          message: `배치 ${batchIdx}/${totalBatches} 완료 (성공 ${batchSucceeded}, 실패 ${batchFailed}, ${Math.round(batchDuration / 1000)}s)`,
-          batch_idx: batchIdx,
-          batch_total: totalBatches,
-          batch_succeeded: batchSucceeded,
-          batch_failed: batchFailed,
-          batch_duration_ms: batchDuration,
-        });
+          callResults.push(...batchResults);
 
-        console.log(
-          `[generate] Batch ${batchIdx}/${totalBatches} done: ` +
-          `${batchSucceeded} success, ${batchFailed} failed, ${Math.round(batchDuration / 1000)}s`
-        );
+          const batchSucceeded = batchResults.filter(r => r.success).length;
+          const batchFailed = batchResults.filter(r => !r.success).length;
+          emit('progress', {
+            step: 'batch_done',
+            message: `배치 ${batchIdx}/${totalBatches} 완료 (성공 ${batchSucceeded}, 실패 ${batchFailed}, ${Math.round(batchDuration / 1000)}s)`,
+            batch_idx: batchIdx,
+            batch_total: totalBatches,
+            batch_succeeded: batchSucceeded,
+            batch_failed: batchFailed,
+            batch_duration_ms: batchDuration,
+          });
+
+          console.log(
+            `[generate] Batch ${batchIdx}/${totalBatches} done: ` +
+            `${batchSucceeded} success, ${batchFailed} failed, ${Math.round(batchDuration / 1000)}s`
+          );
+        }
+      } finally {
+        if (keepAliveInterval) {
+          clearInterval(keepAliveInterval);
+          console.log(
+            `[generate] Keep-alive stopped: ${pingCount} pings sent ` +
+            `(~${Math.round(pingCount * KEEPALIVE_INTERVAL_MS / 1000)}s monitored)`
+          );
+        }
       }
 
       // 성공/실패 분리
@@ -1187,12 +1270,36 @@ export default async function handler(req, res) {
         step: 'single_call_start',
         message: 'Claude Opus 4.7 단일 호출 시작 (adaptive thinking)',
       });
-      const userPrompt = buildUserPrompt(process_id, wp.content, project);
-      const claudeResult = await callClaude({
-        systemPrompt,
-        userPrompt,
-        schema: OUTPUT_SCHEMAS[process_id],
-      });
+
+      // Phase 2-2f: 단일 호출 경로에도 Keep-alive 적용 (legacy path 보호)
+      // 단일 callClaude 도 4~5분 걸릴 수 있어 같은 silence 문제 가능
+      let pingCountSingle = 0;
+      const keepAliveSingle = emitter.streaming
+        ? setInterval(() => {
+            pingCountSingle += 1;
+            try {
+              sseSend(res, 'ping', { ts: Date.now(), seq: pingCountSingle });
+            } catch (e) {
+              console.error('[keepalive-single] ping write failed:', e.message);
+            }
+          }, 25000)
+        : null;
+
+      let claudeResult;
+      try {
+        const userPrompt = buildUserPrompt(process_id, wp.content, project);
+        claudeResult = await callClaude({
+          systemPrompt,
+          userPrompt,
+          schema: OUTPUT_SCHEMAS[process_id],
+        });
+      } finally {
+        if (keepAliveSingle) {
+          clearInterval(keepAliveSingle);
+          console.log(`[generate] Single-call keep-alive stopped: ${pingCountSingle} pings sent`);
+        }
+      }
+
       parsedOutput = claudeResult.parsedOutput;
       totalInputTokens = claudeResult.inputTokens;
       totalOutputTokens = claudeResult.outputTokens;
