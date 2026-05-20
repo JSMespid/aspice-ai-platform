@@ -4,11 +4,19 @@
 //   - 실시간 비용/토큰/캐시 HIT 표시
 //   - progressHistory 로 시간순 누적 (어떤 단계든 step prop으로 들어와도 OK)
 //   - streaming 단계(GEN_SHEET_*, GEN_MERGING, GEN_SAVING)는 '생성' / '구조 검증' 행으로 매핑
+// Phase 2-2g (옵션 G):
+//   - cancellable / onCancel / cancelling props 추가 — chunked 모드에서 헤더의 취소 버튼 활성
 
 import { useEffect, useRef, useState } from 'react';
 import { AgentStep } from '../lib/agent-harness.js';
 
-export default function RationalePanel({ open, onClose, step, detail, result }) {
+export default function RationalePanel({
+  open, onClose, step, detail, result,
+  // Phase 2-2g: chunked generation 취소 (기본값은 false/null — 미지정 시 버튼 안 보임)
+  cancellable = false,
+  onCancel = null,
+  cancelling = false,
+}) {
   // Phase 2-2d: streaming 진행 정보 누적
   //   - sheets: { [idx]: { name, group, status, stk_count, cache_hit, latency_ms } }
   //   - liveCost: 실시간 누적 비용 (단계별로 들어옴)
@@ -231,12 +239,40 @@ export default function RationalePanel({ open, onClose, step, detail, result }) 
               AI 생성 + 5축 가드레일
             </h2>
           </div>
-          <button onClick={onClose} style={{
-            background: 'transparent', border: 'none',
-            fontSize: 22, fontWeight: 300,
-            color: 'var(--c-text-muted)',
-            cursor: 'pointer', width: 32, height: 32, borderRadius: 6,
-          }} aria-label="닫기">×</button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {/*
+              Phase 2-2g: Cancel 버튼 — chunked 모드에서만 표시.
+              Cooperative cancellation: 클릭 즉시 cancel flag 만 설정,
+              실제 batch 종료는 다음 체크포인트 (보통 5분 이내).
+            */}
+            {cancellable && onCancel && (
+              <button
+                onClick={onCancel}
+                disabled={cancelling}
+                style={{
+                  background: cancelling ? '#fff' : '#fef2f2',
+                  border: '1px solid #fca5a5',
+                  color: '#b91c1c',
+                  borderRadius: 6,
+                  padding: '6px 12px',
+                  fontSize: 12, fontWeight: 600,
+                  cursor: cancelling ? 'not-allowed' : 'pointer',
+                  opacity: cancelling ? 0.6 : 1,
+                  whiteSpace: 'nowrap',
+                }}
+                title={cancelling ? '취소 요청 처리 중...' : '진행 중인 AI 생성 취소 — 다음 체크포인트에서 종료'}
+                aria-label="AI 생성 취소"
+              >
+                {cancelling ? '⏳ 취소 중...' : '⛔ 취소'}
+              </button>
+            )}
+            <button onClick={onClose} style={{
+              background: 'transparent', border: 'none',
+              fontSize: 22, fontWeight: 300,
+              color: 'var(--c-text-muted)',
+              cursor: 'pointer', width: 32, height: 32, borderRadius: 6,
+            }} aria-label="닫기">×</button>
+          </div>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 22px' }}>
