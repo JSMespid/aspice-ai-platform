@@ -109,9 +109,15 @@ export default async function handler(req, res) {
         error: 'Missing required fields: project_id, process_id, work_product_id',
       });
     }
-    if (!isValidUUID(project_id) || !isValidUUID(process_id) || !isValidUUID(work_product_id)) {
+    // project_id, work_product_id 는 UUID. process_id 는 코드 문자열 (예: "SYS.1").
+    if (!isValidUUID(project_id) || !isValidUUID(work_product_id)) {
       return res.status(400).json({
-        error: 'Invalid UUID format for project_id, process_id, or work_product_id',
+        error: 'Invalid UUID format for project_id or work_product_id',
+      });
+    }
+    if (typeof process_id !== 'string' || process_id.length === 0 || process_id.length > 50) {
+      return res.status(400).json({
+        error: 'Invalid process_id (must be non-empty string, max 50 chars)',
       });
     }
     if (!plan || !Array.isArray(plan.batches) || plan.batches.length === 0) {
