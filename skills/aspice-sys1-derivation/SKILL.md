@@ -6,7 +6,12 @@ description: "Use when generating SYS.1 (Stakeholder Requirements Derivation) ar
 # ASPICE SYS.1 — Stakeholder Requirements Derivation Skill
 # ASPICE SYS.1 — 이해관계자 요구사항 도출 스킬
 
-**Phase 2-2c Revision** — Spec-Preservation Mode + OEM-Supplier Context + Worksheet-Based Classification
+**Phase 2-2f.1 Revision** — Spec-Preservation Mode + OEM-Supplier Context + Worksheet-Based Classification + ⭐ Category Stability (Interface-Priority)
+
+> **Changelog**:
+> - Phase 2-2c: Spec-Preservation + OEM-Supplier Context + Worksheet Classification
+> - Phase 2-2d: Korean warnings + work-product re-registration
+> - Phase 2-2f.1 (this revision): Rule 5 확장 — 결정 트리 + Interface-Priority overlap rule + Section 8.5 Category Boundary Examples + Mistake 7
 
 ---
 
@@ -539,13 +544,70 @@ Modal verbs (ASPICE standard):
 
 **If customer input does not use these modals**: Convert to IEEE 830 form, preserving meaning. Note in rationale: "원본은 'X provides Y' — IEEE 830 형식으로 변환."
 
-### Rule 5: Categorize Requirements / 요구사항 분류
+### Rule 5: ⭐ Categorize Requirements — Deterministic Decision Tree / 요구사항 분류 — 결정 트리
 
-Each STK_REQ has a `category`:
-- `functional` — what the system does / 시스템이 수행하는 기능
-- `non_functional` — performance, reliability, security, usability / 성능·신뢰성·보안·사용성
-- `interface` — communication with external entities / 외부 entity 와의 통신
-- `constraint` — regulatory, environmental, technical limits / 법규·환경·기술 제약
+**원칙 / Principle**: 같은 입력 행은 언제 분류하든 **반드시 같은 카테고리**가 나와야 합니다. 분류는 "느낌"이 아니라 결정 트리에 따른 기계적 판정입니다.
+
+The same input row MUST yield the same category every time it is classified. Classification follows a deterministic decision tree, not intuition.
+
+**⭐ Overlap Rule (가장 중요) / Most Important**:
+요구사항이 **둘 이상의 카테고리에 모두 해당될 때** (예: 행위 + 외부 채널), 결정 트리의 **위쪽 단계가 항상 승리**합니다. 특히 `interface` 와 `functional` 이 동시에 해당되면 **항상 `interface`** 로 분류합니다.
+
+When a requirement matches multiple categories (e.g., action + external channel), the **earlier step in the decision tree always wins**. In particular, when both `interface` and `functional` apply, classify as **`interface`** every time.
+
+**4개 카테고리 / Four Categories**:
+
+| Category | 한 줄 정의 / One-line definition | 핵심 동사 / Key verbs |
+|---|---|---|
+| `constraint` | 외부 권위/환경/표준이 부과하는 한계 또는 의무 | shall comply with, shall not exceed, shall be within, shall operate at |
+| `interface` | 외부 시스템·신호·물리 채널과의 통신 또는 그 사양 (프로토콜·대역·커넥터·외부 entity 명시) | shall support, shall provide, shall expose, shall transmit/receive/report over, shall pair/connect with |
+| `non_functional` | 정량 가능한 품질 속성 (행동 자체보다는 행동의 "얼마나 잘") | shall achieve, shall meet, shall maintain (a metric) |
+| `functional` | 외부 채널/entity 명시 없이 시스템이 수행하는 내부 행위·상태·반응 | shall calculate, validate, maintain (state), trigger, switch (internal mode) |
+
+**결정 트리 / Decision Tree** (위에서부터 순서대로 적용, 첫 매치가 승리 / apply top-down, first match wins):
+
+```
+Step 1 — constraint?
+  ├─ 법규/표준 명시 (ECE Rxx, ISO xxxxx, KMVSS, FCC, AEC-Q100, 3GPP TS xx.xxx)?
+  ├─ 안전 분류 (ASIL-A/B/C/D, SIL-x, QM)?
+  ├─ 환경 한계 (-40°C~+85°C, vibration profile, IP67)?
+  ├─ 전압/전류/전력 한계 (shall not exceed N W, shall operate at N V)?
+  └─ 인증 의무 (shall be type-approved, shall comply with...)?
+   → YES: category = "constraint"
+   → NO:  go to Step 2
+
+Step 2 — interface? (⭐ 광의로 적용: 외부 채널/entity 가 언급되면 무조건 여기서 멈춤)
+  ├─ 특정 무선/유선 프로토콜 명시 (LTE Band N, 5G NR, BT 5.x, WiFi 6, NFC)?
+  ├─ 자동차 네트워크 명시 (CAN 500kbps, CAN-FD, LIN, FlexRay, Ethernet 100BASE-T1)?
+  ├─ 물리 커넥터/버스 (USB-C, MIPI CSI-2, I2C, SPI, UART)?
+  ├─ 외부 entity 명시 (안테나, SIM/eUICC, GNSS satellites, OEM 백엔드 server, eCall PSAP)?
+  ├─ "지원·제공·노출" 동사 + 외부 명세 (shall support/provide/expose <외부 사양>)?
+  └─ 행위 동사 + 위의 외부 채널/entity 가 함께 등장? (shall transmit/receive/report/log/download OVER/VIA/TO/FROM <외부 채널>)
+   → YES: category = "interface"  ⭐ 행위 동사가 있어도 외부 채널이 명시되면 여기서 멈춤
+   → NO:  go to Step 3
+
+Step 3 — non_functional?
+  ├─ 정량화된 품질 메트릭 (latency, throughput, MTBF, availability, accuracy, jitter, BER, VSWR)?
+  ├─ 보안 속성 자체 (shall be encrypted, shall authenticate, shall be tamper-resistant)?
+  ├─ 응답성/처리시간 (response time ≤ N ms)?
+  └─ 행위 명시 없이 "얼마나 잘"만 명시?
+   → YES: category = "non_functional"
+   → NO:  go to Step 4
+
+Step 4 — functional (외부 채널/entity 가 전혀 언급되지 않은 순수 내부 행위만):
+  └─ 시스템이 무엇을 "하는지"를 기술하되, 외부 채널/entity 명시 없음
+     (calculate from internal data, validate internally, maintain internal state, trigger internal alert, ...)
+   → category = "functional"
+```
+
+**중요 / Important**:
+- 한 요구사항이 여러 카테고리에 걸치면 결정 트리의 **위쪽 단계가 무조건 승리**합니다 — 직관으로 뒤집지 마세요.
+- 특히 Step 2 (interface) 는 **광의로 적용**합니다: 행위 동사가 있더라도 외부 채널·entity 가 함께 명시되면 interface 로 분류합니다. 이 규칙으로 분류 결정성을 보장하고, 같은 입력 → 같은 카테고리가 매 런마다 재현됩니다.
+- `functional` 은 **외부 채널/entity 가 전혀 언급되지 않은 순수 내부 행위만**을 위한 카테고리입니다.
+
+When a requirement straddles categories, the earlier step ALWAYS wins — do not override by intuition. Step 2 (interface) is applied **broadly**: even if an action verb is present, the presence of an external channel/entity puts the requirement in interface. This guarantees classification determinism. `functional` is reserved for **purely internal behaviors with no external channel/entity mentioned**.
+
+See Section 8.5 for boundary examples and the worked decision-tree walkthroughs.
 
 ### Rule 6: ⭐ Input Meaning Preservation / 입력 의미 보존
 
@@ -570,6 +632,93 @@ Allowed exception: Universally applicable automotive constraints (operating temp
 
 ---
 
+### Section 8.5 — ⭐ Category Boundary Examples (Interface-Priority Rule Applied) / 카테고리 경계 예시 (Interface 우선 규칙 적용)
+
+이 섹션은 Rule 5 결정 트리 — 특히 **`interface` 와 `functional` 이 겹칠 때 항상 `interface` 가 승리** — 를 풀이 예시로 보여줍니다.
+
+This section illustrates Rule 5's decision tree — specifically that **`interface` always wins over `functional` when both apply** — through worked examples.
+
+#### 8.5.1 ⭐ The Channel-Mention Test / 채널 언급 테스트
+
+요구사항을 분류하기 전 한 가지만 묻습니다:
+
+Before classifying, ask one question:
+
+> **"이 행에 특정 외부 채널·프로토콜·커넥터·entity 가 이름으로 언급되어 있는가?"**
+> **"Does this row name a specific external channel, protocol, connector, or entity?"**
+
+| 답 | 다음 단계 |
+|---|---|
+| YES (외부 채널/entity 언급 있음) | → Step 2 (interface). 행위 동사가 있어도 결과는 **interface**. |
+| NO (외부 채널/entity 언급 전혀 없음) | → Step 3 (non_functional) 또는 Step 4 (functional) 평가 |
+
+이 단순 테스트가 `interface` 와 `functional` 사이의 흔들리는 분류를 결정적으로 만들어줍니다.
+
+This simple test deterministically resolves the wobble between `interface` and `functional`.
+
+#### 8.5.2 Worked Examples (Interface-Priority) / 풀이 예시
+
+| # | 원본 입력 | 분류 | 이유 |
+|---|---|---|---|
+| E1 | "The NAD shall support LTE Band 1, Band 3, Band 7." | **interface** | 채널 사양 명시 (LTE Band). Step 2. |
+| E2 | "The NAD shall report position every 100ms over LTE." | **interface** | 행위 + 외부 채널(LTE) 동시 등장 → ⭐ Overlap → **interface 승리**. Step 2. |
+| E3 | "Bluetooth shall comply with BT 5.0 specification." | **interface** | 외부 표준 명시 (BT 5.0). Step 2. |
+| E4 | "The system shall pair with up to 5 Bluetooth devices." | **interface** | 행위(pair) + 외부 채널(Bluetooth) → ⭐ Overlap → **interface 승리**. Step 2. |
+| E5 | "CAN bus shall operate at 500 kbps." | **interface** | 채널 사양 (CAN + 속도). Step 2. |
+| E6 | "The system shall transmit DTCs over CAN upon request." | **interface** | 행위(transmit) + 외부 채널(CAN) → ⭐ Overlap → **interface 승리**. Step 2. |
+| E7 | "The NAD shall provide UART at 115200 baud, 8N1." | **interface** | 커넥터 사양 (UART + 속도/포맷). Step 2. |
+| E8 | "The NAD shall log boot events to UART for debugging." | **interface** | 행위(log) + 외부 커넥터(UART) → ⭐ Overlap → **interface 승리**. Step 2. |
+| E9 | "The antenna shall achieve VSWR ≤ 1.5 at 1575.42 MHz (GPS L1)." | **non_functional** | 핵심은 정량 메트릭 (VSWR). 행위 동사 없음. Step 3. ※경계 사례 — 1575.42 MHz 는 채널 식별이지만, achieve+VSWR 메트릭이 핵심이고 행위 동사 부재. |
+| E10 | "The system shall comply with ECE R10 for EMC." | **constraint** | 법규 명시. Step 1 (최우선). |
+| E11 | "The system shall encrypt OTA payloads using AES-256." | **non_functional** | 보안 속성 자체 (암호화 알고리즘). 외부 채널 명시 없음 (OTA "payloads" 은 데이터, 채널 아님). Step 3. |
+| E12 | "The system shall download OTA packages from the backend server." | **interface** | 행위(download) + 외부 entity(backend server) → ⭐ Overlap → **interface 승리**. Step 2. |
+| E13 | "The system shall validate firmware integrity before booting." | **functional** | 행위 + 외부 채널 언급 없음. 순수 내부 행위. Step 4. |
+| E14 | "The system shall maintain an internal state machine for power modes." | **functional** | 내부 상태. 외부 entity 없음. Step 4. |
+| E15 | "The system shall calculate position using available satellite data." | **functional** | 내부 계산. 위성 데이터는 입력이지만 채널·프로토콜·entity 명시 없음. Step 4. (참고: 만약 "from GNSS satellites via NMEA over UART" 였다면 interface.) |
+| E16 | "The system shall trigger an internal alert when temperature exceeds 85°C." | **functional** | 내부 트리거. 외부 채널 없음. Step 4. |
+
+#### 8.5.3 Why Interface-Priority? / 왜 Interface 우선인가?
+
+NAD (Network Access Device) 와 같은 통신 장치에서는 거의 모든 요구사항이 외부 채널과 연관됩니다. 이때 분류자(LLM)는 매 런마다 "이 행위는 functional 인가 interface 인가" 를 다시 판단하게 되어 분류가 흔들립니다.
+
+For connectivity devices like NAD (Network Access Device), nearly every requirement involves external channels. The classifier (LLM) re-decides "is this functional or interface" each run, causing classification instability.
+
+**해결책 / Solution**: 두 카테고리가 모두 적용 가능할 때 **무조건 `interface`** 로 결정. 모호함 제거 → 같은 입력 → 같은 카테고리.
+
+When both categories apply, **always choose `interface`**. Ambiguity removed → same input → same category.
+
+#### 8.5.4 What's Left in `functional`? / `functional` 에 남는 것은?
+
+이 규칙 하에서 `functional` 은 다음만을 위한 카테고리:
+
+Under this rule, `functional` is reserved for:
+
+- 순수 내부 계산 (calculate, validate, compute) — 외부 채널 명시 없이
+- 내부 상태 관리 (maintain state, switch mode, manage)
+- 내부 데이터 처리 (process input, sanitize, transform) — 채널 명시 없이
+- 내부 트리거/판정 (trigger internal alert, decide, evaluate) — 채널 명시 없이
+
+`functional` 후보를 만났을 때 마지막 확인: **"이 행에 어떤 외부 채널·프로토콜·entity 도 이름으로 언급되어 있지 않은가?"** YES 라면 `functional`. NO (하나라도 언급) 라면 `interface`.
+
+When considering `functional`, final check: **"Does this row mention NO external channel, protocol, or entity by name?"** YES → `functional`. NO (any mention) → `interface`.
+
+#### 8.5.5 Self-Check Before Assigning Category / 카테고리 할당 전 자가 점검
+
+각 STK_REQ 의 카테고리를 결정하기 전, 내부적으로 다음을 묻습니다 (출력에는 포함하지 않음):
+
+Before assigning each STK_REQ's category, internally answer (do NOT include in output):
+
+1. ☐ Step 1 (constraint): 법규·표준·환경·안전등급·인증 명시 있는가? YES → constraint. NO → 다음.
+2. ☐ Step 2 (interface): 외부 채널·프로토콜·커넥터·entity 가 이름으로 언급되어 있는가? YES → **interface (행위 동사 무시)**. NO → 다음.
+3. ☐ Step 3 (non_functional): 정량 메트릭이 핵심이고 행위 동사가 없는가? YES → non_functional. NO → 다음.
+4. ☐ Step 4 (functional): 외부 채널 언급 전혀 없이 순수 내부 행위만 기술하는가? YES → functional.
+
+자기 검증: 같은 행을 한 번 더 분류한다고 가정. 같은 답이 나오는가? 다르다면 결정 트리를 다시 위에서부터 적용.
+
+Self-check: re-classify the same row mentally. Same answer? If not, re-apply the tree top-down.
+
+---
+
 ## 9. Quality Checklist / 품질 점검표
 
 Before producing output, verify ALL items / 출력 전 모두 확인:
@@ -584,7 +733,11 @@ Before producing output, verify ALL items / 출력 전 모두 확인:
 6. ☐ `source_doc` cites both sheet AND row AND customer item ID (if applicable)
 7. ☐ `statement` follows IEEE 830 pattern with measurable values (or `clarification_needed: true` for preserved vagueness)
 8. ☐ `rationale` is in Korean (preferred)
-9. ☐ `category` matches the requirement nature
+9. ☐ `category` matches the requirement nature per Rule 5
+9a. ☐ ⭐ `category` was assigned by applying the Rule 5 decision tree **top-down** (Section 8.5.5), not by intuition. Re-classifying the same row would yield the same category.
+9b. ☐ ⭐ When the row mentions any external channel/protocol/connector/entity (even alongside an action verb), `category` = `interface` (Interface-Priority rule per Section 8.5.1). `functional` is reserved for rows with NO external channel mention.
+9a. ☐ ⭐ `category` 는 Rule 5 결정 트리(Section 8.5.5)를 **위에서부터 순차** 적용해 결정함. 같은 행을 다시 분류해도 같은 답이 나옴.
+9b. ☐ ⭐ 행에 외부 채널·프로토콜·커넥터·entity 가 언급되면 (행위 동사와 함께라도) `category` = `interface` (Interface-Priority, Section 8.5.1). `functional` 은 외부 채널 언급이 전혀 없는 순수 내부 행위에만 사용.
 10. ☐ Statement does NOT add specifications absent from input
 
 ### 9.2 Coverage checks (across all STK_REQs) / Coverage 확인
@@ -663,6 +816,54 @@ Right: Sheet "Cover Page" matched meta-keyword → excluded from derivation,
 ```
 
 See Section 4.2 for meta-sheet identification.
+
+### ❌ Mistake 7: ⭐ Inconsistent Categorization Between Runs / 런 간 일관되지 않은 카테고리 분류
+
+이번 패치에서 추가된, 가장 중요한 실수 유형입니다. (Phase 2-2f.1 에서 추가)
+
+This is the most important new mistake type added in this patch (Phase 2-2f.1).
+
+**증상 / Symptom**:
+```
+같은 입력 (예: NAD0519 SW + HW 워크시트) → 두 번 생성
+Run 1 결과: interface 72개, functional 54개
+Run 2 결과: interface 23개, functional 103개  ← 같은 행 49개가 두 카테고리 사이에서 뒤집힘
+```
+
+같은 input → 같은 output 이어야 합니다. 카테고리 흔들림은 결정 트리를 적용하지 않았다는 신호.
+
+Same input → same output. Category flips signal that the decision tree was not applied.
+
+**원인 / Cause**:
+- "feel" 기반 분류 (이 행은 functional 같아 / 이 행은 interface 같아 — 매 런마다 다름)
+- Overlap 규칙 무시 — interface 와 functional 둘 다 적용 가능할 때 임의 선택
+
+**올바른 접근 / Correct approach**:
+
+1. Section 8.5.1 의 Channel-Mention Test 를 먼저 적용:
+   "이 행에 외부 채널·프로토콜·entity 가 이름으로 언급되어 있는가?"
+2. YES → **interface** (행위 동사가 있어도). 결정 완료.
+3. NO → Step 3 (non_functional) 또는 Step 4 (functional) 평가.
+
+**Wrong** (직관에 의존):
+```
+Row: "shall transmit DTCs over CAN upon request"
+Run 1 thinking: "transmit 는 행위니까 functional"  → functional
+Run 2 thinking: "CAN 은 외부 채널이니까 interface" → interface  ← 같은 행, 다른 결과!
+```
+
+**Right** (Interface-Priority 결정 트리 적용):
+```
+Row: "shall transmit DTCs over CAN upon request"
+Channel-Mention Test: "CAN" 명시 → YES → Step 2 → interface (확정)
+다시 분류해도: "CAN" 명시 → YES → Step 2 → interface (같은 답)  ✅
+```
+
+분류는 결정 트리에 의한 기계적 판정이지 직관이 아닙니다. 카테고리가 런마다 뒤바뀐다면 결정 트리를 적용하지 않은 것입니다.
+
+Classification is mechanical via decision tree, not intuition. If category flips between runs, the decision tree was not applied.
+
+See Section 8.5 for the full tree, the Interface-Priority overlap rule, and 16 worked examples (E1–E16).
 
 ---
 
@@ -785,11 +986,11 @@ This SKILL is built to meet these expectations. Spec-preservation mode (Section 
 
 ---
 
-## 13. Summary — The Three Pillars / 요약 — 3대 원칙
+## 13. Summary — The Four Pillars / 요약 — 4대 원칙
 
-If you forget everything else, remember these three:
+If you forget everything else, remember these four:
 
-다른 모든 것을 잊더라도 다음 3가지는 기억:
+다른 모든 것을 잊더라도 다음 4가지는 기억:
 
 1. **Spec Preservation (Section 3)** — Every customer input → ≥1 STK_REQ. Ratio 1.0-1.3. No compression ever.
    **스펙 보존** — 모든 고객 입력 → 1개 이상 STK_REQ. 비율 1.0-1.3. 압축 절대 금지.
@@ -800,6 +1001,9 @@ If you forget everything else, remember these three:
 3. **No Domain Inference (Rule 7)** — Do not add specifications from "automotive best practice" if they are not in the customer input. Preserve customer vagueness rather than invent precision.
    **도메인 추론 금지** — "자동차 표준 관례" 라며 고객 입력에 없는 사양 추가 금지. 모호함을 발명된 정밀도로 대체하지 말 것.
 
-These three pillars together ensure the SYS.1 artifact passes ASPICE assessment under the Korean OEM-supplier workflow.
+4. ⭐ **Classification Determinism (Rule 5 + Section 8.5)** — Apply the decision tree top-down: constraint → interface → non_functional → functional. **When `interface` and `functional` overlap, ALWAYS choose `interface`**. Same input → same category every run.
+   **분류 결정성** — 결정 트리를 위에서부터 적용: constraint → interface → non_functional → functional. **`interface` 와 `functional` 이 겹치면 항상 `interface`** 선택. 같은 입력 → 매 런마다 같은 카테고리.
 
-이 3대 원칙이 함께 작동해야 한국 OEM-공급사 워크플로우 하에서 SYS.1 산출물이 ASPICE 평가를 통과합니다.
+These four pillars together ensure the SYS.1 artifact passes ASPICE assessment under the Korean OEM-supplier workflow with reproducible classification.
+
+이 4대 원칙이 함께 작동해야 한국 OEM-공급사 워크플로우 하에서 SYS.1 산출물이 ASPICE 평가를 통과하며, 재현 가능한 분류를 보장합니다.
