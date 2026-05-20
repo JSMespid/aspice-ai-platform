@@ -356,6 +356,494 @@ async function consumeSSEStream(response, onEvent) {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════
+// Phase 2-2g (옵션 G): Chunked Generation Orchestrator
+// ══════════════════════════════════════════════════════════════════
+// 시트 ≥3 케이스에서 사용. Vercel 800s 한도를 피하기 위해 시트를 batch
+// 단위로 쪼개서 init → batch(반복) → merge 시퀀스로 호출.
+//
+// 흐름:
+//   1. work_product.content → 시트 추출 (extractSheetsFromWorkProduct)
+//   2. batchSize 단위로 batches 계산
+//   3. POST /api/generate-init → generation_id
+//   4. 각 batch 마다 (concurrency 단위 wave 로):
+//        POST /api/generate-batch (SSE)
+//        consumeSSEStream + sheet_index→sheet_idx 정규화하여 emit
+//   5. POST /api/generate-merge → 최종 결과 + 가드레일
+//
+// 설계 결정 반영 (인수인계 권장안):
+//   #1 시트 수 분기: 호출 측 (ProcessScreen) 책임 — 이 함수는 ≥3 가정
+//   #2 부분 실패 자동 merge: force_partial=true 항상
+//   #3 Resume v1: 표시만 (이 함수는 신규 시작; resume 은 fetchGenerationStatus 별도)
+//   #4 Cancel 후 부분 결과: 호출 측 책임 — 이 함수는 cancel 감지 시 즉시 종료
+// ──────────────────────────────────────────────────────────────────
+
+/**
+ * Cancel a running generation (cooperative — batches stop at next checkpoint).
+ * @param {string} generationId
+ * @returns {Promise<{success, status, ...}>}
+ */
+export async function cancelGeneration(generationId) {
+  if (!generationId) throw new Error('cancelGeneration: generationId required');
+  const resp = await fetch('/api/generate-cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ generation_id: generationId }),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`generate-cancel ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+  return resp.json();
+}
+
+/**
+ * Fetch current generation status (poll / resume support).
+ * Either `generationId` OR (`projectId` + `workProductId`).
+ * @returns {Promise<object|null>}  null if not found (project+wp pattern, no active)
+ */
+export async function fetchGenerationStatus({ generationId, projectId, workProductId } = {}) {
+  const params = new URLSearchParams();
+  if (generationId) params.set('generation_id', generationId);
+  if (projectId) params.set('project_id', projectId);
+  if (workProductId) params.set('work_product_id', workProductId);
+  if (![...params.keys()].length) {
+    throw new Error('fetchGenerationStatus: provide generationId OR (projectId AND workProductId)');
+  }
+  const resp = await fetch(`/api/generation-status?${params.toString()}`);
+  if (resp.status === 404) return null;
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`generation-status ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  // 패턴 B (project+wp) 에서 master 가 없으면 { generation: null }
+  if (data && data.generation === null) return null;
+  return data;
+}
+
+/**
+ * Extract sheets from work_product.content for chunked generation.
+ *
+ * ⚠️ 이 헬퍼는 wp.content 의 구조에 의존적입니다. legacy api/generate.js
+ *    의 sheetBasedInputs 빌드 로직과 같은 형식을 만들어야 함 (line 913 근처).
+ *
+ * 출력 형식 (api/generate-batch 의 sheets[] 입력과 동일):
+ *   [{ sheet_index, sheet_name, group_name, rows, source_file_name? }, ...]
+ *
+ * 현재 구현은 흔한 형태들을 패턴매칭. 매칭 실패 시 console.warn + 빈 배열 반환.
+ * 통합 테스트 시 wp.content 구조 확인하고 보정 필요.
+ *
+ * @param {object} content  wp.content 객체
+ * @returns {Array}  sheets[]
+ */
+export function extractSheetsFromWorkProduct(content) {
+  if (!content || typeof content !== 'object') {
+    console.warn('[extractSheets] empty/invalid content');
+    return [];
+  }
+
+  // 패턴 1: content.sheets[] 직접 (가장 자연스러움)
+  if (Array.isArray(content.sheets)) {
+    return content.sheets.map((s, i) => ({
+      sheet_index: s.sheet_index ?? s.idx ?? (i + 1),
+      sheet_name: s.sheet_name ?? s.name ?? `Sheet${i + 1}`,
+      group_name: s.group_name ?? s.group ?? null,
+      rows: Array.isArray(s.rows) ? s.rows : [],
+      source_file_name: s.source_file_name ?? s.file_name ?? null,
+    }));
+  }
+
+  // 패턴 2: content 각 itemKey 아래에 spreadsheet 객체
+  //   { customer_request: { sheets: [...] }, ... }
+  const collected = [];
+  let globalIdx = 1;
+  for (const [key, val] of Object.entries(content)) {
+    if (key === 'ai_generated') continue;  // AI 산출물 제외
+    if (val && typeof val === 'object' && Array.isArray(val.sheets)) {
+      for (const s of val.sheets) {
+        collected.push({
+          sheet_index: globalIdx++,
+          sheet_name: s.sheet_name ?? s.name ?? `${key}_${globalIdx}`,
+          group_name: s.group_name ?? s.group ?? key,
+          rows: Array.isArray(s.rows) ? s.rows : [],
+          source_file_name: s.source_file_name ?? val.file_name ?? null,
+        });
+      }
+    }
+  }
+  if (collected.length > 0) return collected;
+
+  console.warn(
+    '[extractSheets] wp.content 에서 시트를 찾지 못했습니다. ' +
+    'content keys:', Object.keys(content),
+    '— extractSheetsFromWorkProduct 의 패턴매칭 보정이 필요할 수 있습니다.'
+  );
+  return [];
+}
+
+/**
+ * Build a chunked plan from a flat sheets[] array.
+ * @returns {{ totalBatches, totalSheets, batches: [{ batch_idx, sheets: [...] }] }}
+ */
+function buildChunkedPlan(sheets, batchSize) {
+  const batches = [];
+  for (let i = 0; i < sheets.length; i += batchSize) {
+    const slice = sheets.slice(i, i + batchSize);
+    batches.push({
+      batch_idx: batches.length + 1,
+      sheets: slice,
+    });
+  }
+  return {
+    totalBatches: batches.length,
+    totalSheets: sheets.length,
+    batches,
+  };
+}
+
+/**
+ * Run one batch via SSE. Emits AgentStep events through `emit`.
+ * Returns { batchIdx, finalPayload, cancelled, failed }.
+ *
+ * sheet_index → sheet_idx 정규화: generate-batch 의 progress 이벤트는 sheet_index
+ * (snake_case 일관성) 를 보내지만 RationalePanel / AgentStep 디테일은 기존 legacy
+ * 와 호환 위해 sheet_idx 로 노출.
+ */
+async function runOneBatch({ generationId, batchIdx, totalBatches, sheets, emit }) {
+  emit(AgentStep.GEN_BATCH_START, {
+    message: `Batch ${batchIdx}/${totalBatches} 시작 — 시트 ${sheets.length}개`,
+    batch_idx: batchIdx,
+    batch_total: totalBatches,
+    sheets_in_batch: sheets.length,
+    sheets_start_idx: sheets[0]?.sheet_index ?? null,
+    sheets_end_idx: sheets[sheets.length - 1]?.sheet_index ?? null,
+    raw: {
+      batch_idx: batchIdx,
+      batch_total: totalBatches,
+      sheets_in_batch: sheets.length,
+      sheets_start_idx: sheets[0]?.sheet_index ?? null,
+      sheets_end_idx: sheets[sheets.length - 1]?.sheet_index ?? null,
+    },
+  });
+
+  let resp;
+  try {
+    resp = await fetch('/api/generate-batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify({ generation_id: generationId, batch_idx: batchIdx, sheets }),
+    });
+  } catch (e) {
+    emit(AgentStep.GEN_SHEET_FAILED, {
+      message: `Batch ${batchIdx} 네트워크 오류: ${e.message}`,
+      error: e.message,
+    });
+    return { batchIdx, cancelled: false, failed: true, error: e.message };
+  }
+
+  if (!resp.ok) {
+    const errText = await resp.text();
+    emit(AgentStep.GEN_SHEET_FAILED, {
+      message: `Batch ${batchIdx} API 오류 ${resp.status}: ${errText.slice(0, 200)}`,
+      error: errText.slice(0, 500),
+    });
+    return { batchIdx, cancelled: false, failed: true, error: errText };
+  }
+
+  const contentType = String(resp.headers.get('content-type') || '').toLowerCase();
+  const isSSE = contentType.includes('text/event-stream');
+
+  let finalPayload = null;
+  let cancelled = false;
+
+  if (isSSE) {
+    try {
+      finalPayload = await consumeSSEStream(resp, (eventType, payload) => {
+        if (eventType === 'started' || eventType === 'ping') return undefined;
+
+        if (eventType === 'progress') {
+          const step = payload.step;
+          const sheetIdx = payload.sheet_index;  // generate-batch 는 sheet_index 사용
+          const rawNormalized = { ...payload, sheet_idx: sheetIdx };
+
+          if (step === 'sheet_start') {
+            emit(AgentStep.GEN_SHEET_START, {
+              message: payload.message,
+              sheet_idx: sheetIdx,
+              sheet_name: payload.sheet_name,
+              sheet_group: payload.sheet_group,
+              raw: rawNormalized,
+            });
+          } else if (step === 'sheet_done') {
+            emit(AgentStep.GEN_SHEET_DONE, {
+              message: payload.message,
+              sheet_idx: sheetIdx,
+              sheet_name: payload.sheet_name,
+              sheet_group: payload.sheet_group,
+              stk_count: payload.stk_count,
+              cache_hit: payload.cache_hit,
+              latency_ms: payload.latency_ms,
+              cost_usd: payload.cost_usd,
+              raw: rawNormalized,
+            });
+          } else if (step === 'sheet_failed') {
+            emit(AgentStep.GEN_SHEET_FAILED, {
+              message: payload.message,
+              sheet_idx: sheetIdx,
+              sheet_name: payload.sheet_name,
+              error: payload.error,
+              raw: rawNormalized,
+            });
+          } else {
+            // 일반 progress
+            emit(AgentStep.GEN_GENERATING, {
+              message: payload.message || step,
+              raw: rawNormalized,
+            });
+          }
+        } else if (eventType === 'sheet_cancelled') {
+          cancelled = true;
+          emit(AgentStep.GEN_SHEET_FAILED, {
+            message: payload.message || `시트 ${payload.sheet_index} 취소됨`,
+            sheet_idx: payload.sheet_index,
+            sheet_name: payload.sheet_name,
+            error: 'cancelled',
+            raw: { ...payload, sheet_idx: payload.sheet_index },
+          });
+        } else if (eventType === 'batch_cancelled') {
+          cancelled = true;
+          return payload;  // batch_cancelled 도 finalPayload 후보
+        } else if (eventType === 'batch_complete') {
+          return payload;
+        } else if (eventType === 'circuit_breaker_paused') {
+          emit(AgentStep.GEN_FAILED, {
+            message: `Circuit breaker 작동: ${payload.message || '연속 batch 실패'}`,
+            raw: payload,
+          });
+        } else if (eventType === 'error') {
+          throw new Error(payload.error || 'Batch streaming error');
+        }
+        return undefined;
+      });
+    } catch (e) {
+      console.error('[harness:gen:chunked] batch SSE error:', e);
+      emit(AgentStep.GEN_SHEET_FAILED, {
+        message: `Batch ${batchIdx} 스트리밍 오류: ${e.message}`,
+        error: e.message,
+      });
+      return { batchIdx, cancelled, failed: true, error: e.message };
+    }
+  } else {
+    finalPayload = await resp.json();
+  }
+
+  const succeeded = finalPayload?.succeeded ?? 0;
+  const failed = finalPayload?.failed ?? 0;
+
+  emit(AgentStep.GEN_BATCH_DONE, {
+    message: `Batch ${batchIdx}/${totalBatches} 완료${cancelled ? ' (취소됨)' : ''} — 성공 ${succeeded}, 실패 ${failed}`,
+    batch_idx: batchIdx,
+    batch_total: totalBatches,
+    batch_succeeded: succeeded,
+    batch_failed: failed,
+    batch_duration_ms: finalPayload?.duration_ms ?? null,
+    raw: finalPayload,
+  });
+
+  return { batchIdx, cancelled, finalPayload };
+}
+
+/**
+ * Run a chunked Generator for ≥3-sheet work_products.
+ *
+ * @param {object} args
+ * @param {string} args.projectId
+ * @param {string} args.processId
+ * @param {string} args.workProductId
+ * @param {Array}  args.sheets        — required. 추출 책임은 호출 측 (또는 extractSheetsFromWorkProduct).
+ * @param {number} [args.batchSize=2]
+ * @param {number} [args.concurrency=2]
+ * @param {function} [args.onProgress]
+ * @param {function} [args.onGenerationId]  — generation_id 받자마자 호출 (취소 버튼 활성화용)
+ * @returns {Promise<{generator, passed, blockedAt?, cancelled?, generation_id}>}
+ */
+export async function runGeneratorChunked({
+  projectId, processId, workProductId,
+  sheets, batchSize = 2, concurrency = 2,
+  onProgress, onGenerationId,
+}) {
+  const emit = (step, detail) => {
+    console.log('[harness:gen:chunked]', step, detail?.message || '');
+    if (onProgress) onProgress(step, detail);
+  };
+
+  if (!Array.isArray(sheets) || sheets.length === 0) {
+    emit(AgentStep.GEN_FAILED, { message: 'sheets 배열이 비어 있습니다 (chunked 경로는 ≥1 시트 필요).' });
+    throw new Error('runGeneratorChunked: sheets[] required');
+  }
+
+  emit(AgentStep.GEN_PREPARING, { message: 'Chunked 모드 — batch plan 작성 중' });
+
+  // ── 1. plan 작성 ──
+  const plan = buildChunkedPlan(sheets, batchSize);
+  const { totalBatches, totalSheets, batches } = plan;
+
+  emit(AgentStep.GEN_BATCH_PLAN, {
+    message: `Chunked 모드: ${totalBatches} 배치 × 최대 ${batchSize} 시트, 동시 ${concurrency}`,
+    batch_size: batchSize,
+    total_batches: totalBatches,
+    total_sheets: totalSheets,
+    raw: {
+      batch_size: batchSize,
+      total_batches: totalBatches,
+      total_sheets: totalSheets,
+      sheets: sheets.map(s => ({
+        idx: s.sheet_index,
+        name: s.sheet_name,
+        group: s.group_name,
+      })),
+    },
+  });
+
+  // ── 2. /api/generate-init ──
+  let initResult;
+  try {
+    const initResp = await fetch('/api/generate-init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        project_id: projectId,
+        process_id: processId,
+        work_product_id: workProductId,
+        plan: {
+          batch_size: batchSize,
+          concurrency,
+          batches: batches.map(b => ({
+            batch_idx: b.batch_idx,
+            sheet_indices: b.sheets.map(s => s.sheet_index),
+            sheet_names: b.sheets.map(s => s.sheet_name),
+          })),
+        },
+      }),
+    });
+    if (!initResp.ok) {
+      const errText = await initResp.text();
+      throw new Error(`generate-init ${initResp.status}: ${errText.slice(0, 500)}`);
+    }
+    initResult = await initResp.json();
+  } catch (e) {
+    console.error('[harness:gen:chunked] init error:', e);
+    emit(AgentStep.GEN_FAILED, { message: `초기화 실패: ${e.message}` });
+    throw e;
+  }
+
+  const generationId = initResult.generation_id;
+  if (onGenerationId) onGenerationId(generationId);
+  console.log('[harness:gen:chunked] generation_id:', generationId);
+
+  emit(AgentStep.GEN_GENERATING, {
+    message: `${totalBatches}개 배치 처리 시작 — 시트 ${totalSheets}개, 예상 비용 ~$${(initResult.estimated_cost_usd || 0).toFixed(2)}`,
+    generation_id: generationId,
+    estimated_cost_usd: initResult.estimated_cost_usd,
+  });
+
+  // ── 3. batch 실행 (concurrency wave 단위) ──
+  let anyCancelled = false;
+  for (let waveStart = 0; waveStart < batches.length; waveStart += concurrency) {
+    const wave = batches.slice(waveStart, waveStart + concurrency);
+    const waveResults = await Promise.all(
+      wave.map(b => runOneBatch({
+        generationId,
+        batchIdx: b.batch_idx,
+        totalBatches,
+        sheets: b.sheets,
+        emit,
+      }))
+    );
+    if (waveResults.some(r => r.cancelled)) {
+      anyCancelled = true;
+      break;  // 한 batch 라도 cancel → 다음 wave 진행 중단
+    }
+  }
+
+  // ── 4. cancel 시 종료 (merge 시도하지 않음 — 호출 측이 부분 저장 결정) ──
+  if (anyCancelled) {
+    emit(AgentStep.GEN_FAILED, {
+      message: '취소되었습니다. 부분 결과 보존 여부는 [부분 저장] / [모두 폐기] 버튼으로 결정하세요.',
+      cancelled: true,
+      generation_id: generationId,
+    });
+    return {
+      generator: null,
+      passed: false,
+      cancelled: true,
+      generation_id: generationId,
+    };
+  }
+
+  // ── 5. /api/generate-merge ──
+  emit(AgentStep.GEN_MERGING, { message: '병합 및 가드레일 검증 중' });
+
+  let mergeResult;
+  try {
+    const mergeResp = await fetch('/api/generate-merge', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        generation_id: generationId,
+        // 결정 #2 (인수인계 권장): 부분 실패 자동 merge 허용
+        force_partial: true,
+      }),
+    });
+    if (!mergeResp.ok) {
+      const errText = await mergeResp.text();
+      throw new Error(`generate-merge ${mergeResp.status}: ${errText.slice(0, 500)}`);
+    }
+    mergeResult = await mergeResp.json();
+  } catch (e) {
+    console.error('[harness:gen:chunked] merge error:', e);
+    emit(AgentStep.GEN_FAILED, { message: `병합 실패: ${e.message}` });
+    throw e;
+  }
+
+  console.log('[harness:gen:chunked] merge result keys:', mergeResult ? Object.keys(mergeResult) : null);
+
+  // ── 6. 결과 처리 ──
+  const passed = (
+    mergeResult.guardrail_passed === true ||
+    mergeResult.guardrail_result?.passed === true ||
+    (mergeResult.success === true && !mergeResult.error)
+  );
+
+  if (!passed) {
+    const failedAxes = mergeResult.guardrail_result?.failed_axes
+                    || mergeResult.guardrail_result?.failed
+                    || [];
+    emit(AgentStep.GEN_BLOCKED, {
+      message: `구조/추적성/도메인 가드레일 차단${failedAxes.length ? ': ' + failedAxes.join(', ') : ''}`,
+      result: mergeResult,
+    });
+    return {
+      generator: mergeResult,
+      passed: false,
+      blockedAt: 'guardrail_1_2_3',
+      generation_id: generationId,
+    };
+  }
+
+  emit(AgentStep.GEN_COMPLETED, {
+    message: '생성 완료. 산출물 검토 후 [🔍 QA 검토 시작] 진행 가능.',
+    result: mergeResult,
+  });
+
+  return {
+    generator: mergeResult,
+    passed: true,
+    generation_id: generationId,
+  };
+}
+
 // ──────────────────────────────────────────────────
 // Phase 2: Evaluator (Gemini)
 // ──────────────────────────────────────────────────
