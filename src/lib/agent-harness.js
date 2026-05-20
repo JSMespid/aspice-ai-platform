@@ -425,17 +425,33 @@ export async function fetchGenerationStatus({ generationId, projectId, workProdu
 /**
  * Extract sheets from work_product.content for chunked generation.
  *
- * ⚠️ 이 헬퍼는 wp.content 의 구조에 의존적입니다. legacy api/generate.js
- *    의 sheetBasedInputs 빌드 로직과 같은 형식을 만들어야 함 (line 913 근처).
+ * legacy api/generate.js 의 `sheetBasedInputs` 빌드 (line 913 근처) 와
+ * 동일한 로직. wp.content 구조:
  *
- * 출력 형식 (api/generate-batch 의 sheets[] 입력과 동일):
- *   [{ sheet_index, sheet_name, group_name, rows, source_file_name? }, ...]
+ *   wp.content = {
+ *     [itemKey]: {
+ *       source_type: 'excel_multi_sheet',  // ← 필수 마커
+ *       fileName: 'xxx.xlsx',
+ *       sheets: [
+ *         { sheet_name, group_name, columns, rows, selected, is_meta, ... },
+ *         ...
+ *       ],
+ *     },
+ *     ai_generated: {...},  // AI 산출물 (제외)
+ *   }
  *
- * 현재 구현은 흔한 형태들을 패턴매칭. 매칭 실패 시 console.warn + 빈 배열 반환.
- * 통합 테스트 시 wp.content 구조 확인하고 보정 필요.
+ * 추출 규칙 (legacy 동일):
+ *   - source_type === 'excel_multi_sheet' 인 itemKey 만 처리
+ *   - sheets[] 가 array 일 때만
+ *   - 각 sheet 는 selected === true && is_meta !== true 만 (사용자 선택분)
+ *   - sheet_index 는 글로벌 순서 (여러 itemKey 에 걸쳐 1, 2, 3, ...)
+ *
+ * 출력은 generate-batch 의 sheets[] 입력 그대로 사용 가능 (legacy 의
+ * buildSheetUserPrompt 가 generate-batch 에서도 사용되므로 sheet 객체의
+ * 모든 필드를 통과시킨다).
  *
  * @param {object} content  wp.content 객체
- * @returns {Array}  sheets[]
+ * @returns {Array}  [{ sheet_index, sheet_name, group_name, columns, rows, ... }]
  */
 export function extractSheetsFromWorkProduct(content) {
   if (!content || typeof content !== 'object') {
@@ -443,43 +459,43 @@ export function extractSheetsFromWorkProduct(content) {
     return [];
   }
 
-  // 패턴 1: content.sheets[] 직접 (가장 자연스러움)
-  if (Array.isArray(content.sheets)) {
-    return content.sheets.map((s, i) => ({
-      sheet_index: s.sheet_index ?? s.idx ?? (i + 1),
-      sheet_name: s.sheet_name ?? s.name ?? `Sheet${i + 1}`,
-      group_name: s.group_name ?? s.group ?? null,
-      rows: Array.isArray(s.rows) ? s.rows : [],
-      source_file_name: s.source_file_name ?? s.file_name ?? null,
-    }));
-  }
-
-  // 패턴 2: content 각 itemKey 아래에 spreadsheet 객체
-  //   { customer_request: { sheets: [...] }, ... }
-  const collected = [];
+  const sheets = [];
   let globalIdx = 1;
-  for (const [key, val] of Object.entries(content)) {
-    if (key === 'ai_generated') continue;  // AI 산출물 제외
-    if (val && typeof val === 'object' && Array.isArray(val.sheets)) {
-      for (const s of val.sheets) {
-        collected.push({
-          sheet_index: globalIdx++,
-          sheet_name: s.sheet_name ?? s.name ?? `${key}_${globalIdx}`,
-          group_name: s.group_name ?? s.group ?? key,
-          rows: Array.isArray(s.rows) ? s.rows : [],
-          source_file_name: s.source_file_name ?? val.file_name ?? null,
-        });
-      }
+
+  for (const [key, value] of Object.entries(content)) {
+    if (value?.source_type !== 'excel_multi_sheet') continue;
+    if (!Array.isArray(value.sheets)) continue;
+
+    for (const sheet of value.sheets) {
+      // legacy 와 동일한 필터: selected 시트, 메타 시트 제외
+      if (!sheet.selected) continue;
+      if (sheet.is_meta) continue;
+
+      sheets.push({
+        // legacy 의 sheet 객체 그대로 통과 (buildSheetUserPrompt 호환)
+        ...sheet,
+        // 글로벌 인덱스 (여러 itemKey 에 걸쳐 1, 2, 3, ...)
+        sheet_index: globalIdx++,
+        // 추적성: itemKey 와 fileName 보존 (legacy sheetBasedInputs 와 동일 정보)
+        source_file_name: value.fileName || sheet.source_file_name || null,
+        _item_key: key,  // 디버그/추적용 — backend 가 무시해도 무해
+      });
     }
   }
-  if (collected.length > 0) return collected;
 
-  console.warn(
-    '[extractSheets] wp.content 에서 시트를 찾지 못했습니다. ' +
-    'content keys:', Object.keys(content),
-    '— extractSheetsFromWorkProduct 의 패턴매칭 보정이 필요할 수 있습니다.'
-  );
-  return [];
+  if (sheets.length === 0) {
+    console.warn(
+      '[extractSheets] excel_multi_sheet 시트를 찾지 못했습니다. ' +
+      'content keys:', Object.keys(content),
+      '— 입력 항목이 register 되었는지 확인하세요.'
+    );
+  } else {
+    console.log(`[extractSheets] ${sheets.length} 시트 추출:`,
+      sheets.map(s => `${s.sheet_index}: ${s.sheet_name} (${s._item_key})`).join(', ')
+    );
+  }
+
+  return sheets;
 }
 
 /**
