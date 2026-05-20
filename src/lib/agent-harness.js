@@ -654,20 +654,23 @@ async function runOneBatch({ generationId, batchIdx, totalBatches, sheets, emit 
     finalPayload = await resp.json();
   }
 
-  const succeeded = finalPayload?.succeeded ?? 0;
-  const failed = finalPayload?.failed ?? 0;
+  const succeeded = finalPayload?.sheets_succeeded ?? 0;
+  const failed = finalPayload?.sheets_failed ?? 0;
+  const cancelledCount = finalPayload?.sheets_cancelled ?? 0;
+  const batchDurationMs = finalPayload?.batch_duration_ms ?? null;
 
   emit(AgentStep.GEN_BATCH_DONE, {
-    message: `Batch ${batchIdx}/${totalBatches} 완료${cancelled ? ' (취소됨)' : ''} — 성공 ${succeeded}, 실패 ${failed}`,
+    message: `Batch ${batchIdx}/${totalBatches} 완료${cancelled ? ' (취소됨)' : ''} — 성공 ${succeeded}, 실패 ${failed}${cancelledCount ? `, 취소 ${cancelledCount}` : ''}`,
     batch_idx: batchIdx,
     batch_total: totalBatches,
     batch_succeeded: succeeded,
     batch_failed: failed,
-    batch_duration_ms: finalPayload?.duration_ms ?? null,
+    batch_cancelled: cancelledCount,
+    batch_duration_ms: batchDurationMs,
     raw: finalPayload,
   });
 
-  return { batchIdx, cancelled, finalPayload };
+  return { batchIdx, cancelled, finalPayload, succeeded, failed };
 }
 
 /**
@@ -825,17 +828,35 @@ export async function runGeneratorChunked({
 
   console.log('[harness:gen:chunked] merge result keys:', mergeResult ? Object.keys(mergeResult) : null);
 
-  // ── 6. 결과 처리 ──
-  const passed = (
+  // ── 6. 가드레일 결과 emit (RationalePanel 의 HOOKED → PASSED/FAILED 전환용) ──
+  // merge endpoint 가 SSE 가 아니므로 guardrail_running/done 이벤트가 없다.
+  // 결과만 한 번 GEN_VALIDATING 으로 emit 해서 패널이 표시할 수 있게 함.
+  const gr = mergeResult.guardrail_result;
+  if (gr) {
+    emit(AgentStep.GEN_VALIDATING, {
+      message: gr.passed
+        ? `5축 가드레일 통과 (1·2·3축 PASS)`
+        : `5축 가드레일 차단${gr.failed_axes?.length ? ': ' + gr.failed_axes.join(', ') : ''}`,
+      passed: gr.passed,
+      failed_axes: gr.failed_axes || gr.failed || [],
+      guardrail_result: gr,
+      raw: { step: 'guardrail_done', ...gr },
+    });
+  }
+
+  // ── 7. 결과 분류 ──
+  //   가드레일 FAIL → GEN_BLOCKED (사용자에게 명확한 차단 표시)
+  //   가드레일 PASS + 전체 batch success → GEN_COMPLETED (이상적 완료)
+  //   가드레일 PASS + 일부 batch 실패/취소 → GEN_COMPLETED + partial 경고
+  //                                          (산출물은 저장되지만 일부 누락)
+  const guardrailPassed = (
+    gr?.passed === true ||
     mergeResult.guardrail_passed === true ||
-    mergeResult.guardrail_result?.passed === true ||
-    (mergeResult.success === true && !mergeResult.error)
+    (mergeResult.success === true && !mergeResult.error && gr == null)
   );
 
-  if (!passed) {
-    const failedAxes = mergeResult.guardrail_result?.failed_axes
-                    || mergeResult.guardrail_result?.failed
-                    || [];
+  if (!guardrailPassed) {
+    const failedAxes = gr?.failed_axes || gr?.failed || [];
     emit(AgentStep.GEN_BLOCKED, {
       message: `구조/추적성/도메인 가드레일 차단${failedAxes.length ? ': ' + failedAxes.join(', ') : ''}`,
       result: mergeResult,
@@ -844,6 +865,41 @@ export async function runGeneratorChunked({
       generator: mergeResult,
       passed: false,
       blockedAt: 'guardrail_1_2_3',
+      generation_id: generationId,
+    };
+  }
+
+  // partial 케이스 — backend status='partial' 또는 is_partial=true 또는
+  //                 일부 batch 가 실패/취소인 경우
+  const isPartial = (
+    mergeResult.status === 'partial' ||
+    mergeResult.is_partial === true ||
+    (mergeResult.failed_batches > 0) ||
+    (mergeResult.cancelled_batches > 0)
+  );
+
+  if (isPartial) {
+    const succeeded = mergeResult.successful_batches ?? 0;
+    const failed = mergeResult.failed_batches ?? 0;
+    const cancelledN = mergeResult.cancelled_batches ?? 0;
+    const total = mergeResult.total_batches ?? 0;
+    emit(AgentStep.GEN_COMPLETED, {
+      message:
+        `⚠️ 부분 완료 — ${total} batch 중 ${succeeded} 성공` +
+        `${failed > 0 ? `, ${failed} 실패` : ''}` +
+        `${cancelledN > 0 ? `, ${cancelledN} 취소` : ''}` +
+        `. 누락된 시트는 다시 [⚡ AI 생성] 으로 재시도 가능합니다.`,
+      partial: true,
+      successful_batches: succeeded,
+      failed_batches: failed,
+      cancelled_batches: cancelledN,
+      total_batches: total,
+      result: mergeResult,
+    });
+    return {
+      generator: mergeResult,
+      passed: true,
+      partial: true,
       generation_id: generationId,
     };
   }
