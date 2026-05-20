@@ -109,6 +109,15 @@ export async function runGenerator({ projectId, processId, workProductId, onProg
           console.log('[harness:gen] backend started at', payload.ts);
           return;
         }
+        if (eventType === 'ping') {
+          // Phase 2-2f: SSE Keep-alive ping (25초마다) — Vercel proxy 침묵 타임아웃 방지용
+          // UI 영향 없음, 디버그 로그만 (개발 중 검증용; 향후 verbose 플래그로 가릴 수 있음)
+          if (payload.seq % 4 === 1) {
+            // 매 4번째(=100초)마다 한 번만 로그 — 콘솔 노이즈 최소화
+            console.log('[harness:gen] keep-alive ping seq', payload.seq, '(connection alive)');
+          }
+          return;
+        }
         if (eventType === 'progress') {
           const step = payload.step;
           // sheet_* 이벤트는 별도 AgentStep으로 표시
