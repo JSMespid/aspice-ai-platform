@@ -19,10 +19,25 @@ import WorkProductDirectInputModal from "../components/WorkProductDirectInputMod
 import RationalePanel from "../components/RationalePanel.jsx";
 import GeneratedArtifactView from "../components/GeneratedArtifactView.jsx";
 import StkReqEditModal from "../components/StkReqEditModal.jsx";
-import { runGenerator, runEvaluator, AgentStep, isBusy } from "../lib/agent-harness.js";
+import {
+  runGenerator,
+  runGeneratorChunked,
+  runEvaluator,
+  cancelGeneration,
+  fetchGenerationStatus,
+  extractSheetsFromWorkProduct,
+  AgentStep,
+  isBusy,
+} from "../lib/agent-harness.js";
 
 // AI 생성 지원 프로세스 (Phase 2-2a 는 SYS.1만)
 const AI_GENERATE_SUPPORTED = new Set(["SYS.1"]);
+
+// Phase 2-2g (옵션 G): 시트 수에 따라 legacy / chunked 경로 분기
+// 결정 #1 (인수인계 권장): 시트 ≥3 chunked, ≤2 legacy
+const CHUNKED_THRESHOLD = 3;
+const CHUNKED_BATCH_SIZE = 2;
+const CHUNKED_CONCURRENCY = 2;
 
 async function apiCall(path, method = "GET", body = null) {
   const res = await fetch(path, {
@@ -56,6 +71,14 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   const [generating, setGenerating] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
 
+  // Phase 2-2g (옵션 G): chunked generation state
+  // - chunkedGenerationId: 진행 중 chunked 작업의 generation_id (cancel 버튼 활성화 + resume 표시용)
+  // - cancelling: cancel 요청 진행 중 (중복 클릭 방지)
+  // - resumeInfo: mount 시 활성 작업 감지하면 표시 (결정 #3 v1: 표시만)
+  const [chunkedGenerationId, setChunkedGenerationId] = useState(null);
+  const [cancelling, setCancelling] = useState(false);
+  const [resumeInfo, setResumeInfo] = useState(null);
+
   useEffect(() => {
     setState(wp?.state || "INITIAL");
   }, [wp?.state]);
@@ -63,6 +86,37 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   useEffect(() => {
     if (onStateChange) onStateChange(state);
   }, [state, onStateChange]);
+
+  // Phase 2-2g: mount 시 활성 chunked generation 감지 (Resume v1 — 표시만)
+  // 페이지 reload / 다른 탭에서 시작한 작업이 진행 중일 때 사용자에게 알림.
+  // v1 정책: 자동 재시도하지 않음. 사용자가 진행 보기 / 취소 결정.
+  useEffect(() => {
+    if (!project?.id || !wp?.id || !AI_GENERATE_SUPPORTED.has(processId)) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const status = await fetchGenerationStatus({
+          projectId: project.id,
+          workProductId: wp.id,
+        });
+        if (cancelled || !status) return;
+        // 활성 상태만 (queued / running / cancelling) 표시
+        if (['queued', 'running', 'cancelling'].includes(status.status)) {
+          setResumeInfo({
+            generationId: status.generation_id,
+            status: status.status,
+            progress: status.progress,
+            cost: status.cost,
+            startedAt: status.started_at,
+          });
+        }
+      } catch (e) {
+        // 조용한 실패 — Resume 은 보너스 기능이라 에러 시 무시
+        console.warn('[ProcessScreen] resume detect failed:', e.message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [project?.id, wp?.id, processId]);
 
   const deps = getPreviousProcessIds(processId);
   const missingDeps = deps.filter(depId => {
@@ -142,6 +196,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   }
 
   // ── AI 생성 핸들러 (Phase 2-2b STEP C-2: Generator만) ──
+  // Phase 2-2g 옵션 G: 시트 수 ≥3 → chunked, ≤2 → legacy
   async function handleAIGenerate() {
     if (!wp) {
       alert("입력값을 먼저 저장하세요.");
@@ -152,23 +207,54 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
       return;
     }
 
+    // 시트 추출 + 경로 분기
+    const sheets = extractSheetsFromWorkProduct(wp.content);
+    const useChunked = sheets.length >= CHUNKED_THRESHOLD;
+    console.log(
+      `[ProcessScreen] AI 생성 시작 — 시트 ${sheets.length}개, ` +
+      `경로: ${useChunked ? 'chunked (옵션 G)' : 'legacy /api/generate'}`
+    );
+
     // 패널 열고 진행 시작
     setPanelOpen(true);
     setAgentResult(null);
     setAgentStep(AgentStep.GEN_PREPARING);
-    setAgentDetail({ message: '시작 중...' });
+    setAgentDetail({
+      message: useChunked
+        ? `Chunked 모드 — 시트 ${sheets.length}개 시작 중...`
+        : '시작 중...',
+    });
     setGenerating(true);
+    setChunkedGenerationId(null);
+    setResumeInfo(null);  // 새 작업 시작 시 resume 알림 해제
 
     try {
-      const result = await runGenerator({
-        projectId: project.id,
-        processId,
-        workProductId: wp.id,
-        onProgress: (step, detail) => {
-          setAgentStep(step);
-          setAgentDetail(detail);
-        },
-      });
+      let result;
+      if (useChunked) {
+        result = await runGeneratorChunked({
+          projectId: project.id,
+          processId,
+          workProductId: wp.id,
+          sheets,
+          batchSize: CHUNKED_BATCH_SIZE,
+          concurrency: CHUNKED_CONCURRENCY,
+          onGenerationId: (gid) => setChunkedGenerationId(gid),
+          onProgress: (step, detail) => {
+            setAgentStep(step);
+            setAgentDetail(detail);
+          },
+        });
+      } else {
+        result = await runGenerator({
+          projectId: project.id,
+          processId,
+          workProductId: wp.id,
+          onProgress: (step, detail) => {
+            setAgentStep(step);
+            setAgentDetail(detail);
+          },
+        });
+      }
       // agentResult 에 Generator 결과만 저장 (Evaluator 는 별도 트리거)
       setAgentResult({ generator: result.generator, evaluator: null });
 
@@ -179,6 +265,30 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
       setAgentDetail({ message: `오류: ${e.message}` });
     }
     setGenerating(false);
+    setChunkedGenerationId(null);  // 종료 시 cancel 버튼 비활성
+  }
+
+  // ── Cancel 핸들러 (Phase 2-2g 옵션 G) ──
+  // Cooperative cancellation: cancel 요청은 즉시, 실제 batch 종료는 다음 체크포인트.
+  // runGeneratorChunked 의 batch loop 이 cancel 감지 → 자체 종료 → 위 try/catch 흐름.
+  async function handleCancelGeneration() {
+    if (!chunkedGenerationId || cancelling) return;
+    if (!window.confirm('진행 중인 AI 생성을 취소합니다. 부분 결과는 보존되며, 다음 단계에서 [부분 저장] / [모두 폐기] 선택 가능합니다.\n\n계속할까요?')) {
+      return;
+    }
+    setCancelling(true);
+    setAgentDetail({
+      message: '취소 중... 진행 중인 batch 가 다음 체크포인트에서 종료됩니다 (보통 5분 이내).',
+    });
+    try {
+      const result = await cancelGeneration(chunkedGenerationId);
+      console.log('[ProcessScreen] cancel result:', result);
+    } catch (e) {
+      console.error('[ProcessScreen] cancel failed:', e);
+      setAgentDetail({ message: `취소 요청 실패: ${e.message}` });
+    } finally {
+      setCancelling(false);
+    }
   }
 
   // ── QA 검토 핸들러 (Phase 2-2b STEP C-2: Evaluator만, 사용자 명시 트리거) ──
@@ -379,6 +489,93 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      {/* ── Phase 2-2g 옵션 G: 활성 chunked 작업 감지 알림 (Resume v1) ── */}
+      {/*
+        다른 탭 / 페이지 reload 등으로 진행 중인 작업이 있을 때 표시.
+        v1 정책: 자동 재연결 X, 사용자가 [상태 보기] 또는 [취소] 결정.
+        새 generation 시작 (handleAIGenerate) 시 resumeInfo 는 자동 해제.
+      */}
+      {resumeInfo && !generating && (
+        <div style={{
+          marginBottom: 16, padding: "12px 16px",
+          background: "#fef9c3",
+          border: "1px solid #fde047",
+          borderRadius: 8,
+          display: "flex", alignItems: "center", gap: 12,
+          fontSize: 13,
+        }}>
+          <span style={{ flex: 1 }}>
+            ⏳ <strong>진행 중인 AI 생성</strong>이 있습니다 — 배치{" "}
+            {resumeInfo.progress?.completed_batches ?? 0}/
+            {resumeInfo.progress?.total_batches ?? "?"} 완료 (
+            {resumeInfo.progress?.percent ?? 0}%) · 누적 비용 $
+            {(resumeInfo.cost?.cost_so_far_usd ?? 0).toFixed(2)}
+          </span>
+          <button
+            onClick={async () => {
+              try {
+                const status = await fetchGenerationStatus({
+                  generationId: resumeInfo.generationId,
+                });
+                if (!status) {
+                  alert("이미 종료된 작업입니다.");
+                  setResumeInfo(null);
+                  return;
+                }
+                alert(
+                  `상태: ${status.status}\n` +
+                  `진행률: ${status.progress?.percent ?? 0}% ` +
+                  `(완료 ${status.progress?.completed_batches ?? 0}, ` +
+                  `실패 ${status.progress?.failed_batches ?? 0}, ` +
+                  `진행중 ${status.progress?.running_batches ?? 0})\n` +
+                  `누적 비용: $${(status.cost?.cost_so_far_usd ?? 0).toFixed(4)}\n` +
+                  `예상 잔여: ${
+                    status.eta?.estimated_remaining_ms != null
+                      ? Math.round(status.eta.estimated_remaining_ms / 1000) + "초"
+                      : "계산 불가"
+                  }\n\n` +
+                  `(v1: 실시간 SSE 재연결은 미구현. polling 형태 상태 조회만 제공.)`
+                );
+              } catch (e) {
+                alert(`상태 조회 실패: ${e.message}`);
+              }
+            }}
+            style={{
+              background: "#fff",
+              border: "1px solid var(--c-navy-deep)",
+              color: "var(--c-navy-deep)",
+              borderRadius: 6,
+              padding: "6px 10px",
+              fontSize: 12, fontWeight: 600,
+              cursor: "pointer",
+            }}>
+            상태 보기
+          </button>
+          <button
+            onClick={async () => {
+              if (!window.confirm("진행 중인 AI 생성을 취소합니다. 부분 결과는 보존됩니다.")) return;
+              try {
+                await cancelGeneration(resumeInfo.generationId);
+                setResumeInfo(null);
+                alert("취소 요청을 보냈습니다. batch 가 다음 체크포인트에서 종료됩니다.");
+              } catch (e) {
+                alert(`취소 실패: ${e.message}`);
+              }
+            }}
+            style={{
+              background: "#fef2f2",
+              border: "1px solid #fca5a5",
+              color: "#b91c1c",
+              borderRadius: 6,
+              padding: "6px 10px",
+              fontSize: 12, fontWeight: 600,
+              cursor: "pointer",
+            }}>
+            ⛔ 취소
+          </button>
+        </div>
+      )}
+
       {/* ── 프로세스 헤더 ────────────────────────── */}
       <div style={{
         background: "#fff",
@@ -644,6 +841,10 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         step={agentStep}
         detail={agentDetail}
         result={agentResult}
+        // Phase 2-2g 옵션 G: chunked generation 진행 중일 때만 cancel 버튼 표시
+        cancellable={!!chunkedGenerationId && generating}
+        onCancel={handleCancelGeneration}
+        cancelling={cancelling}
       />
     </div>
   );
