@@ -49,6 +49,14 @@ const SHEETS_PER_BATCH_MAX = 4;  // 안전장치 — Anthropic Tier 1 한도 보
 const CIRCUIT_BREAKER_THRESHOLD = 2;  // 연속 2 batch 실패 시 paused
 
 // ──────────────────────────────────────────────────
+// UUID 형식 검증
+// ──────────────────────────────────────────────────
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUUID(s) {
+  return typeof s === 'string' && UUID_RE.test(s);
+}
+
+// ──────────────────────────────────────────────────
 // Cancel flag 확인 (DB hot path)
 // 마이그레이션에서 만든 is_generation_cancelled() 함수 사용
 // PostgREST RPC 호출 방식
@@ -155,6 +163,9 @@ export default async function handler(req, res) {
 
     if (!generation_id) {
       throw Object.assign(new Error('Missing required field: generation_id'), { _status: 400 });
+    }
+    if (!isValidUUID(generation_id)) {
+      throw Object.assign(new Error('Invalid generation_id format (must be UUID)'), { _status: 400 });
     }
     if (!Number.isInteger(batch_idx) || batch_idx < 1) {
       throw Object.assign(new Error('Invalid batch_idx: must be integer >= 1'), { _status: 400 });

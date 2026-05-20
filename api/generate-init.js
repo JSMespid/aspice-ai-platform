@@ -42,6 +42,14 @@ async function sb(path, method = 'GET', body = null, prefer = null) {
 }
 
 // ──────────────────────────────────────────────────
+// UUID 형식 검증 (잘못된 입력으로 500 → 400 으로 변환)
+// ──────────────────────────────────────────────────
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUUID(s) {
+  return typeof s === 'string' && UUID_RE.test(s);
+}
+
+// ──────────────────────────────────────────────────
 // 상태값 영문 ↔ 한글 매핑 (generate.js 와 동일)
 // ──────────────────────────────────────────────────
 function stateToStatus(state) {
@@ -99,6 +107,11 @@ export default async function handler(req, res) {
     if (!project_id || !process_id || !work_product_id) {
       return res.status(400).json({
         error: 'Missing required fields: project_id, process_id, work_product_id',
+      });
+    }
+    if (!isValidUUID(project_id) || !isValidUUID(process_id) || !isValidUUID(work_product_id)) {
+      return res.status(400).json({
+        error: 'Invalid UUID format for project_id, process_id, or work_product_id',
       });
     }
     if (!plan || !Array.isArray(plan.batches) || plan.batches.length === 0) {

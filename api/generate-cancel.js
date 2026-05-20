@@ -43,6 +43,14 @@ async function sb(path, method = 'GET', body = null, prefer = null) {
 }
 
 // ──────────────────────────────────────────────────
+// UUID 형식 검증
+// ──────────────────────────────────────────────────
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUUID(s) {
+  return typeof s === 'string' && UUID_RE.test(s);
+}
+
+// ──────────────────────────────────────────────────
 // Main Handler
 // ──────────────────────────────────────────────────
 export default async function handler(req, res) {
@@ -57,6 +65,9 @@ export default async function handler(req, res) {
     const { generation_id } = req.body || {};
     if (!generation_id) {
       return res.status(400).json({ error: 'Missing required field: generation_id' });
+    }
+    if (!isValidUUID(generation_id)) {
+      return res.status(400).json({ error: 'Invalid generation_id format (must be UUID)' });
     }
 
     // ── 2. master row 조회 ──────────────────────────────────

@@ -41,22 +41,81 @@ async function sb(path, method = 'GET', body = null, prefer = null) {
 }
 
 // ──────────────────────────────────────────────────
+// UUID 형식 검증
+// ──────────────────────────────────────────────────
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUUID(s) {
+  return typeof s === 'string' && UUID_RE.test(s);
+}
+
+// ──────────────────────────────────────────────────
+// child rows 를 batch_idx (agent_step) 기준으로 그룹화
+// ──────────────────────────────────────────────────
+// generate-batch 가 시트당 child row 를 INSERT 하므로
+// 한 batch_idx 에 여러 child rows 가 존재할 수 있다.
+// status / progress / batches[] 모두 batch 단위 집계가 정확하다.
+function groupChildrenByBatch(children) {
+  const groups = new Map();  // batch_idx → child[]
+  for (const c of children) {
+    if (!Number.isInteger(c.agent_step) || c.agent_step < 1) continue;
+    if (!groups.has(c.agent_step)) groups.set(c.agent_step, []);
+    groups.get(c.agent_step).push(c);
+  }
+  return groups;
+}
+
+// ──────────────────────────────────────────────────
+// 한 batch 안 child 들의 status 로부터 batch 의 status 결정
+// 결정 트리 (priority 순):
+//   1. child 가 하나도 없음 → 'queued' (아직 시작 안 됨)
+//   2. 한 child 라도 'running' → 'running'
+//   3. 모두 'success' → 'success' (= completed)
+//   4. 모두 'cancelled' → 'cancelled'
+//   5. 모두 'failed' → 'failed'
+//   6. mixed terminal (success + failed/cancelled 혼합) → 'partial'
+// ──────────────────────────────────────────────────
+function deriveBatchStatus(childrenInBatch) {
+  if (!childrenInBatch || childrenInBatch.length === 0) return 'queued';
+  if (childrenInBatch.some(c => c.status === 'running')) return 'running';
+
+  if (childrenInBatch.every(c => c.status === 'success')) return 'success';
+  if (childrenInBatch.every(c => c.status === 'cancelled')) return 'cancelled';
+  if (childrenInBatch.every(c => c.status === 'failed')) return 'failed';
+
+  // 혼합 종료 상태 (일부 success + 일부 failed/cancelled)
+  return 'partial';
+}
+
+// ──────────────────────────────────────────────────
 // 진행률 / ETA 계산 헬퍼
 // ──────────────────────────────────────────────────
 function computeProgress(master, children) {
   const totalBatches = master.job_state?.total_batches || 0;
+  const groups = groupChildrenByBatch(children);
 
-  // child 상태별 카운트
-  const completed = children.filter(c => c.status === 'success').length;
-  const failed = children.filter(c => c.status === 'failed').length;
-  const running = children.filter(c => c.status === 'running').length;
-  const cancelled = children.filter(c => c.status === 'cancelled').length;
-  // 아직 시작 안 된 batch 수 (child row 가 아예 없는 batch 포함)
-  const accounted = completed + failed + running + cancelled;
+  // batch 단위 카운트 (child 직접 카운트 X — 시트당 child 라 중복 집계됨)
+  let completed = 0;
+  let failed = 0;
+  let running = 0;
+  let cancelled = 0;
+  let partial = 0;
+
+  for (const childrenInBatch of groups.values()) {
+    const s = deriveBatchStatus(childrenInBatch);
+    if (s === 'success') completed++;
+    else if (s === 'failed') failed++;
+    else if (s === 'running') running++;
+    else if (s === 'cancelled') cancelled++;
+    else if (s === 'partial') partial++;
+  }
+
+  const accounted = completed + failed + running + cancelled + partial;
   const queued = Math.max(0, totalBatches - accounted);
 
+  // 종료(terminal) batch = completed + failed + cancelled + partial
+  const terminalCount = completed + failed + cancelled + partial;
   const percent = totalBatches > 0
-    ? Math.round(((completed + failed + cancelled) / totalBatches) * 1000) / 10
+    ? Math.round((terminalCount / totalBatches) * 1000) / 10
     : 0;
 
   return {
@@ -65,6 +124,7 @@ function computeProgress(master, children) {
     failed_batches: failed,
     running_batches: running,
     cancelled_batches: cancelled,
+    partial_batches: partial,
     queued_batches: queued,
     percent,
   };
@@ -124,37 +184,69 @@ function computeCost(master, children) {
 // ──────────────────────────────────────────────────
 // batch 별 상세 정보 추출 (UI dashboard 용)
 // ──────────────────────────────────────────────────
+// 시트당 child row 패턴이므로 batch 단위로 그룹화 후 합산해야 정확.
 function buildBatchDetails(master, children) {
   const totalBatches = master.job_state?.total_batches || 0;
   const batchesPlan = master.job_state?.batches_plan || [];
-
-  // child rows 를 batch_idx (agent_step) 기준으로 인덱싱
-  const childByBatchIdx = new Map();
-  for (const c of children) {
-    if (Number.isInteger(c.agent_step) && c.agent_step >= 1) {
-      childByBatchIdx.set(c.agent_step, c);
-    }
-  }
+  const groups = groupChildrenByBatch(children);
 
   const batches = [];
   for (let i = 1; i <= totalBatches; i++) {
-    const child = childByBatchIdx.get(i) || null;
+    const childrenInBatch = groups.get(i) || [];
     const plan = batchesPlan.find(p => p.batch_idx === i) || null;
+    const batchStatus = deriveBatchStatus(childrenInBatch);
 
-    const parsedStkCount = child?.parsed_output?.stakeholder_requirements?.length || 0;
+    // batch 단위 합산
+    let stkCount = 0;
+    let costUsd = 0;
+    let inputTokens = 0;
+    let outputTokens = 0;
+    let maxLatencyMs = null;  // batch 내부 시트 병렬이므로 wall time = max
+    const collectedSheetIndices = [];
+    const childIds = [];
+    let firstError = null;
+    let sheetsSuccess = 0, sheetsFailed = 0, sheetsRunning = 0, sheetsCancelled = 0;
+
+    for (const c of childrenInBatch) {
+      stkCount += c.parsed_output?.stakeholder_requirements?.length || 0;
+      costUsd += parseFloat(c.cost_usd) || 0;
+      inputTokens += c.input_tokens || 0;
+      outputTokens += c.output_tokens || 0;
+      if (c.latency_ms != null && (maxLatencyMs == null || c.latency_ms > maxLatencyMs)) {
+        maxLatencyMs = c.latency_ms;
+      }
+      if (Array.isArray(c.sheet_indices)) collectedSheetIndices.push(...c.sheet_indices);
+      if (c.id) childIds.push(c.id);
+      if (!firstError && c.error_message) firstError = c.error_message;
+      if (c.status === 'success') sheetsSuccess++;
+      else if (c.status === 'failed') sheetsFailed++;
+      else if (c.status === 'running') sheetsRunning++;
+      else if (c.status === 'cancelled') sheetsCancelled++;
+    }
+
+    // sheet_indices: child 들의 합집합 > plan 의 예정값
+    const sheetIndices = collectedSheetIndices.length > 0
+      ? collectedSheetIndices
+      : (plan?.sheet_indices || []);
 
     batches.push({
       batch_idx: i,
-      sheet_indices: child?.sheet_indices || plan?.sheet_indices || [],
+      sheet_indices: sheetIndices,
       sheet_names: plan?.sheet_names || [],
-      status: child?.status || 'queued',  // child row 없으면 아직 queued
-      stk_count: parsedStkCount,
-      cost_usd: parseFloat(child?.cost_usd) || 0,
-      latency_ms: child?.latency_ms || null,
-      input_tokens: child?.input_tokens || null,
-      output_tokens: child?.output_tokens || null,
-      error_message: child?.error_message || null,
-      child_id: child?.id || null,
+      status: batchStatus,
+      stk_count: stkCount,
+      cost_usd: Math.round(costUsd * 10000) / 10000,
+      latency_ms: maxLatencyMs,
+      input_tokens: inputTokens || null,
+      output_tokens: outputTokens || null,
+      error_message: firstError,
+      // 시트 단위 상세 (UI 가 batch 안 진행률 표시 가능)
+      sheets_total: childrenInBatch.length || (plan?.sheet_indices?.length || 0),
+      sheets_success: sheetsSuccess,
+      sheets_failed: sheetsFailed,
+      sheets_running: sheetsRunning,
+      sheets_cancelled: sheetsCancelled,
+      child_ids: childIds,
     });
   }
 
@@ -182,6 +274,18 @@ export default async function handler(req, res) {
         project_id = project_id || url.searchParams.get('project_id');
         work_product_id = work_product_id || url.searchParams.get('work_product_id');
       } catch (_) { /* noop */ }
+    }
+
+    // UUID 형식 검증 — 빈 문자열이나 'undefined' 같은 잘못된 입력 방어
+    // (값이 truthy 인 경우만 검증; 빈 string/null/undefined 는 "param 안 줌" 으로 취급)
+    if (generation_id && !isValidUUID(generation_id)) {
+      return res.status(400).json({ error: 'Invalid generation_id format (must be UUID)' });
+    }
+    if (project_id && !isValidUUID(project_id)) {
+      return res.status(400).json({ error: 'Invalid project_id format (must be UUID)' });
+    }
+    if (work_product_id && !isValidUUID(work_product_id)) {
+      return res.status(400).json({ error: 'Invalid work_product_id format (must be UUID)' });
     }
 
     // ── 2. master row 조회 ──────────────────────────────────
