@@ -1496,3 +1496,38 @@ export default async function handler(req, res) {
 }
 
 // Phase 2-2c (Pro): Vercel 함수 maxDuration = 800초 (vercel.json에서 설정)
+
+// ──────────────────────────────────────────────────
+// Phase 2-2g (옵션 G — Function Chunking) 용 named exports
+// generate-batch.js, generate-merge.js 가 재사용.
+// 기존 default export (handler) 는 그대로 — Vercel 은 default 만 endpoint 로 인식.
+// ──────────────────────────────────────────────────
+export {
+  // 헬퍼
+  sb,
+  callClaude,
+  composeSystemPrompt,
+  buildSheetUserPrompt,
+  buildUserPrompt,
+  labelOf,
+  mergePerSheetOutputs,
+  estimateCost,
+  stateToStatus,
+  syncStateAndStatus,
+  // SSE 도구
+  sseSend,
+  initSSE,
+  wantsStreaming,
+  createEmitter,
+  // 스키마
+  OUTPUT_SCHEMAS,
+  PER_SHEET_SCHEMA,
+  STK_REQ_ITEM_SCHEMA,
+  // 상수
+  TIMEOUT_MS,
+  MAX_TOKENS,
+  MODEL,
+  PROVIDER,
+  SHEET_BATCH_SIZE,
+  SKILLS_INDEX,
+};
