@@ -594,8 +594,8 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
           // Phase 2-2c (Pro): Adaptive thinking 기본 (깊은 reasoning)
           // Vercel Pro maxDuration 800초로 시트당 4~6분의 깊은 추론도 안전
           // 자동차 OEM ASPICE 평가 통과를 위한 품질 우선
-          // thinking: { type: 'adaptive' },
-          thinking: { type: 'enabled', budget_tokens: 8000 },
+          thinking: { type: 'adaptive' },
+          // thinking: { type: 'enabled', budget_tokens: 8000 },
           // Structured Outputs (GA — 별도 beta header 불필요)
           output_config: {
             format: {
