@@ -28,8 +28,8 @@ const TIMEOUT_MS = 750_000; // Phase 2-2c (Pro): 12분 30초 — Vercel Pro maxD
                              // 시트당 깊은 reasoning 5~6분도 충분히 처리 가능
 const MAX_TOKENS = 64000;  // Phase 2-2c: 시트별 스펙 보존 모드로 출력 크기 증가 (Opus 4.7 최대 128000)
                             // 16000은 시트당 100+ STK_REQ 생성 시 부족하여 잘림 발생
-//const MODEL = 'claude-opus-4-7';  // 최상위 reasoning 모델 (품질 우선)
-const MODEL = 'claude-sonnet-4-6';
+const MODEL = 'claude-opus-4-7';  // 최상위 reasoning 모델 (품질 우선)
+//const MODEL = 'claude-sonnet-4-6';
 const PROVIDER = 'anthropic';
 
 // Phase 2-2e: 시트별 호출 batch 크기
