@@ -41,7 +41,7 @@ const AI_GENERATE_SUPPORTED = new Set(["SYS.1"]);
 //   batch 단위는 순차 (concurrency=1) — frontend orchestrator 가 직렬로 호출
 //   4시트면 2 batch × ~5분 = ~10분 (정상 범위)
 const CHUNKED_THRESHOLD = 3;
-const CHUNKED_BATCH_SIZE = 1;
+const CHUNKED_BATCH_SIZE = 2;
 const CHUNKED_CONCURRENCY = 1;
 
 async function apiCall(path, method = "GET", body = null) {
