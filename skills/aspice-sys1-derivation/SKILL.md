@@ -1,17 +1,18 @@
 ---
 name: aspice-sys1-derivation
-description: "Use when generating SYS.1 (Stakeholder Requirements Derivation) artifacts for automotive software systems following ASPICE PAM v4.0. Triggers on requests to analyze customer-provided input documents (SOW, Customer SW Requirements, Customer HW Requirements) and derive structured stakeholder requirements with 1:1 spec-preservation traceability. Operates in OEM-Supplier workflow context where input documents are customer deliverables, not supplier work products. Activates when input includes terms like 'SYS.1', '요구사항 도출', 'stakeholder requirements', 'SW 요구사항', 'HW 요구사항', 'SOW', or worksheet-based Excel inputs."
+description: "Use when generating SYS.1 (Stakeholder Requirements Derivation) artifacts for automotive software systems following ASPICE PAM v4.0. Triggers on requests to analyze customer-provided input documents (SOW, Customer SW Requirements, Customer HW Requirements) and derive structured stakeholder requirements with 1:1 spec-preservation traceability. Operates in OEM-Supplier workflow context where input documents are customer deliverables, not supplier work products. Activates when input includes terms like 'SYS.1', '요구사항 도출', 'stakeholder requirements', 'SW 요구사항', 'HW 요구사항', 'SOW', 'Design Constraint', '설계 제약', 'Legacy', 'Pass-Through', or worksheet-based Excel inputs."
 ---
 
 # ASPICE SYS.1 — Stakeholder Requirements Derivation Skill
 # ASPICE SYS.1 — 이해관계자 요구사항 도출 스킬
 
-**Phase 2-2f.1 Revision** — Spec-Preservation Mode + OEM-Supplier Context + Worksheet-Based Classification + ⭐ Category Stability (Interface-Priority)
+**Phase 2-2f.2 Revision** — Spec-Preservation Mode + OEM-Supplier Context + Worksheet-Based Classification + ⭐ Category Stability (Interface-Priority) + ⭐ Legacy System 3-Step Process
 
 > **Changelog**:
 > - Phase 2-2c: Spec-Preservation + OEM-Supplier Context + Worksheet Classification
 > - Phase 2-2d: Korean warnings + work-product re-registration
-> - Phase 2-2f.1 (this revision): Rule 5 확장 — 결정 트리 + Interface-Priority overlap rule + Section 8.5 Category Boundary Examples + Mistake 7
+> - Phase 2-2f.1: Rule 5 확장 — 결정 트리 + Interface-Priority overlap rule + Section 8.5 Category Boundary Examples + Mistake 7
+> - Phase 2-2f.2 (this revision): Legacy SW/HW 혼입 대응 — 3단계 실무 표준 프로세스 (Design Constraint 분류 + Reverse Traceability + Pass-Through) + Section 3.5 + Rule 5 Step 1 보강 + Section 8.5 예시 E17–E19 + Section 12.5 통합 가이드 + Mistake 8 + 5번째 Pillar
 
 ---
 
@@ -206,6 +207,32 @@ If customer input is vague (e.g., "shall be reliable"), preserve it as STK_REQ b
 DO NOT invent measurements that aren't in the input.
 입력에 없는 측정값을 발명하지 말 것.
 
+### 3.5 ⭐ Legacy SW/HW Inputs — Mandatory Reception, Treated as Design Constraints / Legacy SW/HW 입력 — 의무 수용 + 설계 제약 처리
+
+When customer (OEM) provides Legacy-system-derived SW/HW specifics (code logic, chipset choices, circuit placement) embedded in SYS.1 input, the supplier **MUST NOT refuse, abstract, or reject** them — they remain valid SYS.1 stakeholder requirements per the Spec-Preservation Principle, **AND** must be marked as **Design Constraint** rather than ordinary functional requirements.
+
+고객(OEM)이 Legacy 시스템에서 검증된 구체적 SW/HW 사양(코드 로직, 칩셋 선택, 회로 배치 등)을 SYS.1 input 에 포함해 전달할 때, 공급사는 이를 **거부·추상화·각하할 수 없습니다** — 스펙 보존 원칙에 따라 유효한 SYS.1 이해관계자 요구사항으로 보존하되, **반드시 "설계 제약 조건(Design Constraint)"** 으로 마킹합니다.
+
+**판단 기준 (이 중 하나라도 해당) / Criteria (any one of)**:
+- 입력에 특정 알고리즘·코드 로직·State machine 구조가 명시됨 (예: "shall use Linux kernel 5.4 with PREEMPT_RT patch")
+- 특정 칩셋·PCB 배치·전원 회로 설계가 강제됨 (예: "shall use Qualcomm SA525M chipset")
+- 고객이 "Legacy 호환" / "이전 모델과 동일" 등을 명시
+- SOW/ICD 에 "변경 불가" / "shall be identical to" / "재사용 (reuse)" 표현이 있음
+
+**SKILL 의 처리 (자동) / SKILL Handling (automatic)**:
+1. 해당 STK_REQ 는 **무조건 보존** (스펙 보존 원칙) — Section 3.1 ~ 3.4 그대로 적용
+2. `category` 는 **Rule 5 Step 1 의 constraint 분기**에서 결정됨 (Section 5 + Section 8.5.2 예시 E17~E19 참조)
+3. `rationale` 한 줄 추가: "고객 Legacy 시스템 기반 설계 제약 — 시스템 측 임의 변경 불가."
+4. STK_REQ 에 신규 필드 `is_design_constraint: true` 추가
+5. 다운스트림 Pass-Through 추적성 정보를 `traceability_seeds.pass_through_candidates[]` 에 기록 (Section 6.4 참조)
+
+> **⚠️ 흔한 오해**: "SYS.1 에는 시스템 레벨 요구만 들어가야 하니, 구체적 SW/HW 내용은 SWE.1/HWE.1 로 옮겨야 한다" — 이것은 **오류**입니다. 고객이 SYS.1 input 으로 제공한 이상, SYS.1 산출물에 보존되어야 하며 단지 **분류만 Design Constraint** 로 처리하면 됩니다. SWE.1/HWE.1 로의 전파는 **Pass-Through 링크**(Section 12.5 단계 3)로 별도 수행합니다.
+> **Common misconception**: "SYS.1 should contain only system-level requirements, so SW/HW specifics must be moved to SWE.1/HWE.1" — this is **wrong**. Once the customer provides them as SYS.1 input, they MUST be preserved in the SYS.1 artifact; only the classification is set to `Design Constraint`. Propagation to SWE.1/HWE.1 happens separately via **Pass-Through links** (Section 12.5 Step 3).
+
+전체 3단계 프로세스 (Design Constraint 분류 → Reverse Traceability 검증 → Pass-Through 링크)는 **Section 12.5** 에서 상세히 다룹니다.
+
+The full 3-step process (Design Constraint classification → Reverse Traceability verification → Pass-Through links) is detailed in **Section 12.5**.
+
 ---
 
 ## 4. ⭐ Worksheet-Based Classification / 워크시트 기반 분류
@@ -373,7 +400,8 @@ You MUST produce JSON matching this schema (validated by structured_output).
       "source_doc": "Customer SW Requirements §Cellular Stack, Row 5 (SW-005)",
       "priority": "must",
       "verification_method": "test",
-      "clarification_needed": false
+      "clarification_needed": false,
+      "is_design_constraint": false
     }
   ],
 
@@ -405,7 +433,15 @@ You MUST produce JSON matching this schema (validated by structured_output).
   "traceability_seeds": {
     "from_customer_sw_req": ["SW-005 → STK_REQ_CELLULAR_001", "..."],
     "from_customer_hw_req": ["HW-012 → STK_REQ_GNSS_001", "..."],
-    "from_sow":             ["SOW §3.1 → STK_REQ_CELLULAR_002", "..."]
+    "from_sow":             ["SOW §3.1 → STK_REQ_CELLULAR_002", "..."],
+    "pass_through_candidates": [
+      {
+        "stk_req_id": "STK_REQ_CELLULAR_001",
+        "target_process": "SWE.1",
+        "rationale": "Legacy SW logic — direct propagation recommended",
+        "requires_se_sw_agreement": true
+      }
+    ]
   },
 
   "warnings": [
@@ -423,6 +459,7 @@ You MUST produce JSON matching this schema (validated by structured_output).
 | `source_row` | integer \| null | yes | Row number in the source sheet (1-indexed), null if not applicable |
 | `source_item_id` | string \| null | yes | Original ID from customer document (e.g., "SW-005"), null if absent |
 | `clarification_needed` | boolean | yes | True if the input was vague and customer clarification is needed |
+| `is_design_constraint` | boolean | yes | ⭐ True if this STK_REQ originates from customer-provided Legacy SW/HW specifics that constrain downstream design (Section 3.5, Section 12.5). When `true`, `category` MUST be `constraint`. |
 
 ### 6.2 Coverage Matrix Specification / Coverage Matrix 사양
 
@@ -446,6 +483,22 @@ The following field from the previous schema is **REMOVED** in Phase 2-2c:
 이전 스키마의 다음 필드는 Phase 2-2c 에서 **제거**됨:
 
 - ❌ `use_cases` — Use Cases are not part of ASPICE PAM v4.0 SYS.1 BP requirements. They were a source of hallucination (main_flow steps inferred from domain knowledge, not input). Use Cases, if needed, belong in SYS.5 as verification scenarios.
+
+### 6.4 ⭐ Pass-Through Candidates (Legacy Handling) / Pass-Through 후보 (Legacy 처리)
+
+`traceability_seeds.pass_through_candidates` is an array of STK_REQs that are candidates for **direct Pass-Through linking** to SWE.1 (for SW-specific Legacy items) or HWE.1 (for HW-specific Legacy items), bypassing SYS.2 documentation duplication. See Section 12.5 Step 3 for the full Pass-Through process.
+
+`traceability_seeds.pass_through_candidates` 는 SWE.1 (SW 관련 Legacy 항목) 또는 HWE.1 (HW 관련 Legacy 항목)로 **SYS.2 중간 문서화 없이 다이렉트 Pass-Through 링크** 후보가 되는 STK_REQ 들의 배열. Pass-Through 전체 프로세스는 Section 12.5 단계 3 참조.
+
+**Population rule / 생성 규칙**:
+- 포함 대상: `is_design_constraint: true` 인 STK_REQ 중, 입력 텍스트가 SW 알고리즘·코드 로직·칩셋 명세 등 단일 도메인(SW 또는 HW)에 명확히 속하는 것
+- `target_process`: "SWE.1" or "HWE.1" (도메인에 따라)
+- `requires_se_sw_agreement`: 항상 `true` — Pass-Through 결정은 SE/SW(또는 SE/HW) 합의 회의록 또는 툴 내 승인 마크가 **반드시** 동반되어야 ASPICE 평가에서 인정됨 (Section 12.5 Step 3)
+- `rationale`: 짧은 한글 설명 (예: "Legacy SW 로직 — 직접 전파 권장", "Legacy HW 칩셋 강제 — HWE.1 다이렉트")
+
+**⚠️ 중요**: 이 배열은 **후보(candidates)** 일 뿐 실제 Pass-Through 링크가 아닙니다. 실제 링크는 다운스트림(SWE.1/HWE.1) 산출물 생성 시 별도로 처리되며, SE/SW(또는 SE/HW) 합의 증적이 확보된 후에만 활성화됩니다.
+
+**Important**: This array contains only **candidates**, not actual Pass-Through links. The actual links are processed downstream when SWE.1/HWE.1 artifacts are generated, and activated only after SE/SW (or SE/HW) agreement is documented.
 
 ---
 
@@ -484,10 +537,11 @@ Each item in the `warnings` array MUST be written in Korean. Korean automotive O
 | Row N: ... clarification | "Row 23 (China eCall): Tier 2 comment notes..." | "행 23 (중국 eCall): Tier 2 코멘트가 EU 규제 기준임을 명시 — 중국 전용 eCall 요구사항은 별도 명세 필요로 플래그 표시." |
 | Multiple rows (Tier 2 status 'N/A')... | "Multiple rows (Tier 2 status 'N/A'): #19, #20..." | "다수 행(Tier 2 상태 'N/A'): #19, #20, #36, #37, #38, #39, #40 (HPLMN timer, SAR, MIPI, NV 항목) 및 #55-#58 (RTT) — 스펙 보존 원칙에 따라 priority='could' + clarification_needed=true로 STK_REQ 생성. |
 | Requirements marked 'Supported w/ NRE'... | "Several requirements marked 'Supported w/ NRE' or 'Supported w/ Restrictions'..." | "Tier 2(LGIT)가 'Supported w/ NRE' 또는 'Supported w/ Restrictions'로 표시한 여러 요구사항을 원문 그대로 보존 — 상업적 범위에 대한 고객 확인은 kickoff 시 권장." |
+| Legacy SW/HW... Design Constraint | "Customer-provided Legacy SW logic — marked as Design Constraint" | "고객이 Legacy 시스템 기반 SW 로직 (예: Linux kernel 5.4 + PREEMPT_RT 패치) 을 SYS.1 input 으로 강제 — Design Constraint 로 분류 (is_design_constraint=true), 시스템 측 임의 변경 불가. SWE.1 Pass-Through 후보로 traceability_seeds 에 등록." |
 
 **중요 규칙 / Key Rules**:
 
-1. **영문 표준 용어는 유지**: `AEC-Q100`, `3GPP Release 16`, `ASIL-D`, `IEEE 830`, `MIPI`, `eCall`, `SoC`, `eUICC`, `SIM`, `DRX`, `HPLMN`, `SAR`, `RTT`, `NRE` 등 자동차/통신 표준 약어 및 영문 ID 는 그대로 유지.
+1. **영문 표준 용어는 유지**: `AEC-Q100`, `3GPP Release 16`, `ASIL-D`, `IEEE 830`, `MIPI`, `eCall`, `SoC`, `eUICC`, `SIM`, `DRX`, `HPLMN`, `SAR`, `RTT`, `NRE`, `Pass-Through`, `Design Constraint` 등 자동차/통신 표준 약어 및 영문 ID 는 그대로 유지.
 
 2. **행/열 표기는 한글**: "Row N" → "행 N", "Column" → "컬럼", "rows" → "행들"
 
@@ -559,7 +613,7 @@ When a requirement matches multiple categories (e.g., action + external channel)
 
 | Category | 한 줄 정의 / One-line definition | 핵심 동사 / Key verbs |
 |---|---|---|
-| `constraint` | 외부 권위/환경/표준이 부과하는 한계 또는 의무 | shall comply with, shall not exceed, shall be within, shall operate at |
+| `constraint` | 외부 권위/환경/표준이 부과하는 한계 또는 의무. **+ 고객 Legacy 시스템 기반 SW/HW 강제 사양 (Design Constraint, Section 3.5)** | shall comply with, shall not exceed, shall be within, shall operate at, **shall use (Legacy: chipset/library/algorithm)**, **shall be identical to (Legacy version)** |
 | `interface` | 외부 시스템·신호·물리 채널과의 통신 또는 그 사양 (프로토콜·대역·커넥터·외부 entity 명시) | shall support, shall provide, shall expose, shall transmit/receive/report over, shall pair/connect with |
 | `non_functional` | 정량 가능한 품질 속성 (행동 자체보다는 행동의 "얼마나 잘") | shall achieve, shall meet, shall maintain (a metric) |
 | `functional` | 외부 채널/entity 명시 없이 시스템이 수행하는 내부 행위·상태·반응 | shall calculate, validate, maintain (state), trigger, switch (internal mode) |
@@ -572,7 +626,15 @@ Step 1 — constraint?
   ├─ 안전 분류 (ASIL-A/B/C/D, SIL-x, QM)?
   ├─ 환경 한계 (-40°C~+85°C, vibration profile, IP67)?
   ├─ 전압/전류/전력 한계 (shall not exceed N W, shall operate at N V)?
-  └─ 인증 의무 (shall be type-approved, shall comply with...)?
+  ├─ 인증 의무 (shall be type-approved, shall comply with...)?
+  ├─ ⭐ Design Constraint — 고객 Legacy SW/HW 강제 사양 (Section 3.5)?
+  │   - 특정 알고리즘·코드 로직·OS 커널 버전 명시 ("shall use Linux kernel 5.4 with PREEMPT_RT")
+  │   - 특정 칩셋·PCB·전원 회로 강제 ("shall use Qualcomm SA525M")
+  │   - "Legacy 호환" / "이전 모델과 동일" / "shall be identical to" / "shall reuse" 표현
+  │   - SOW/ICD 에 "변경 불가" / "binding to legacy" 명시
+  │   → 추가 처리: `is_design_constraint: true`, rationale 한 줄 추가, 
+  │                Pass-Through 후보로 traceability_seeds 에 등록
+  └─ 모두 해당:
    → YES: category = "constraint"
    → NO:  go to Step 2
 
@@ -603,11 +665,12 @@ Step 4 — functional (외부 채널/entity 가 전혀 언급되지 않은 순�
 **중요 / Important**:
 - 한 요구사항이 여러 카테고리에 걸치면 결정 트리의 **위쪽 단계가 무조건 승리**합니다 — 직관으로 뒤집지 마세요.
 - 특히 Step 2 (interface) 는 **광의로 적용**합니다: 행위 동사가 있더라도 외부 채널·entity 가 함께 명시되면 interface 로 분류합니다. 이 규칙으로 분류 결정성을 보장하고, 같은 입력 → 같은 카테고리가 매 런마다 재현됩니다.
+- Step 1 의 ⭐ Design Constraint 분기는 **Spec-Preservation 보다 우선하지 않습니다** — 고객 Legacy 사양도 입력 그대로 보존하되, 분류만 `constraint` 로 마킹하는 것입니다. Section 3.5 + Section 12.5 참조.
 - `functional` 은 **외부 채널/entity 가 전혀 언급되지 않은 순수 내부 행위만**을 위한 카테고리입니다.
 
-When a requirement straddles categories, the earlier step ALWAYS wins — do not override by intuition. Step 2 (interface) is applied **broadly**: even if an action verb is present, the presence of an external channel/entity puts the requirement in interface. This guarantees classification determinism. `functional` is reserved for **purely internal behaviors with no external channel/entity mentioned**.
+When a requirement straddles categories, the earlier step ALWAYS wins — do not override by intuition. Step 2 (interface) is applied **broadly**: even if an action verb is present, the presence of an external channel/entity puts the requirement in interface. This guarantees classification determinism. Step 1's ⭐ Design Constraint branch does NOT override Spec-Preservation — Legacy specifics are still preserved verbatim; only the classification is set to `constraint`. See Section 3.5 + Section 12.5. `functional` is reserved for **purely internal behaviors with no external channel/entity mentioned**.
 
-See Section 8.5 for boundary examples and the worked decision-tree walkthroughs.
+See Section 8.5 for boundary examples and the worked decision-tree walkthroughs (including E17–E19 for Design Constraint cases).
 
 ### Rule 6: ⭐ Input Meaning Preservation / 입력 의미 보존
 
@@ -634,9 +697,9 @@ Allowed exception: Universally applicable automotive constraints (operating temp
 
 ### Section 8.5 — ⭐ Category Boundary Examples (Interface-Priority Rule Applied) / 카테고리 경계 예시 (Interface 우선 규칙 적용)
 
-이 섹션은 Rule 5 결정 트리 — 특히 **`interface` 와 `functional` 이 겹칠 때 항상 `interface` 가 승리** — 를 풀이 예시로 보여줍니다.
+이 섹션은 Rule 5 결정 트리 — 특히 **`interface` 와 `functional` 이 겹칠 때 항상 `interface` 가 승리** — 를 풀이 예시로 보여줍니다. 또한 ⭐ Step 1 의 Design Constraint 분기 예시 (E17~E19) 도 포함합니다.
 
-This section illustrates Rule 5's decision tree — specifically that **`interface` always wins over `functional` when both apply** — through worked examples.
+This section illustrates Rule 5's decision tree — specifically that **`interface` always wins over `functional` when both apply** — through worked examples. Also includes ⭐ Step 1 Design Constraint branch examples (E17–E19).
 
 #### 8.5.1 ⭐ The Channel-Mention Test / 채널 언급 테스트
 
@@ -656,26 +719,34 @@ Before classifying, ask one question:
 
 This simple test deterministically resolves the wobble between `interface` and `functional`.
 
-#### 8.5.2 Worked Examples (Interface-Priority) / 풀이 예시
+**⭐ The Legacy-Mention Test (Step 1)** / Legacy 언급 테스트:
+> **"이 행에 Legacy 시스템 기반 SW/HW 강제 사양 (특정 OS 버전, 칩셋, 알고리즘) 또는 'Legacy 호환' / 'shall be identical to' 류 표현이 있는가?"**
+> 
+> YES → Step 1 즉시 `constraint` + `is_design_constraint: true` (E17~E19 참조)
 
-| # | 원본 입력 | 분류 | 이유 |
-|---|---|---|---|
-| E1 | "The NAD shall support LTE Band 1, Band 3, Band 7." | **interface** | 채널 사양 명시 (LTE Band). Step 2. |
-| E2 | "The NAD shall report position every 100ms over LTE." | **interface** | 행위 + 외부 채널(LTE) 동시 등장 → ⭐ Overlap → **interface 승리**. Step 2. |
-| E3 | "Bluetooth shall comply with BT 5.0 specification." | **interface** | 외부 표준 명시 (BT 5.0). Step 2. |
-| E4 | "The system shall pair with up to 5 Bluetooth devices." | **interface** | 행위(pair) + 외부 채널(Bluetooth) → ⭐ Overlap → **interface 승리**. Step 2. |
-| E5 | "CAN bus shall operate at 500 kbps." | **interface** | 채널 사양 (CAN + 속도). Step 2. |
-| E6 | "The system shall transmit DTCs over CAN upon request." | **interface** | 행위(transmit) + 외부 채널(CAN) → ⭐ Overlap → **interface 승리**. Step 2. |
-| E7 | "The NAD shall provide UART at 115200 baud, 8N1." | **interface** | 커넥터 사양 (UART + 속도/포맷). Step 2. |
-| E8 | "The NAD shall log boot events to UART for debugging." | **interface** | 행위(log) + 외부 커넥터(UART) → ⭐ Overlap → **interface 승리**. Step 2. |
-| E9 | "The antenna shall achieve VSWR ≤ 1.5 at 1575.42 MHz (GPS L1)." | **non_functional** | 핵심은 정량 메트릭 (VSWR). 행위 동사 없음. Step 3. ※경계 사례 — 1575.42 MHz 는 채널 식별이지만, achieve+VSWR 메트릭이 핵심이고 행위 동사 부재. |
-| E10 | "The system shall comply with ECE R10 for EMC." | **constraint** | 법규 명시. Step 1 (최우선). |
-| E11 | "The system shall encrypt OTA payloads using AES-256." | **non_functional** | 보안 속성 자체 (암호화 알고리즘). 외부 채널 명시 없음 (OTA "payloads" 은 데이터, 채널 아님). Step 3. |
-| E12 | "The system shall download OTA packages from the backend server." | **interface** | 행위(download) + 외부 entity(backend server) → ⭐ Overlap → **interface 승리**. Step 2. |
-| E13 | "The system shall validate firmware integrity before booting." | **functional** | 행위 + 외부 채널 언급 없음. 순수 내부 행위. Step 4. |
-| E14 | "The system shall maintain an internal state machine for power modes." | **functional** | 내부 상태. 외부 entity 없음. Step 4. |
-| E15 | "The system shall calculate position using available satellite data." | **functional** | 내부 계산. 위성 데이터는 입력이지만 채널·프로토콜·entity 명시 없음. Step 4. (참고: 만약 "from GNSS satellites via NMEA over UART" 였다면 interface.) |
-| E16 | "The system shall trigger an internal alert when temperature exceeds 85°C." | **functional** | 내부 트리거. 외부 채널 없음. Step 4. |
+#### 8.5.2 Worked Examples (Interface-Priority + Design Constraint) / 풀이 예시
+
+| # | 원본 입력 | 분류 | `is_design_constraint` | 이유 |
+|---|---|---|---|---|
+| E1 | "The NAD shall support LTE Band 1, Band 3, Band 7." | **interface** | false | 채널 사양 명시 (LTE Band). Step 2. |
+| E2 | "The NAD shall report position every 100ms over LTE." | **interface** | false | 행위 + 외부 채널(LTE) 동시 등장 → ⭐ Overlap → **interface 승리**. Step 2. |
+| E3 | "Bluetooth shall comply with BT 5.0 specification." | **interface** | false | 외부 표준 명시 (BT 5.0). Step 2. |
+| E4 | "The system shall pair with up to 5 Bluetooth devices." | **interface** | false | 행위(pair) + 외부 채널(Bluetooth) → ⭐ Overlap → **interface 승리**. Step 2. |
+| E5 | "CAN bus shall operate at 500 kbps." | **interface** | false | 채널 사양 (CAN + 속도). Step 2. |
+| E6 | "The system shall transmit DTCs over CAN upon request." | **interface** | false | 행위(transmit) + 외부 채널(CAN) → ⭐ Overlap → **interface 승리**. Step 2. |
+| E7 | "The NAD shall provide UART at 115200 baud, 8N1." | **interface** | false | 커넥터 사양 (UART + 속도/포맷). Step 2. |
+| E8 | "The NAD shall log boot events to UART for debugging." | **interface** | false | 행위(log) + 외부 커넥터(UART) → ⭐ Overlap → **interface 승리**. Step 2. |
+| E9 | "The antenna shall achieve VSWR ≤ 1.5 at 1575.42 MHz (GPS L1)." | **non_functional** | false | 핵심은 정량 메트릭 (VSWR). 행위 동사 없음. Step 3. |
+| E10 | "The system shall comply with ECE R10 for EMC." | **constraint** | false | 법규 명시. Step 1 (최우선). |
+| E11 | "The system shall encrypt OTA payloads using AES-256." | **non_functional** | false | 보안 속성 자체 (암호화 알고리즘). 외부 채널 명시 없음. Step 3. |
+| E12 | "The system shall download OTA packages from the backend server." | **interface** | false | 행위(download) + 외부 entity(backend server) → ⭐ Overlap → **interface 승리**. Step 2. |
+| E13 | "The system shall validate firmware integrity before booting." | **functional** | false | 행위 + 외부 채널 언급 없음. 순수 내부 행위. Step 4. |
+| E14 | "The system shall maintain an internal state machine for power modes." | **functional** | false | 내부 상태. 외부 entity 없음. Step 4. |
+| E15 | "The system shall calculate position using available satellite data." | **functional** | false | 내부 계산. 위성 데이터는 입력이지만 채널·프로토콜·entity 명시 없음. Step 4. |
+| E16 | "The system shall trigger an internal alert when temperature exceeds 85°C." | **functional** | false | 내부 트리거. 외부 채널 없음. Step 4. |
+| ⭐ E17 | "The NAD shall use Linux kernel 5.4 LTS with PREEMPT_RT patch (identical to MY2024 Legacy NAD)." | **constraint** | **true** | Step 1 — Design Constraint. OS 커널 버전 + Legacy 호환 명시. `is_design_constraint: true`. SWE.1 Pass-Through 후보. rationale: "고객 Legacy 시스템 기반 SW 제약 — 시스템 측 임의 변경 불가." |
+| ⭐ E18 | "The NAD shall use Qualcomm SA525M chipset (binding from prior platform)." | **constraint** | **true** | Step 1 — Design Constraint. 칩셋 강제 + Legacy 결합 명시. `is_design_constraint: true`. HWE.1 Pass-Through 후보. |
+| ⭐ E19 | "The OTA download routine shall be identical to the proven implementation in TCU-A40." | **constraint** | **true** | Step 1 — Design Constraint. "shall be identical to (Legacy version)" 명시. `is_design_constraint: true`. SWE.1 Pass-Through 후보. ※주의: 외부 entity(backend server) 언급이 없으므로 Step 2(interface) 가 아니라 Step 1 의 Legacy 분기에서 결정됨. |
 
 #### 8.5.3 Why Interface-Priority? / 왜 Interface 우선인가?
 
@@ -708,7 +779,7 @@ When considering `functional`, final check: **"Does this row mention NO external
 
 Before assigning each STK_REQ's category, internally answer (do NOT include in output):
 
-1. ☐ Step 1 (constraint): 법규·표준·환경·안전등급·인증 명시 있는가? YES → constraint. NO → 다음.
+1. ☐ Step 1 (constraint): 법규·표준·환경·안전등급·인증 명시 있는가? **또는 ⭐ Legacy SW/HW 강제 사양 (Section 3.5) 인가?** YES → constraint (Legacy 면 `is_design_constraint: true`). NO → 다음.
 2. ☐ Step 2 (interface): 외부 채널·프로토콜·커넥터·entity 가 이름으로 언급되어 있는가? YES → **interface (행위 동사 무시)**. NO → 다음.
 3. ☐ Step 3 (non_functional): 정량 메트릭이 핵심이고 행위 동사가 없는가? YES → non_functional. NO → 다음.
 4. ☐ Step 4 (functional): 외부 채널 언급 전혀 없이 순수 내부 행위만 기술하는가? YES → functional.
@@ -736,8 +807,10 @@ Before producing output, verify ALL items / 출력 전 모두 확인:
 9. ☐ `category` matches the requirement nature per Rule 5
 9a. ☐ ⭐ `category` was assigned by applying the Rule 5 decision tree **top-down** (Section 8.5.5), not by intuition. Re-classifying the same row would yield the same category.
 9b. ☐ ⭐ When the row mentions any external channel/protocol/connector/entity (even alongside an action verb), `category` = `interface` (Interface-Priority rule per Section 8.5.1). `functional` is reserved for rows with NO external channel mention.
+9c. ☐ ⭐ **Legacy 항목 확인**: 입력이 고객 Legacy 시스템 기반 SW/HW 강제 사양 (특정 OS·칩셋·알고리즘 명시 또는 "shall be identical to/reuse" 류 표현)인가? YES → `category` = `constraint` AND `is_design_constraint: true` AND `traceability_seeds.pass_through_candidates` 에 항목 추가. (Section 3.5 + Section 12.5 + 예시 E17~E19)
 9a. ☐ ⭐ `category` 는 Rule 5 결정 트리(Section 8.5.5)를 **위에서부터 순차** 적용해 결정함. 같은 행을 다시 분류해도 같은 답이 나옴.
 9b. ☐ ⭐ 행에 외부 채널·프로토콜·커넥터·entity 가 언급되면 (행위 동사와 함께라도) `category` = `interface` (Interface-Priority, Section 8.5.1). `functional` 은 외부 채널 언급이 전혀 없는 순수 내부 행위에만 사용.
+9c. ☐ ⭐ **Legacy 항목 확인**: 고객 Legacy 시스템 기반 SW/HW 강제 사양인가? YES → `constraint` + `is_design_constraint: true` + `pass_through_candidates` 등록.
 10. ☐ Statement does NOT add specifications absent from input
 
 ### 9.2 Coverage checks (across all STK_REQs) / Coverage 확인
@@ -755,6 +828,7 @@ Before producing output, verify ALL items / 출력 전 모두 확인:
 18. ☐ No `use_cases` field (removed in Phase 2-2c)
 19. ☐ `warnings` array populated if any meta-sheets were detected or any unusual cases occurred
 20. ☐ ⭐ All `warnings` items are written in Korean (한글) per Section 7.1 (영문 표준 용어 보존 OK; e.g., AEC-Q100, 3GPP, ASIL)
+21. ☐ ⭐ **Legacy / Pass-Through 확인**: `is_design_constraint: true` 인 STK_REQ 가 있는 경우, `traceability_seeds.pass_through_candidates[]` 에 동일 개수의 후보 항목이 등록되어 있는가? 각 후보의 `requires_se_sw_agreement` 가 `true` 인가? (Section 6.4 + Section 12.5)
 
 **If ANY check fails, fix before responding. / 하나라도 실패 시 수정 후 응답.**
 
@@ -778,7 +852,12 @@ If the input documents don't mention "OTA updates", do NOT create `STK_REQ_OTA_0
 
 SYS.1 is about **stakeholder needs**, not system design.
 - ❌ "shall use Linux kernel 5.4" — 구현 세부사항 (SWE.2)
-- ❌ "shall implement AUTOSAR" — 구현 (SWE.2)
+
+**⭐ 단, 고객이 Legacy 시스템 기반으로 SYS.1 input 에 위와 같은 구체 사양을 명시했다면 별개 케이스**: 이는 Spec-Preservation 에 따라 SYS.1 에 보존하되 **Design Constraint 로 분류**합니다 (Section 3.5, Section 12.5, Mistake 8 참조). 이 경우 "프로세스 경계 위반"이 아니라 "고객이 부과한 설계 제약"으로 처리됩니다.
+
+**⭐ Exception**: If the customer provided such specifics as SYS.1 input from a Legacy system, preserve them in SYS.1 but classify as **Design Constraint** (Section 3.5, Section 12.5, Mistake 8). This is not a "process boundary violation" but a "customer-imposed design constraint."
+
+- ❌ "shall implement AUTOSAR" — 구현 (SWE.2) — 위와 같은 Legacy 예외 적용 가능
 
 ### ❌ Mistake 4: ⭐ Misinterpreting Customer Input as Supplier Output / 고객 입력을 공급사 산출물로 오해
 
@@ -821,7 +900,7 @@ See Section 4.2 for meta-sheet identification.
 
 이번 패치에서 추가된, 가장 중요한 실수 유형입니다. (Phase 2-2f.1 에서 추가)
 
-This is the most important new mistake type added in this patch (Phase 2-2f.1).
+This is the most important new mistake type added in Phase 2-2f.1.
 
 **증상 / Symptom**:
 ```
@@ -863,7 +942,92 @@ Channel-Mention Test: "CAN" 명시 → YES → Step 2 → interface (확정)
 
 Classification is mechanical via decision tree, not intuition. If category flips between runs, the decision tree was not applied.
 
-See Section 8.5 for the full tree, the Interface-Priority overlap rule, and 16 worked examples (E1–E16).
+See Section 8.5 for the full tree, the Interface-Priority overlap rule, and 19 worked examples (E1–E19).
+
+### ❌ Mistake 8: ⭐ Mishandling Legacy SW/HW Inputs / Legacy SW/HW 입력 오처리
+
+Phase 2-2f.2 에서 추가된 새로운 실수 유형입니다. 한국 OEM 프로젝트에서 매우 흔하게 발생합니다.
+
+This mistake type is added in Phase 2-2f.2. Very common in Korean OEM projects.
+
+**증상 / Symptoms — 4가지 잘못된 처리 패턴**:
+
+| ❌ 잘못된 처리 | 결과 | 올바른 처리 |
+|---|---|---|
+| **A. 거부 (Reject)**: "이건 SWE.1 / HWE.1 내용이지 SYS.1 이 아니다 — 입력에서 제외" | 스펙 손실 (`spec_loss` status) | Spec-Preservation 에 따라 보존 (Section 3) |
+| **B. 추상화 (Abstract)**: "Linux kernel 5.4 + PREEMPT_RT" → "shall use real-time Linux OS" | 구체성 손실, 고객 의도 왜곡 | 원문 그대로 보존 (Rule 6) |
+| **C. functional 로 잘못 분류**: 카테고리를 `functional` 로 마킹 | 임의 변경 가능한 항목으로 오해됨, 심사 시 "왜 SYS.1 에 SW 내용?" 질문 받음 | `constraint` + `is_design_constraint: true` (Rule 5 Step 1, E17~E19) |
+| **D. Pass-Through 누락**: `is_design_constraint: true` 인데 `pass_through_candidates[]` 비어 있음 | 다운스트림(SWE.1/HWE.1)에서 활용 불가, 추적성 단절 | 모든 Design Constraint 를 `pass_through_candidates[]` 에 등록 (Section 6.4) |
+
+**예시 — 4가지 처리의 비교 / Worked Example — All 4 Treatments Compared**:
+
+고객 입력: `"The NAD shall use Qualcomm SA525M chipset (binding from MY2024 platform)."`
+
+```
+❌ Wrong A (거부):
+   → 이 행 누락. coverage_matrix.summary.status = "spec_loss"
+
+❌ Wrong B (추상화):
+   → "The NAD shall use a 4G-capable chipset." (Qualcomm SA525M 손실)
+
+❌ Wrong C (functional 오분류):
+   {
+     "id": "STK_REQ_NAD_042",
+     "category": "functional",  // ← Wrong!
+     "is_design_constraint": false,  // ← Wrong!
+     "statement": "The NAD shall use Qualcomm SA525M chipset.",
+     ...
+   }
+   심사원 질문: "왜 SYS.1 에 칩셋 모델명이 functional 로?" → 답변 불가
+
+❌ Wrong D (Pass-Through 누락):
+   {
+     "id": "STK_REQ_NAD_042",
+     "category": "constraint",  // ← Correct
+     "is_design_constraint": true,  // ← Correct
+     ...
+   }
+   // BUT: traceability_seeds.pass_through_candidates 가 비어 있음 → HWE.1 추적 끊김
+
+✅ Right (전체 정합):
+   {
+     "id": "STK_REQ_NAD_042",
+     "category": "constraint",
+     "is_design_constraint": true,
+     "statement": "The NAD shall use Qualcomm SA525M chipset (binding from MY2024 platform).",
+     "rationale": "고객 Legacy 시스템(MY2024 NAD) 기반 칩셋 강제 — 시스템 측 임의 변경 불가. 신규 아키텍처와의 부작용 여부는 HW 담당자 공동 평가 필요.",
+     "source_doc": "Customer HW Requirements §Cellular, Row 42 (HW-042)",
+     "priority": "must",
+     "verification_method": "review",
+     ...
+   }
+   
+   AND traceability_seeds.pass_through_candidates 에:
+   {
+     "stk_req_id": "STK_REQ_NAD_042",
+     "target_process": "HWE.1",
+     "rationale": "Legacy HW 칩셋 강제 — HWE.1 다이렉트",
+     "requires_se_sw_agreement": true
+   }
+   
+   AND warnings 에:
+   "고객 Legacy MY2024 NAD 기반 칩셋(Qualcomm SA525M) 강제 — Design Constraint 로 분류
+    (is_design_constraint=true), HWE.1 Pass-Through 후보로 등록. 부작용 검토(Impact Analysis)
+    및 SE-HW 합의 회의록 확보 필요 (Section 12.5 Step 2-3 참조)."
+```
+
+**판단 체크리스트 / Quick Check** — 입력 행 처리 시 다음 4가지 모두 만족해야 함:
+
+1. ☐ 행이 보존되었는가? (STK_REQ 1개 이상 도출)
+2. ☐ 원문 사양이 그대로 보존되었는가? (칩셋명·OS 버전 등 구체성 유지)
+3. ☐ `category = constraint` + `is_design_constraint: true` 가 모두 설정되었는가?
+4. ☐ `pass_through_candidates[]` 에 등록되었는가?
+
+4개 모두 YES → 올바른 처리. 하나라도 NO → Mistake 8 발생, 수정 필요.
+
+Section 12.5 의 3단계 표준 프로세스를 참조하면 위 4가지가 자동으로 충족됩니다.
+
+Following the 3-step standard process in Section 12.5 ensures all 4 conditions are met automatically.
 
 ---
 
@@ -903,6 +1067,7 @@ When generating from a `<sheet_context>` block:
 5. **Cite `source_item_id`** as the row's `ID` field (if present)
 6. **Cite `source_doc`** as: `"<source_document> §<sheet_name>, Row <row_num> (<source_item_id>)"`
 7. **Compute coverage_matrix entry** for this group only (the orchestrator will merge across sheets)
+8. ⭐ **Detect Legacy / Design Constraint cases** per Section 3.5 + Rule 5 Step 1 — set `is_design_constraint: true` and populate `pass_through_candidates_partial[]` (sheet-level subset; orchestrator merges into final `traceability_seeds.pass_through_candidates`)
 
 ### 11.2 Per-Sheet Output Subset / 시트별 출력 부분
 
@@ -914,8 +1079,7 @@ In sheet-by-sheet mode, the Generator produces a subset of the full schema (will
   "group": "CELLULAR",
   "sheet_source": "Cellular Stack",
   "stakeholder_requirements": [
-    { "id": "STK_REQ_CELLULAR_001", ... },
-    { "id": "STK_REQ_CELLULAR_002", ... }
+    { "id": "STK_REQ_CELLULAR_001", ... }
   ],
   "coverage_matrix_partial": {
     "group": "CELLULAR",
@@ -925,11 +1089,19 @@ In sheet-by-sheet mode, the Generator produces a subset of the full schema (will
     "ratio": 1.043,
     "unmapped_input_rows": []
   },
+  "pass_through_candidates_partial": [
+    {
+      "stk_req_id": "STK_REQ_CELLULAR_042",
+      "target_process": "HWE.1",
+      "rationale": "Legacy HW 칩셋 강제 — HWE.1 다이렉트",
+      "requires_se_sw_agreement": true
+    }
+  ],
   "warnings": []
 }
 ```
 
-The orchestrator merges all per-sheet outputs into the full structure (Section 6), computes `operational_context` from accumulated regulatory mentions, and produces the final `traceability_seeds` and `summary`.
+The orchestrator merges all per-sheet outputs into the full structure (Section 6), computes `operational_context` from accumulated regulatory mentions, merges `pass_through_candidates_partial[]` into `traceability_seeds.pass_through_candidates[]`, and produces the final `traceability_seeds` and `summary`.
 
 ### 11.3 If No Sheet Context Provided / 시트 컨텍스트 없을 때
 
@@ -979,18 +1151,140 @@ Korean OEMs (Hyundai, Kia, GM Korea, Renault Korea) and major Tier-1s (현대모
 - **Bilingual documentation** — English technical content with Korean rationale
 - **Strict traceability** — every customer line traceable to a SYS.1 STK_REQ
 - **Customer item IDs preserved** in source_doc — assessors cross-check against customer documents
+- ⭐ **Legacy SW/HW handling via 3-step process** — Section 12.5 (Design Constraint → Reverse Traceability → Pass-Through)
 
 This SKILL is built to meet these expectations. Spec-preservation mode (Section 3) is non-negotiable for Korean OEM-supplier projects.
 
 본 SKILL 은 위 기대사항을 충족하도록 설계되었습니다. 스펙 보존 모드(섹션 3)는 한국 OEM-공급사 프로젝트에서 비협상 사항입니다.
 
+### 12.5 ⭐ Legacy System Inputs — 3-Step Standard Process / Legacy 시스템 입력 — 3단계 실무 표준 프로세스
+
+**Context / 배경**:
+한국 OEM 은 과거 검증된 Legacy 시스템의 개발 경험과 뼈아픈 시행착오를 바탕으로, 자신들이 이미 검증했다고 믿는 구체적인 코드 로직(SW), 특정 칩셋이나 회로 배치(HW) 지침을 SYS.1 input 에 섞어서 공급사에 전달하는 경우가 많습니다. 글로벌 선진 Tier 1 들은 이 상황을 다음 3단계 표준 프로세스로 처리합니다.
+
+Korean OEMs, drawing on Legacy system development experience and hard-won lessons, often embed specific code logic (SW) and chipset/circuit placement (HW) guidelines into the SYS.1 input. Global Tier 1s handle this situation via the following 3-step standard process.
+
+**핵심 원칙 / Core Principle**:
+> 고객의 과거 유산을 **무작위로 거부하지도, 맹종하지도 않는다.** '설계 제약 분류 → 부작용 검토 → 다이렉트 링크 연결' 이라는 명확한 필터를 거쳐 통제하는 것이 현대적 형상관리의 정석.
+> 
+> Neither **arbitrarily reject nor blindly accept** the customer's legacy heritage. Control it through a clear filter: "Design Constraint classification → Side-effect review → Direct link connection" — this is the modern configuration management standard.
+
+#### Step 1 — Design Constraint 분류 (SKILL 자동 처리)
+
+**Action**: 고객의 Legacy 기반 SW/HW input 을 **'설계 제약 조건(Design Constraint)'** 으로 분류하여 SYS.1 수준에서 관리합니다.
+
+| 항목 | 값 |
+|---|---|
+| 요구사항 관리 툴 속성 (Polarion, DOORS 등) | `Type = Design Constraint` (NOT `Functional Requirement`) |
+| 본 SKILL 출력 | `category: "constraint"` + `is_design_constraint: true` |
+| Rule 5 결정 트리 | Step 1 — Design Constraint 분기 (Section 8.5.2 E17~E19) |
+| rationale 한 줄 | "고객 Legacy 시스템 기반 설계 제약 — 시스템 측 임의 변경 불가." |
+
+**심사원 방어 논리 / Defense Argument for Assessors**:
+> "이것은 고객이 Legacy 시스템의 검증된 아키텍처를 강제한 **'설계 제약 조건'** 이기 때문에 SYS.1 수준에서 관리하는 것이 맞습니다."
+> 
+> "This is a customer-imposed **'Design Constraint'** rooted in a validated Legacy architecture, so SYS.1-level management is appropriate."
+
+이렇게 분류해야 심사원이 와서 "왜 시스템 문서(SYS.1)에 하위 레벨인 SW/HW 설계 이야기가 적혀 있죠?" 라고 지적할 때 완벽하게 방어할 수 있습니다.
+
+This classification enables a clean defense when assessors ask "Why does the system document (SYS.1) contain lower-level SW/HW design details?"
+
+#### Step 2 — Reverse Traceability 검증 (역추적성 검토 — 가장 중요) ★
+
+**원칙 / Principle** (재인용 / Repeat):
+> **"Legacy 산출물이라도 추가 검토(Evaluation) 없이 그냥 받아쓰기해서는 안 된다."**
+> **"Legacy artifacts MUST NOT be passively copied without additional evaluation."**
+
+고객이 준 구체적인 SW/HW 내용이 **현재 새로 개발하는 전체 시스템 아키텍처와 충돌이나 부작용(Side-effect)** 을 일으키지 않는지 확인하는 절차가 필요합니다. 이를 **역추적성 검토(Reverse Traceability Review)** 라고 합니다.
+
+**실무 액션 (3 단계) / Field Actions (3 sub-steps)**:
+
+1. **소집 (Convene)**: 시스템 엔지니어(SE)가 SW/HW 담당자를 소집합니다.
+
+2. **분석 (Analyze) — Impact Analysis**:
+   - 고객이 준 Legacy 기반 SW 로직(SYS.1)을 그대로 썼을 때, 이번에 새로 바뀌는 다른 시스템 기능과 **간섭이나 버그를 일으키지 않는가?**
+   - 예시 (Examples):
+     - 새로운 통신 프로토콜과의 충돌 여부
+     - 변경된 전원 회로와의 호환성
+     - 신규 보안 요구사항과의 일치성
+     - 새 ASIL 등급에서의 적합성
+   - 산출물: Impact Analysis 보고서
+
+3. **승인 (Confirm)**: 분석 결과 문제없음이 확인되면, **Confirm 마크** 를 부여합니다.
+   - 도구/증적: Polarion/DOORS 내 Confirm 속성 + SW/HW 담당자 공동 서명 (또는 툴 내 승인 마크)
+   - 본 SKILL 산출물의 `traceability_seeds.pass_through_candidates[].requires_se_sw_agreement: true` 가 이 단계 완료를 전제로 함
+
+**중요 / Important**: 이 단계는 SKILL 자동 처리 범위 밖입니다 — **사람(SE + SW/HW 담당자)** 이 수행해야 하며, SKILL 은 단지 "이 STK_REQ 는 Reverse Traceability 검토가 필요하다"는 신호 (`is_design_constraint: true` + Pass-Through 후보 등록) 만 제공합니다.
+
+This step is outside the SKILL's automated scope — **humans (SE + SW/HW engineers)** must perform it; the SKILL only signals "this STK_REQ requires a Reverse Traceability review" (`is_design_constraint: true` + Pass-Through candidate registration).
+
+#### Step 3 — Pass-Through 다이렉트 링크 연결
+
+**Action**: 고객이 준 구체적인 SW 알고리즘 내용을 SYS.2 에 복사·붙여넣기 하지 않고, **SYS.1 → SWE.1/HWE.1 다이렉트 화살표(Traceability Link)** 를 연결합니다. 중간 단계인 SYS.2 는 **건너뜁니다(Pass-Through)**.
+
+```
+[Standard 흐름]
+   SYS.1 ──→ SYS.2 ──→ SWE.1
+                       (또는 HWE.1)
+
+[Pass-Through 흐름 — Legacy Design Constraint 한정]
+   SYS.1 ─────────────→ SWE.1   ← SYS.2 우회
+   (Design Constraint)  (또는 HWE.1)
+```
+
+**이유 / Why**: 
+- 문서의 불필요한 중복 방지 (구체 SW 알고리즘이 SYS.1 과 SYS.2 두 곳에 똑같이 적힐 필요 없음)
+- 추적성의 명확성 (Legacy 사양은 시스템 분해 없이 직접 구현으로 전달)
+- ASPICE 평가에서 인정되는 효율적 형상관리 방식
+
+**필수 증적 / Required Evidence**:
+> "시스템 대표(SE)와 SW 대표(SW 리더)가 **이 Legacy 요구사항은 상위 단계를 생략하고 SW 레벨로 직접 하향 전파(Pass-Through)하기로 합의함**" 이라는 기록 (회의록 또는 툴 내의 승인 마크)
+> 
+> Written record (meeting minutes or tool approval mark) stating: "The SE representative and SW leader **agreed to pass this Legacy requirement directly to the SW level, bypassing the upper stage (Pass-Through)**"
+
+본 SKILL 은 이를 `traceability_seeds.pass_through_candidates[].requires_se_sw_agreement: true` 로 명시. 실제 합의 증적은 **다운스트림 단계 (SWE.1/HWE.1 생성 시)** 에서 확보합니다.
+
+This SKILL marks it via `traceability_seeds.pass_through_candidates[].requires_se_sw_agreement: true`. The actual agreement evidence is secured **downstream (when SWE.1/HWE.1 artifacts are generated)**.
+
+#### 💡 심사원 앞 모범 답변 (Model Answer Before Assessors)
+
+이 프로세스를 구축해 두면, A-SPICE 심사 시 다음과 같이 모범적인 답변을 할 수 있습니다.
+
+With this process in place, you can give the following exemplary answer in an A-SPICE assessment.
+
+> **모범 답변 (한글)**:
+> "저희 고객사는 Legacy 시스템의 개발 경험을 바탕으로 매우 구체적인 SW/HW 레벨의 요구사항을 SYS.1 인풋으로 제공했습니다.
+> 
+> 저희는 이를 **'설계 제약 조건(Design Constraint)'** 으로 분류하여 SYS.1 단계에서 관리하고 있으며, 신규 시스템 아키텍처와의 부작용(Side-effect) 여부를 SW/HW 담당자들과 공동으로 평가(Evaluation)하여 무결성을 검증했습니다.
+> 
+> 이후 문서의 불필요한 중복을 막기 위해 시스템-도메인 담당자 간 합의 하에, 해당 요구사항들을 하위 SWE.1 / HWE.1 명세서로 **직접 Pass-Through 링크**를 연결하여 양방향 추적성을 확보했습니다."
+
+> **Model Answer (English)**:
+> "Our customer, drawing on Legacy system development experience, provided very specific SW/HW-level requirements as SYS.1 input.
+> 
+> We classified these as **'Design Constraints'** and manage them at the SYS.1 level. We then verified integrity through a joint **Impact Analysis** with SW/HW engineers to confirm no side effects with the new system architecture.
+> 
+> To prevent unnecessary documentation duplication, with SE-domain owner agreement, we connected these requirements directly to SWE.1/HWE.1 specifications via **Pass-Through links**, securing bidirectional traceability."
+
+#### Process Summary Table / 프로세스 요약표
+
+| Step | 핵심 액션 / Core Action | 도구·증적 / Tools & Evidence | SKILL 처리 / SKILL Handling |
+|---|---|---|---|
+| **1. Design Constraint 분류** | Type 속성을 Design Constraint 로 마킹 | Polarion / DOORS 속성 설정 | ✅ 자동 — `category: "constraint"` + `is_design_constraint: true` |
+| **2. Reverse Traceability 검토** | SW/HW 담당자와 Impact Analysis 수행 | 분석 보고서 + Confirm 마크 | ⚠️ 사람 수행 — SKILL 은 `requires_se_sw_agreement: true` 신호만 제공 |
+| **3. Pass-Through 링크 연결** | SYS.1 → SWE.1 / HWE.1 다이렉트 링크 | 합의 회의록 + Traceability 링크 | ✅ 후보 등록 자동 — 실제 링크는 다운스트림 |
+
+세 단계가 함께 작동해야 한국 OEM-Tier 1 프로젝트에서 Legacy SW/HW 입력이 ASPICE 평가를 안전하게 통과합니다.
+
+All three steps must work together for Legacy SW/HW inputs to safely pass A-SPICE assessment in Korean OEM-Tier 1 projects.
+
 ---
 
-## 13. Summary — The Four Pillars / 요약 — 4대 원칙
+## 13. Summary — The Five Pillars / 요약 — 5대 원칙
 
-If you forget everything else, remember these four:
+If you forget everything else, remember these five:
 
-다른 모든 것을 잊더라도 다음 4가지는 기억:
+다른 모든 것을 잊더라도 다음 5가지는 기억:
 
 1. **Spec Preservation (Section 3)** — Every customer input → ≥1 STK_REQ. Ratio 1.0-1.3. No compression ever.
    **스펙 보존** — 모든 고객 입력 → 1개 이상 STK_REQ. 비율 1.0-1.3. 압축 절대 금지.
@@ -1004,6 +1298,9 @@ If you forget everything else, remember these four:
 4. ⭐ **Classification Determinism (Rule 5 + Section 8.5)** — Apply the decision tree top-down: constraint → interface → non_functional → functional. **When `interface` and `functional` overlap, ALWAYS choose `interface`**. Same input → same category every run.
    **분류 결정성** — 결정 트리를 위에서부터 적용: constraint → interface → non_functional → functional. **`interface` 와 `functional` 이 겹치면 항상 `interface`** 선택. 같은 입력 → 매 런마다 같은 카테고리.
 
-These four pillars together ensure the SYS.1 artifact passes ASPICE assessment under the Korean OEM-supplier workflow with reproducible classification.
+5. ⭐ **Legacy System Handling — 3-Step Process (Section 3.5 + Section 12.5)** — Customer-provided Legacy SW/HW specifics MUST be: (1) preserved with `category: "constraint"` + `is_design_constraint: true`, (2) flagged for Reverse Traceability review by SE + SW/HW engineers, (3) registered as `pass_through_candidates[]` for downstream SWE.1/HWE.1 direct linkage. **Neither reject nor blindly accept — filter and control via 3 steps.**
+   **Legacy 시스템 처리 — 3단계 프로세스** — 고객 제공 Legacy SW/HW 구체 사양은 반드시: (1) `category: "constraint"` + `is_design_constraint: true` 로 보존, (2) SE + SW/HW 담당자의 Reverse Traceability 검토 대상으로 표시, (3) 다운스트림 SWE.1/HWE.1 직접 연결 후보(`pass_through_candidates[]`)로 등록. **거부도 맹종도 아닌 — 3단계 필터로 통제.**
 
-이 4대 원칙이 함께 작동해야 한국 OEM-공급사 워크플로우 하에서 SYS.1 산출물이 ASPICE 평가를 통과하며, 재현 가능한 분류를 보장합니다.
+These five pillars together ensure the SYS.1 artifact passes ASPICE assessment under the Korean OEM-supplier workflow with reproducible classification and clean Legacy handling.
+
+이 5대 원칙이 함께 작동해야 한국 OEM-공급사 워크플로우 하에서 SYS.1 산출물이 ASPICE 평가를 통과하며, 재현 가능한 분류와 깨끗한 Legacy 처리를 보장합니다.
