@@ -16,7 +16,7 @@
       "includeFiles": "skills/**"
     },
     "api/generate-merge.js": {
-      "maxDuration": 300,
+      "maxDuration": 600,
       "includeFiles": "skills/**"
     },
     "api/generate-cancel.js": {
