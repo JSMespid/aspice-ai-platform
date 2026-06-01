@@ -7,6 +7,24 @@
       "maxDuration": 800,
       "includeFiles": "skills/**"
     },
+    "api/generate-init.js": {
+      "maxDuration": 60,
+      "includeFiles": "skills/**"
+    },
+    "api/generate-batch.js": {
+      "maxDuration": 800,
+      "includeFiles": "skills/**"
+    },
+    "api/generate-merge.js": {
+      "maxDuration": 300,
+      "includeFiles": "skills/**"
+    },
+    "api/generate-cancel.js": {
+      "maxDuration": 30
+    },
+    "api/generation-status.js": {
+      "maxDuration": 30
+    },
     "api/evaluate.js": {
       "maxDuration": 300
     }
