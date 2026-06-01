@@ -598,6 +598,7 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
           // thinking: { type: 'enabled', budget_tokens: 8000 },
           // Structured Outputs (GA — 별도 beta header 불필요)
           output_config: {
+            effort: 'medium',           // ← 신규 추가 (low/medium/high/xhigh)
             format: {
               type: 'json_schema',
               schema,
