@@ -23,7 +23,6 @@
 //   ai_generations 행 기록 (raw_output, parsed_output, guardrail_result)
 //   state_transitions 행 기록 (INITIAL → GENERATING → GENERATED/REJECTED)
 //   audit_logs 행 기록
-
 const TIMEOUT_MS = 750_000; // Phase 2-2c (Pro): 12분 30초 — Vercel Pro maxDuration 800초 한도 내 안전 마진
                              // 시트당 깊은 reasoning 5~6분도 충분히 처리 가능
 const MAX_TOKENS = 64000;  // Phase 2-2c: 시트별 스펙 보존 모드로 출력 크기 증가 (Opus 4.7 최대 128000)
@@ -31,7 +30,6 @@ const MAX_TOKENS = 64000;  // Phase 2-2c: 시트별 스펙 보존 모드로 출�
 const MODEL = 'claude-opus-4-7';  // 최상위 reasoning 모델 (품질 우선)
 //const MODEL = 'claude-sonnet-4-6';
 const PROVIDER = 'anthropic';
-
 // Phase 2-2e: 시트별 호출 batch 크기
 // Anthropic Tier 1 Opus 한도 (50 RPM, 30K ITPM) 안전 마진 + Vercel proxy 침묵 타임아웃 회피
 // - 1: 완전 직렬 (안전하지만 느림 — 시트 N개 = N × 5분)
@@ -42,7 +40,6 @@ const PROVIDER = 'anthropic';
 const SHEET_BATCH_SIZE = Math.max(1, Math.min(8,
   parseInt(process.env.SHEET_BATCH_SIZE || '2', 10) || 2
 ));
-
 // ──────────────────────────────────────────────────
 // Supabase REST 헬퍼
 // ──────────────────────────────────────────────────
@@ -61,7 +58,6 @@ async function sb(path, method = 'GET', body = null, prefer = null) {
   const txt = await res.text();
   return txt ? JSON.parse(txt) : null;
 }
-
 // ──────────────────────────────────────────────────
 // Phase 2-2c: 상태값 영문 ↔ 한글 매핑
 // work_products 테이블에는 state(영문) + status(한글) 두 컬럼이 있음
@@ -79,7 +75,6 @@ function stateToStatus(state) {
   };
   return map[state] || '초안';
 }
-
 function syncStateAndStatus(state) {
   // 두 컬럼 모두 업데이트할 객체 반환
   return {
@@ -87,7 +82,6 @@ function syncStateAndStatus(state) {
     status: stateToStatus(state),
   };
 }
-
 // ──────────────────────────────────────────────────
 // Skills 로딩 (filesystem 기반)
 // 빌드 시 함께 배포되도록 SKILL.md 들이 코드에 포함됨
@@ -97,12 +91,10 @@ const SKILLS_INDEX = {
   // 'SWE.1': ['aspice-swe1-analysis',     'automotive-domain-guide', 'traceability-rules'],
   // 추가 프로세스는 Phase 2-2b 이후에 SKILL.md 추가하면서 매핑
 };
-
 // 런타임에 SKILL.md 들을 읽어 system prompt 에 합성
 // (Vercel 함수에서 접근 가능하도록 inline)
 import { readFileSync, existsSync } from 'fs';
 import path from 'path';
-
 function loadSkill(skillName) {
   // process.cwd() 는 프로젝트 루트 (Vercel 함수도 동일)
   const candidates = [
@@ -115,7 +107,6 @@ function loadSkill(skillName) {
   console.warn(`[skill] Not found: ${skillName} — searched: ${candidates.join(', ')}`);
   return null;
 }
-
 function composeSystemPrompt(processId) {
   const skillNames = SKILLS_INDEX[processId] || [];
   const skillBlocks = [];
@@ -126,47 +117,34 @@ function composeSystemPrompt(processId) {
     }
   }
   return `You are a senior ASPICE PAM v4.0 consultant and automotive functional safety engineer. You have 15+ years of experience deriving stakeholder requirements for automotive ECUs, ADAS, infotainment, and connected vehicle systems.
-
 Your task: Generate a high-quality ASPICE work product based on the provided input documents.
-
 QUALITY PRINCIPLES (non-negotiable):
-
 1. **Completeness over brevity**: Extract EVERY meaningful stakeholder requirement from the input. Do not artificially limit yourself. ASPICE assessors penalize missing requirements.
-
 2. **Precision over speed**: For each STK_REQ, take time to:
    - Cite the EXACT section/page of the source document
    - Identify the underlying stakeholder need (not just paraphrase the input)
    - Specify measurable verification criteria
-
 3. **Domain rigor**: Apply ISO 26262 (functional safety), ISO/SAE 21434 (cybersecurity), and ECE/KMVSS regulations where relevant. If a requirement has safety implications, classify ASIL.
-
 4. **No hallucination**:
    - If a requirement is NOT in the input documents, do NOT invent it.
    - If the input is ambiguous, mark in rationale: "Source document lacks specificity in X; clarification needed."
    - Every STK_REQ_NNN MUST have a verifiable source_doc reference.
-
 5. **JSON Schema compliance**: Your response MUST exactly match the schema in output_config. Any deviation causes validation failures.
-
 6. **Korean OK for rationale**: Technical IDs, statements, source_doc in English. Rationale may use Korean if it captures nuance better.
-
 OUTPUT EXPECTATIONS:
 - Generate as many stakeholder_requirements as the input warrants (typical NAD-class systems: 15-30 STK_REQs).
 - Generate primary use cases (typically 3-7).
 - Include comprehensive operational_context (environmental, operational, regulatory).
 - Provide thorough traceability_seeds showing which SW/HW/SOW sections map to each STK_REQ.
-
 ${skillBlocks.join('\n\n')}
-
 Now analyze the user-provided input carefully. Think step by step:
 - First, identify all stakeholders mentioned (driver, OEM, regulator, supplier, etc.)
 - Second, extract their needs from the input documents
 - Third, translate each need into a precise, testable STK_REQ
 - Fourth, validate every STK_REQ against the Quality Principles above
 - Finally, structure the response per the output schema
-
 Apply the checklists in each Skill BEFORE finalizing your response. Quality is the only goal.`;
 }
-
 // ──────────────────────────────────────────────────
 // Output Schema for SYS.1 — Phase 2-2c Schema
 // 변경사항:
@@ -177,10 +155,8 @@ Apply the checklists in each Skill BEFORE finalizing your response. Quality is t
 //   - warnings 추가 (메타 시트 감지 등 안내)
 //   - 시트별 분할 호출 시 사용되는 partial schema 추가
 // ──────────────────────────────────────────────────
-
 // 전체 출력 스키마 (단일 호출 또는 병합된 최종 결과)
 const STK_REQ_ID_PATTERN = '^STK_REQ_([A-Z][A-Z0-9_]*_)?[0-9]{3}$';
-
 const STK_REQ_ITEM_SCHEMA = {
   type: 'object',
   properties: {
@@ -204,7 +180,6 @@ const STK_REQ_ITEM_SCHEMA = {
   ],
   additionalProperties: false,
 };
-
 const OUTPUT_SCHEMAS = {
   'SYS.1': {
     type: 'object',
@@ -279,7 +254,6 @@ const OUTPUT_SCHEMAS = {
     additionalProperties: false,
   },
 };
-
 // 시트별 분할 호출 시 사용 (부분 스키마)
 const PER_SHEET_SCHEMA = {
   type: 'object',
@@ -322,12 +296,10 @@ const PER_SHEET_SCHEMA = {
   ],
   additionalProperties: false,
 };
-
 // ──────────────────────────────────────────────────
 // 5축 가드레일 (Phase 2-2a 활성: 1, 2, 3 / 훅: 4, 5)
 // ──────────────────────────────────────────────────
 import { runGuardrails } from '../src/lib/guardrails-server.js';
-
 // ──────────────────────────────────────────────────
 // 비용 추정 (Claude Opus 4.7 + Prompt Caching 가격)
 // ──────────────────────────────────────────────────
@@ -346,7 +318,46 @@ function estimateCost(inputTokens, outputTokens, cacheCreationTokens = 0, cacheR
   const outputCost = (outputTokens * 75) / 1_000_000;
   return inputCost + cacheWriteCost + cacheReadCost + outputCost;
 }
+// ──────────────────────────────────────────────────
+// 사용자 입력 구조화 (work_products.content 를 Claude 가 읽기 좋게 변환)
+// Phase 2-2c: 라벨 매핑이 일반화됨 (sw_req/hw_req/sow → 사람이 읽는 라벨)
+//             엑셀 시트는 본 함수가 아닌 buildSheetUserPrompt 사용
+// ──────────────────────────────────────────────────
+function buildUserPrompt(processId, content, projectMeta) {
+  const lines = [];
+  lines.push(`# Project Context`);
+  lines.push(`- Project: ${projectMeta.name || '(unnamed)'}`);
+  if (projectMeta.product_name) lines.push(`- Product: ${projectMeta.product_name}`);
+  if (projectMeta.organization) lines.push(`- Organization: ${projectMeta.organization}`);
+  if (projectMeta.description)  lines.push(`- Description: ${projectMeta.description}`);
+  lines.push('');
+  lines.push(`# Process: ${processId}`);
+  lines.push('');
+  lines.push(`# Input Items (OEM Customer Documents — preserve all specs)`);
+  lines.push('');
+  lines.push(`⚠️ These input documents are CUSTOMER deliverables provided to the supplier.`);
+  lines.push(`Citing them in source_doc is NORMAL — NOT a circular reference.`);
+  lines.push(`The supplier MUST preserve all customer specifications (ratio 1.0-1.3).`);
+  lines.push('');
 
+  for (const [key, value] of Object.entries(content || {})) {
+    if (!value || !value.body) continue;
+    const label = labelOf(processId, key);
+    lines.push(`## ${label}`);
+    if (value.fileName) lines.push(`Source file: ${value.fileName}`);
+    if (value.note)     lines.push(`Note: ${value.note}`);
+    lines.push('');
+    lines.push(value.body);
+    lines.push('');
+  }
+
+  lines.push(`# Task`);
+  lines.push(`Generate the ${processId} work product per the loaded Skills (especially aspice-sys1-derivation).`);
+  lines.push(`Apply Spec-Preservation Principle: every customer input item → ≥1 STK_REQ.`);
+  lines.push(`Compute coverage_matrix with status "compliant" if ratio in [1.0, 1.3].`);
+  lines.push(`Output strictly conforming JSON.`);
+  return lines.join('\n');
+}
 // Phase 2-2c: 시트별 분할 호출용 사용자 프롬프트
 // Phase 2-2g (옵션 G 핫픽스): 시트별 unique ID prefix 강제로 ID 충돌 방지
 function buildSheetUserPrompt({
@@ -378,7 +389,6 @@ function buildSheetUserPrompt({
   // 스키마 패턴 보장: 영문/숫자/언더스코어만, 대문자, 첫 글자는 A-Z
   sheetPrefix = sheetPrefix.replace(/[^A-Z0-9_]/gi, '').toUpperCase();
   if (!sheetPrefix || !/^[A-Z]/.test(sheetPrefix)) sheetPrefix = 'GROUP';
-
   const lines = [];
   lines.push(`# Project Context`);
   lines.push(`- Project: ${projectMeta.name || '(unnamed)'}`);
@@ -388,20 +398,17 @@ function buildSheetUserPrompt({
   lines.push('');
   lines.push(`# Process: ${processId}`);
   lines.push('');
-
   // 다른 시트들 요약 (Claude가 전체 컨텍스트 인식하도록)
   if (otherInputsSummary) {
     lines.push(`# Other inputs in this project (for context only — do NOT derive STK_REQs from these in this call)`);
     lines.push(otherInputsSummary);
     lines.push('');
   }
-
   lines.push(`# ⚠️ SHEET-BASED GENERATION MODE / 시트 단위 생성 모드`);
   lines.push('');
   lines.push(`This call generates STK_REQs from ONE worksheet only.`);
   lines.push(`Output PER_SHEET_SCHEMA subset (process, group, sheet_source, stakeholder_requirements, coverage_matrix_partial, operational_context_partial, warnings).`);
   lines.push('');
-
   // ── ID 충돌 방지 instruction (옵션 G 핫픽스 핵심) ──
   lines.push(`## ⚠️ CRITICAL: STK_REQ ID Naming Rule (이 시트 전용)`);
   lines.push('');
@@ -422,7 +429,6 @@ function buildSheetUserPrompt({
   lines.push(`4. 시트 데이터 안에 다른 그룹 관련 텍스트가 있더라도 \`id\` prefix는 반드시 **STK_REQ_${sheetPrefix}_** 로 통일.`);
   lines.push(`5. 출력 객체의 \`group\` 필드는 "${groupName}", \`sheet_source\` 필드는 "${sheetData.sheet_name}" 으로 유지.`);
   lines.push('');
-
   lines.push(`<sheet_context>`);
   lines.push(`  <sheet_name>${sheetData.sheet_name}</sheet_name>`);
   lines.push(`  <group_name>${sheetData.group_name}</group_name>`);
@@ -439,7 +445,6 @@ function buildSheetUserPrompt({
   lines.push(`  </rows>`);
   lines.push(`</sheet_context>`);
   lines.push('');
-
   lines.push(`# Task`);
   lines.push(`For each row in <sheet_context>.<rows>, derive 1 or more STK_REQs (1:1 for simple, 1:N for composite).`);
   lines.push(`ID format: **STK_REQ_${sheetPrefix}_NNN** (001, 002, ...) — 위의 Absolute Rules 준수 필수.`);
@@ -454,79 +459,14 @@ function buildSheetUserPrompt({
   lines.push(`Compute coverage_matrix_partial: input_rows=${sheetData.rows.length}, derived_stk_reqs=<your count>, ratio, unmapped_input_rows.`);
   lines.push(`In operational_context_partial: include any regulations or interfaces SPECIFICALLY mentioned in this sheet only.`);
   lines.push(`Use warnings array if you detect any anomalies.`);
-
   return lines.join('\n');
 }
-
-// Phase 2-2c: 시트별 분할 호출용 사용자 프롬프트
-function buildSheetUserPrompt({
-  processId, sheetData, projectMeta, sheetIndex, totalSheets, customerSourceFileName, otherInputsSummary,
-}) {
-  const lines = [];
-  lines.push(`# Project Context`);
-  lines.push(`- Project: ${projectMeta.name || '(unnamed)'}`);
-  if (projectMeta.product_name) lines.push(`- Product: ${projectMeta.product_name}`);
-  if (projectMeta.organization) lines.push(`- Organization: ${projectMeta.organization}`);
-  if (projectMeta.description)  lines.push(`- Description: ${projectMeta.description}`);
-  lines.push('');
-  lines.push(`# Process: ${processId}`);
-  lines.push('');
-
-  // 다른 시트들 요약 (Claude가 전체 컨텍스트 인식하도록)
-  if (otherInputsSummary) {
-    lines.push(`# Other inputs in this project (for context only — do NOT derive STK_REQs from these in this call)`);
-    lines.push(otherInputsSummary);
-    lines.push('');
-  }
-
-  lines.push(`# ⚠️ SHEET-BASED GENERATION MODE / 시트 단위 생성 모드`);
-  lines.push('');
-  lines.push(`This call generates STK_REQs from ONE worksheet only.`);
-  lines.push(`Use the provided group_name for ALL STK_REQ IDs.`);
-  lines.push(`Counter starts at 001 for this group.`);
-  lines.push(`Output PER_SHEET_SCHEMA subset (process, group, sheet_source, stakeholder_requirements, coverage_matrix_partial, operational_context_partial, warnings).`);
-  lines.push('');
-
-  lines.push(`<sheet_context>`);
-  lines.push(`  <sheet_name>${sheetData.sheet_name}</sheet_name>`);
-  lines.push(`  <group_name>${sheetData.group_name}</group_name>`);
-  lines.push(`  <sheet_index>${sheetIndex}</sheet_index>`);
-  lines.push(`  <total_sheets>${totalSheets}</total_sheets>`);
-  lines.push(`  <is_meta>${sheetData.is_meta}</is_meta>`);
-  lines.push(`  <columns>${JSON.stringify(sheetData.columns)}</columns>`);
-  lines.push(`  <source_document>${customerSourceFileName || 'Customer Document'}</source_document>`);
-  lines.push(`  <rows>`);
-  for (const row of sheetData.rows) {
-    lines.push(`    ${JSON.stringify(row)}`);
-  }
-  lines.push(`  </rows>`);
-  lines.push(`</sheet_context>`);
-  lines.push('');
-
-  lines.push(`# Task`);
-  lines.push(`For each row in <sheet_context>.<rows>, derive 1 or more STK_REQs (1:1 for simple, 1:N for composite).`);
-  lines.push(`ID format: STK_REQ_${sheetData.group_name}_NNN (001, 002, ...).`);
-  lines.push(`Each STK_REQ MUST have:`);
-  lines.push(`  - group: "${sheetData.group_name}"`);
-  lines.push(`  - sheet_source: "${sheetData.sheet_name}"`);
-  lines.push(`  - source_row: <the row_num from rows array>`);
-  lines.push(`  - source_item_id: <the customer's ID field if present, else null>`);
-  lines.push(`  - source_doc: "${customerSourceFileName || 'Customer Document'} §${sheetData.sheet_name}, Row N (ID-XYZ)"`);
-  lines.push('');
-  lines.push(`Compute coverage_matrix_partial: input_rows=${sheetData.rows.length}, derived_stk_reqs=<your count>, ratio, unmapped_input_rows.`);
-  lines.push(`In operational_context_partial: include any regulations or interfaces SPECIFICALLY mentioned in this sheet only.`);
-  lines.push(`Use warnings array if you detect any anomalies.`);
-
-  return lines.join('\n');
-}
-
 function labelOf(processId, key) {
   const map = {
     'SYS.1': { sw_req: 'Customer SW Requirements', hw_req: 'Customer HW Requirements', sow: 'Statement of Work (SOW)' },
   };
   return (map[processId] && map[processId][key]) || key;
 }
-
 // Phase 2-2c: 시트별 호출 결과들을 최종 스키마로 병합
 function mergePerSheetOutputs(perSheetOutputs, processId, title) {
   const merged = {
@@ -554,39 +494,31 @@ function mergePerSheetOutputs(perSheetOutputs, processId, title) {
     },
     warnings: [],
   };
-
   const allRegulations = new Set();
   const allInterfaces = new Set();
-
   for (const sheetOut of perSheetOutputs) {
     if (!sheetOut) continue;
-
     // STK_REQ 누적
     if (Array.isArray(sheetOut.stakeholder_requirements)) {
       merged.stakeholder_requirements.push(...sheetOut.stakeholder_requirements);
     }
-
     // Coverage matrix 누적
     if (sheetOut.coverage_matrix_partial) {
       merged.coverage_matrix.by_group.push(sheetOut.coverage_matrix_partial);
     }
-
     // 법규/인터페이스 dedupe
     if (sheetOut.operational_context_partial) {
       (sheetOut.operational_context_partial.regulatory_constraints || []).forEach(r => allRegulations.add(r));
       (sheetOut.operational_context_partial.external_interfaces || []).forEach(i => allInterfaces.add(i));
     }
-
     // Warnings 누적
     if (Array.isArray(sheetOut.warnings)) {
       merged.warnings.push(...sheetOut.warnings);
     }
   }
-
   merged.operational_context.regulatory_constraints = Array.from(allRegulations);
   merged.operational_context.external_interfaces = Array.from(allInterfaces);
   merged.operational_context.operating_conditions = 'See individual sheet contexts. Default automotive operating range: -40°C to +85°C, 9-16V nominal, EMC per ECE R10.';
-
   // Summary 계산
   let totalInputRows = 0;
   let totalStkReqs = 0;
@@ -607,7 +539,6 @@ function mergePerSheetOutputs(perSheetOutputs, processId, title) {
   } else {
     merged.coverage_matrix.summary.status = 'compliant';
   }
-
   // Traceability seeds 자동 생성
   for (const stk of merged.stakeholder_requirements) {
     const arrow = `${stk.source_item_id || stk.sheet_source || 'Row ' + stk.source_row} → ${stk.id}`;
@@ -619,10 +550,8 @@ function mergePerSheetOutputs(perSheetOutputs, processId, title) {
       merged.traceability_seeds.from_sow.push(arrow);
     }
   }
-
   return merged;
 }
-
 // ──────────────────────────────────────────────────
 // Claude API 호출 (with Structured Outputs + Rate Limit Retry)
 // Phase 2-2c: 429 응답 시 retry-after 헤더 기반 자동 재시도 (최대 2회)
@@ -633,7 +562,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
   const ctrl = new AbortController();
   const timeoutId = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   const t0 = Date.now();
-
   try {
     let res;
     try {
@@ -685,7 +613,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
                               fetchError.message?.includes('ETIMEDOUT') ||
                               fetchError.code === 'UND_ERR_SOCKET' ||
                               fetchError.cause?.code === 'ECONNRESET';
-
       if (isNetworkError && attempt < MAX_RETRIES) {
         const waitMs = (attempt + 1) * 3000;  // 3초, 6초 백오프
         console.log(`[callClaude] Network error: ${fetchError.message}, retry after ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
@@ -696,7 +623,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
       // 재시도 한도 초과 또는 다른 종류 에러는 그대로 throw
       throw fetchError;
     }
-
     // Phase 2-2c: 429 (Rate Limit) 또는 529 (Overloaded) 자동 재시도
     if ((res.status === 429 || res.status === 529) && attempt < MAX_RETRIES) {
       const retryAfter = parseInt(res.headers.get('retry-after') || '5', 10);
@@ -706,7 +632,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
       await new Promise(r => setTimeout(r, waitMs));
       return callClaude({ systemPrompt, userPrompt, schema, attempt: attempt + 1 });
     }
-
     // Phase 2-2e: 응답 본문 안전 파싱
     // ── 문제 ──
     // 이전 코드: const data = await res.json()
@@ -721,7 +646,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
     // 3) 파싱 실패 시: upstream/proxy 에러 패턴이면 retry, 아니면 명확한 에러로 throw
     const rawBody = await res.text();
     const latency = Date.now() - t0;
-
     let data;
     try {
       data = JSON.parse(rawBody);
@@ -736,7 +660,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
         /gateway timeout/i.test(bodyPreview) ||
         /Cloudflare/i.test(bodyPreview) ||
         rawBody.startsWith('<');  // HTML 에러 페이지
-
       if (isUpstreamError && attempt < MAX_RETRIES) {
         const waitMs = (attempt + 1) * 5000;  // 5초, 10초 백오프 (게이트웨이 회복 시간)
         console.log(
@@ -747,7 +670,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
         await new Promise(r => setTimeout(r, waitMs));
         return callClaude({ systemPrompt, userPrompt, schema, attempt: attempt + 1 });
       }
-
       // 재시도 한도 초과 또는 다른 종류 파싱 에러 — 명확한 에러로 throw
       throw new Error(
         `Anthropic API 응답이 유효한 JSON 이 아닙니다 (HTTP ${res.status}). ` +
@@ -755,11 +677,9 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
         `응답 본문 미리보기: "${bodyPreview}"`
       );
     }
-
     if (!res.ok) {
       throw new Error(`Claude API ${res.status}: ${JSON.stringify(data).slice(0, 500)}`);
     }
-
     // Phase 2-2d: Prompt Caching 통계 로깅
     // - cache_creation_input_tokens: 캐시에 새로 저장된 토큰 (첫 호출)
     // - cache_read_input_tokens: 캐시에서 읽은 토큰 (재호출, 비용 90% 할인)
@@ -776,7 +696,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
       `(${cacheHit ? '✓ CACHE HIT' : 'no cache'}), ` +
       `output=${outputTokens}, latency=${latency}ms`
     );
-
     // 응답 파싱
     const textBlock = (data.content || []).find(c => c.type === 'text');
     if (!textBlock) {
@@ -784,7 +703,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
     }
     const rawOutput = textBlock.text;
     const stopReason = data.stop_reason || 'unknown';
-
     let parsedOutput = null;
     try {
       parsedOutput = JSON.parse(rawOutput);
@@ -799,7 +717,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
       }
       throw new Error(`Failed to parse JSON from Claude (stop=${stopReason}): ${e.message}`);
     }
-
     return {
       rawOutput,
       parsedOutput,
@@ -815,7 +732,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
     clearTimeout(timeoutId);
   }
 }
-
 // ──────────────────────────────────────────────────
 // Phase 2-2d: SSE (Server-Sent Events) Streaming Helpers
 // ──────────────────────────────────────────────────
@@ -829,7 +745,6 @@ async function callClaude({ systemPrompt, userPrompt, schema, attempt = 0 }) {
 // 백워드 호환:
 //   - 기존 JSON 응답 모드도 유지 (Accept 헤더로 결정)
 //   - 클라이언트가 SSE 미지원 시 자동 폴백
-
 /**
  * 요청이 SSE streaming 응답을 원하는지 판단.
  * Accept 헤더가 'text/event-stream'을 포함하거나
@@ -845,7 +760,6 @@ function wantsStreaming(req) {
   } catch (_) { /* req.url 형식이 다를 수 있어 무시 */ }
   return false;
 }
-
 /**
  * SSE 응답 헤더 설정 + 첫 이벤트 전송 (Vercel proxy 25초 룰 만족).
  */
@@ -861,7 +775,6 @@ function initSSE(res) {
     try { res.flushHeaders(); } catch (_) { /* noop */ }
   }
 }
-
 /**
  * SSE 이벤트 전송. 한 이벤트는 'event: type\ndata: json\n\n' 형식.
  * JSON 안에 줄바꿈이 있으면 SSE 파서가 깨지므로 stringify 결과만 사용.
@@ -874,7 +787,6 @@ function sseSend(res, eventType, payload) {
     console.error('[sse] write failed:', e.message);
   }
 }
-
 /**
  * Streaming/non-streaming 양 모드를 같은 코드로 다룰 emitter factory.
  *
@@ -895,7 +807,6 @@ function createEmitter({ streaming, res }) {
     emit: () => { /* noop in non-streaming mode */ },
   };
 }
-
 // ──────────────────────────────────────────────────
 // Main Handler
 // ──────────────────────────────────────────────────
@@ -905,7 +816,6 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-
   // Phase 2-2d: Streaming 모드 판정 + 즉시 SSE 헤더 전송 (Vercel proxy 25초 룰 만족)
   const streaming = wantsStreaming(req);
   if (streaming) {
@@ -918,7 +828,6 @@ export default async function handler(req, res) {
   }
   const emitter = createEmitter({ streaming, res });
   const emit = emitter.emit;
-
   const { project_id, process_id, work_product_id } = req.body || {};
   if (!project_id || !process_id) {
     if (streaming) {
@@ -927,7 +836,6 @@ export default async function handler(req, res) {
     }
     return res.status(400).json({ error: 'Missing project_id or process_id' });
   }
-
   // 지원하는 프로세스인지 확인 (Phase 2-2a 는 SYS.1만)
   if (!OUTPUT_SCHEMAS[process_id]) {
     const msg = `Process ${process_id} not yet supported. Currently supports: ${Object.keys(OUTPUT_SCHEMAS).join(', ')}`;
@@ -937,9 +845,7 @@ export default async function handler(req, res) {
     }
     return res.status(400).json({ error: msg });
   }
-
   let aiGenId = null;
-
   // Phase 2-2d: streaming/non-streaming 공통 에러 응답 헬퍼
   const sendError = (statusCode, errMsg, extra = {}) => {
     if (streaming) {
@@ -948,14 +854,11 @@ export default async function handler(req, res) {
     }
     return res.status(statusCode).json({ error: errMsg, ...extra });
   };
-
   try {
     emit('progress', { step: 'loading_input', message: '입력 검증 및 Skills 로딩' });
-
     // 1. 프로젝트 + work_product 조회
     const [project] = await sb(`/projects?id=eq.${project_id}&select=id,name,product_name,organization,description`);
     if (!project) return sendError(404, 'Project not found');
-
     let wp = null;
     if (work_product_id) {
       const wps = await sb(`/work_products?id=eq.${work_product_id}&select=*`);
@@ -969,7 +872,6 @@ export default async function handler(req, res) {
     if (!wp.content || Object.keys(wp.content).length === 0) {
       return sendError(400, 'Work product has no input content yet');
     }
-
     // 2. state: GENERATING
     await sb(`/work_products?id=eq.${wp.id}`, 'PATCH', syncStateAndStatus('GENERATING'));
     await sb(`/state_transitions`, 'POST', {
@@ -979,7 +881,6 @@ export default async function handler(req, res) {
       trigger: 'ai_generation',
       reason: `AI generation triggered for ${process_id}`,
     }, 'return=minimal');
-
     // 3. ⭐ Phase 2-2c: 엑셀 멀티시트 입력 감지
     //    - 입력 항목 중 source_type === 'excel_multi_sheet' 가 있으면 시트별 분할 호출
     //    - 없으면 기존 단일 호출 (백워드 호환)
@@ -999,11 +900,9 @@ export default async function handler(req, res) {
         }
       }
     }
-
     const useSheetSplit = sheetBasedInputs.length > 0;
     const systemPrompt = composeSystemPrompt(process_id);
     const skillsUsed = SKILLS_INDEX[process_id] || [];
-
     // Phase 2-2d: 시트 개수 + 모드 알림
     emit('progress', {
       step: 'mode_detected',
@@ -1021,12 +920,10 @@ export default async function handler(req, res) {
           }))
         : [],
     });
-
     // 4. ai_generations master row 생성 (실패해도 기록 남도록)
     const masterRowPrompt = useSheetSplit
       ? `[Sheet-Split Mode] Will dispatch ${sheetBasedInputs.length} per-sheet calls`
       : buildUserPrompt(process_id, wp.content, project);
-
     const [created] = await sb(`/ai_generations`, 'POST', {
       project_id,
       process_id,
@@ -1041,7 +938,6 @@ export default async function handler(req, res) {
       status: 'pending',
     }, 'return=representation') || [];
     aiGenId = created?.id;
-
     // 5. Claude 호출
     let parsedOutput;
     let totalInputTokens = 0;
@@ -1052,18 +948,15 @@ export default async function handler(req, res) {
     let totalLatencyMs = 0;
     let finishReason = 'success';
     let rawOutputLog = '';
-
     if (useSheetSplit) {
       // ── Phase 2-2c: 시트별 분할 호출 (병렬) ──
       // 2026년 5월 Anthropic Tier 1 Opus rate limit 15배 인상으로 병렬 호출 안전
       // callClaude 내부에 429/529 retry 로직 있어 추가 안전
       console.log(`[generate] Sheet-split mode (parallel): ${sheetBasedInputs.length} sheets`);
-
       // 다른 시트들 요약 (전체 컨텍스트 제공용)
       const otherInputsSummary = sheetBasedInputs
         .map((si, i) => `Sheet ${i + 1}/${sheetBasedInputs.length}: "${si.sheet.sheet_name}" (group: ${si.sheet.group_name}, ${si.sheet.rows.length} rows)`)
         .join('\n');
-
       // 사전: 각 시트별 child row 생성 (병렬로 DB 기록)
       const childRowPromises = sheetBasedInputs.map((si, i) => {
         const sheetUserPrompt = buildSheetUserPrompt({
@@ -1093,7 +986,6 @@ export default async function handler(req, res) {
         }));
       });
       const sheetTasks = await Promise.all(childRowPromises);
-
       // Phase 2-2e: callPromise를 즉시 만들지 않고 factory 함수로 만들어 batch loop에서 호출
       // 이전: callPromises는 .map(async) 결과라 즉시 4개 모두 시작 → Anthropic Tier 1 한도 초과
       // 변경: makeCallTask 는 호출되기 전엔 fetch 안 함 → batch loop가 BATCH_SIZE씩 트리거
@@ -1101,7 +993,6 @@ export default async function handler(req, res) {
         const sheetIdx = i + 1;
         const sheetName = si.sheet.sheet_name;
         const sheetGroup = si.sheet.group_name || null;
-
         // Phase 2-2d: 시트 시작 알림
         emit('progress', {
           step: 'sheet_start',
@@ -1110,16 +1001,13 @@ export default async function handler(req, res) {
           sheet_name: sheetName,
           sheet_group: sheetGroup,
         });
-
         try {
           const sheetResult = await callClaude({
             systemPrompt,
             userPrompt: sheetUserPrompt,
             schema: PER_SHEET_SCHEMA,
           });
-
           const stkCount = sheetResult.parsedOutput.stakeholder_requirements?.length || 0;
-
           // child row 성공 업데이트
           if (childId) {
             // Phase 2-2d: Prompt Caching 반영한 정확한 비용 계산
@@ -1140,13 +1028,11 @@ export default async function handler(req, res) {
               status: 'success',
             });
           }
-
           console.log(
             `[generate] Sheet ${sheetIdx}/${sheetBasedInputs.length} done: ` +
             `${stkCount} STK_REQs ` +
             `(cache: ${sheetResult.cacheHit ? '✓ HIT' : 'miss'})`
           );
-
           // Phase 2-2d: 시트 완료 알림
           emit('progress', {
             step: 'sheet_done',
@@ -1162,7 +1048,6 @@ export default async function handler(req, res) {
             cache_read_tokens: sheetResult.cacheReadTokens,
             latency_ms: sheetResult.latencyMs,
           });
-
           return { success: true, si, sheetResult };
         } catch (e) {
           if (childId) {
@@ -1183,7 +1068,6 @@ export default async function handler(req, res) {
           return { success: false, si, error: e.message };
         }
       };  // makeCallTask end
-
       // Phase 2-2e: Batch 처리 — Anthropic Tier 1 한도 + Vercel proxy 침묵 타임아웃 회피
       //
       // 동시에 모든 시트를 fetch 시작하면 Anthropic Tier 1 한도(50 RPM / 30K ITPM) 초과로 일부 시트가 큐 대기.
@@ -1201,7 +1085,6 @@ export default async function handler(req, res) {
       const callTaskFactories = sheetTasks.map((task, i) => makeCallTask(task, i));
       const totalBatches = Math.ceil(callTaskFactories.length / SHEET_BATCH_SIZE);
       const callResults = [];
-
       emit('progress', {
         step: 'batch_plan',
         message: `시트 ${callTaskFactories.length}개를 ${SHEET_BATCH_SIZE}개씩 ${totalBatches}배치로 순차 처리`,
@@ -1209,7 +1092,6 @@ export default async function handler(req, res) {
         total_batches: totalBatches,
         total_sheets: callTaskFactories.length,
       });
-
       // ──────────────────────────────────────────────────
       // Phase 2-2f: SSE Keep-alive (25초마다 ping)
       // ──────────────────────────────────────────────────
@@ -1236,13 +1118,11 @@ export default async function handler(req, res) {
             }
           }, KEEPALIVE_INTERVAL_MS)
         : null;
-
       try {
         for (let b = 0; b < totalBatches; b++) {
           const start = b * SHEET_BATCH_SIZE;
           const end = Math.min(start + SHEET_BATCH_SIZE, callTaskFactories.length);
           const batchIdx = b + 1;
-
           emit('progress', {
             step: 'batch_start',
             message: `배치 ${batchIdx}/${totalBatches} 시작 (시트 ${start + 1}~${end})`,
@@ -1252,16 +1132,13 @@ export default async function handler(req, res) {
             sheets_start_idx: start + 1,
             sheets_end_idx: end,
           });
-
           const batchStartTime = Date.now();
           // 이 batch 의 task 들을 동시에 실행 (BATCH_SIZE 만큼만 — Tier 한도 안전)
           const batchResults = await Promise.all(
             callTaskFactories.slice(start, end).map(fn => fn())
           );
           const batchDuration = Date.now() - batchStartTime;
-
           callResults.push(...batchResults);
-
           const batchSucceeded = batchResults.filter(r => r.success).length;
           const batchFailed = batchResults.filter(r => !r.success).length;
           emit('progress', {
@@ -1273,7 +1150,6 @@ export default async function handler(req, res) {
             batch_failed: batchFailed,
             batch_duration_ms: batchDuration,
           });
-
           console.log(
             `[generate] Batch ${batchIdx}/${totalBatches} done: ` +
             `${batchSucceeded} success, ${batchFailed} failed, ${Math.round(batchDuration / 1000)}s`
@@ -1288,11 +1164,9 @@ export default async function handler(req, res) {
           );
         }
       }
-
       // 성공/실패 분리
       const successResults = callResults.filter(r => r.success);
       const failedResults = callResults.filter(r => !r.success);
-
       // 모든 시트가 실패하면 전체 실패
       if (successResults.length === 0) {
         throw new Error(
@@ -1300,13 +1174,11 @@ export default async function handler(req, res) {
           failedResults.map(f => `  - "${f.si.sheet.sheet_name}": ${f.error}`).join('\n')
         );
       }
-
       // 일부 성공: 진행하되 warnings에 기록
       const perSheetOutputs = successResults.map(r => r.sheetResult.parsedOutput);
       const partialFailWarnings = failedResults.map(
         f => `시트 "${f.si.sheet.sheet_name}" 처리 실패: ${f.error}`
       );
-
       // 토큰/비용/지연 누적 (Phase 2-2d: cache 토큰도 누적)
       for (const r of successResults) {
         totalInputTokens += r.sheetResult.inputTokens;
@@ -1317,7 +1189,6 @@ export default async function handler(req, res) {
       }
       // 병렬이므로 latency 는 가장 긴 시트 기준 (실제 wall-clock time)
       totalLatencyMs = Math.max(0, ...successResults.map(r => r.sheetResult.latencyMs));
-
       // 결과 병합
       // Phase 2-2d: 병합 단계 알림
       emit('progress', {
@@ -1328,7 +1199,6 @@ export default async function handler(req, res) {
       });
       const title = `Stakeholder Requirements for ${project.product_name || project.name || 'System'}`;
       parsedOutput = mergePerSheetOutputs(perSheetOutputs, process_id, title);
-
       // 부분 실패 경고 추가
       if (partialFailWarnings.length > 0) {
         parsedOutput.warnings = [...(parsedOutput.warnings || []), ...partialFailWarnings];
@@ -1343,7 +1213,6 @@ export default async function handler(req, res) {
         step: 'single_call_start',
         message: 'Claude Opus 4.7 단일 호출 시작 (adaptive thinking)',
       });
-
       // Phase 2-2f: 단일 호출 경로에도 Keep-alive 적용 (legacy path 보호)
       // 단일 callClaude 도 4~5분 걸릴 수 있어 같은 silence 문제 가능
       let pingCountSingle = 0;
@@ -1357,7 +1226,6 @@ export default async function handler(req, res) {
             }
           }, 25000)
         : null;
-
       let claudeResult;
       try {
         const userPrompt = buildUserPrompt(process_id, wp.content, project);
@@ -1372,7 +1240,6 @@ export default async function handler(req, res) {
           console.log(`[generate] Single-call keep-alive stopped: ${pingCountSingle} pings sent`);
         }
       }
-
       parsedOutput = claudeResult.parsedOutput;
       totalInputTokens = claudeResult.inputTokens;
       totalOutputTokens = claudeResult.outputTokens;
@@ -1382,7 +1249,6 @@ export default async function handler(req, res) {
       totalLatencyMs = claudeResult.latencyMs;
       finishReason = claudeResult.finishReason;
       rawOutputLog = claudeResult.rawOutput;
-
       // Phase 2-2d: 단일 호출 완료 알림
       emit('progress', {
         step: 'single_call_done',
@@ -1392,7 +1258,6 @@ export default async function handler(req, res) {
         latency_ms: claudeResult.latencyMs,
       });
     }
-
     // 6. 5축 가드레일 검증
     // Phase 2-2d: 가드레일 시작 알림
     emit('progress', {
@@ -1404,7 +1269,6 @@ export default async function handler(req, res) {
       output: parsedOutput,
       input: wp.content,
     });
-
     const passed = guardrailResult.overall_passed;
     // Phase 2-2d: 가드레일 결과 알림
     emit('progress', {
@@ -1415,7 +1279,6 @@ export default async function handler(req, res) {
       passed,
       failed_axes: guardrailResult.failed_axes || [],
     });
-
     // Phase 2-2d: Prompt Caching 반영 비용
     const cost = estimateCost(
       totalInputTokens,
@@ -1423,7 +1286,6 @@ export default async function handler(req, res) {
       totalCacheCreationTokens,
       totalCacheReadTokens
     );
-
     // Phase 2-2d: 캐시 효과 로깅
     if (totalCacheReadTokens > 0 || totalCacheCreationTokens > 0) {
       const cachedTokens = totalCacheReadTokens + totalCacheCreationTokens;
@@ -1442,7 +1304,6 @@ export default async function handler(req, res) {
         `cost=$${cost.toFixed(4)} (saved ~$${savings.toFixed(4)} vs no-cache)`
       );
     }
-
     // Phase 2-2d: 저장 시작 알림
     emit('progress', {
       step: 'saving',
@@ -1453,7 +1314,6 @@ export default async function handler(req, res) {
       cache_read_tokens: totalCacheReadTokens,
       cache_creation_tokens: totalCacheCreationTokens,
     });
-
     // 7. ai_generations master row 업데이트
     if (aiGenId) {
       await sb(`/ai_generations?id=eq.${aiGenId}`, 'PATCH', {
@@ -1469,18 +1329,15 @@ export default async function handler(req, res) {
         status: passed ? 'success' : 'blocked_by_guardrail',
       });
     }
-
     // 8. work_products 업데이트
     const newState = passed ? 'GENERATED' : 'REJECTED';
     const newContent = passed
       ? { ...wp.content, ai_generated: parsedOutput }
       : wp.content;
-
     await sb(`/work_products?id=eq.${wp.id}`, 'PATCH', {
       ...syncStateAndStatus(newState),
       content: newContent,
     });
-
     await sb(`/state_transitions`, 'POST', {
       work_product_id: wp.id,
       from_state: 'GENERATING',
@@ -1491,7 +1348,6 @@ export default async function handler(req, res) {
         : `Guardrail failed: ${guardrailResult.failed_axes.join(', ')}`,
       ai_generation_id: aiGenId,
     }, 'return=minimal');
-
     // 9. audit log
     await sb(`/audit_logs`, 'POST', {
       action: 'ai_generate',
@@ -1508,7 +1364,6 @@ export default async function handler(req, res) {
         sheet_count: useSheetSplit ? sheetBasedInputs.length : 0,
       },
     }, 'return=minimal');
-
     // 10. 응답
     // Phase 2-2d: streaming/non-streaming 분기
     const finalPayload = {
@@ -1533,7 +1388,6 @@ export default async function handler(req, res) {
         sheet_count: useSheetSplit ? sheetBasedInputs.length : 0,
       },
     };
-
     if (streaming) {
       // SSE: complete 이벤트로 전체 결과 전송 후 종료
       sseSend(res, 'complete', finalPayload);
@@ -1542,7 +1396,6 @@ export default async function handler(req, res) {
     return res.status(200).json(finalPayload);
   } catch (error) {
     console.error('[generate]', error);
-
     // 실패 기록
     if (aiGenId) {
       try {
@@ -1552,7 +1405,6 @@ export default async function handler(req, res) {
         });
       } catch (e) { /* swallow */ }
     }
-
     // Phase 2-2d: streaming 모드에서는 error 이벤트로
     if (streaming) {
       sseSend(res, 'error', {
@@ -1567,9 +1419,7 @@ export default async function handler(req, res) {
     });
   }
 }
-
 // Phase 2-2c (Pro): Vercel 함수 maxDuration = 800초 (vercel.json에서 설정)
-
 // ──────────────────────────────────────────────────
 // Phase 2-2g (옵션 G — Function Chunking) 용 named exports
 // generate-batch.js, generate-merge.js 가 재사용.
