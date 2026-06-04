@@ -521,49 +521,65 @@ function mergePerSheetOutputs(perSheetOutputs, processId, title) {
   }
 
   // ──────────────────────────────────────────────────
-  // Phase 2-2h: 그룹별 내부 연번 재번호 (renumber)
+  // Phase 2-2h: 전역 연번 재번호 (renumber) — 방식 A: prefix 유지 + 전역 연번
   // ──────────────────────────────────────────────────
-  // 문제 (NAD_BATCH_0604-3 docx 분석에서 확인):
+  // 배경:
   //   - 옵션 G 시트별 분할 호출에서 Claude 가 source_row / 원본 행 번호 등을
   //     ID 의 NNN 자리에 그대로 써서, 그룹 내부 번호가 건너뜀.
   //     예: HWEU_026, 027, 036, 047, 060 ... (001~순차가 아님)
   //   - 게다가 그룹(prefix)별로 번호가 따로 놀아 문서 전체로 보면
-  //     ID 가 듬성듬성 "중구난방" 으로 보임.
+  //     ID 가 "중구난방" 으로 보임.
   //
-  // 해결 (사용자 채택안 = "그룹 유지 + 내부 연번"):
+  // 해결 (사용자 채택안 = 방식 A "prefix 유지 + 전역 연번"):
   //   - prefix(그룹/도메인)는 그대로 보존 → 시트/도메인 출신 추적성 유지.
-  //   - 같은 prefix 안에서 원래 숫자 오름차순을 유지한 채 001 부터 빈틈없이 재부여.
-  //     예: HWEU_026,027,036,047,060 → HWEU_001,002,003,004,005
+  //   - 번호는 '전체 문서를 관통하는 단일 카운터' 로 부여 → 그룹 경계에서도
+  //     리셋 없이 001 부터 끝까지 연속, 전역적으로 유일.
+  //     예 (그룹 처리 순서 HWEU → HWCHINA → SWNAD → IFNADSYSTEM):
+  //       HWEU_001~087, HWCHINA_088~173, SWNAD_174~266, IFNADSYSTEM_267~382
+  //
+  // 그룹 순서:
+  //   - 시트 처리 순서(= perSheetOutputs 가 merge 에 들어온 순서
+  //     = 화면에 보이던 시트 순서) 를 그대로 사용 (그룹 첫 등장 순서로 기록).
+  //   - 배치를 어떻게 나눠도 시트 순서는 고정이라 결과가 결정적.
   //
   // 안전장치:
   //   1) 패턴(STK_REQ_<PREFIX>_NNN)에 안 맞는 id 는 절대 건드리지 않음.
   //   2) old→new 매핑을 먼저 완성한 뒤, id + source_doc 내 옛 id 를 일괄 치환.
   //   3) source_doc 치환은 긴 id 부터 처리해 부분 매칭 사고 방지
-  //      (예: HWEU_01 이 HWEU_010 의 일부를 잘못 바꾸는 일 없도록).
+  //      (예: _001 이 _0010 의 일부를 잘못 바꾸는 일 없도록).
   //   4) 이 블록은 traceability_seeds 생성 '전' 에 위치 → traceability 는
   //      자동으로 새 id 를 참조하게 됨 (참조 무결성 보장).
-  (function renumberStkReqs() {
-    const PREFIX_RE = /^STK_REQ_([A-Z][A-Z0-9_]*)_(\d{3})$/;
+  (function renumberStkReqsGlobal() {
+    // NNN 자리는 3자리 이상 허용 (전역 카운터가 1000 을 넘어도 안전)
+    const PREFIX_RE = /^STK_REQ_([A-Z][A-Z0-9_]*)_(\d{3,})$/;
 
-    // 1) prefix 별 그룹핑 (원래 숫자 보존)
+    // 1) 그룹 첫 등장 순서 기록 + prefix 별 그룹핑 (원래 숫자 보존)
+    const groupOrder = [];      // prefix 등장 순서 (= 시트 처리 순서)
     const groups = new Map();   // prefix -> [{ stk, origNum }]
     for (const stk of merged.stakeholder_requirements) {
       const m = PREFIX_RE.exec(String(stk.id || ''));
-      if (!m) continue;        // 패턴 불일치 → 그대로 둠
+      if (!m) continue;         // 패턴 불일치 → 그대로 둠
       const prefix = m[1];
       const origNum = parseInt(m[2], 10);
-      if (!groups.has(prefix)) groups.set(prefix, []);
+      if (!groups.has(prefix)) {
+        groups.set(prefix, []);
+        groupOrder.push(prefix);
+      }
       groups.get(prefix).push({ stk, origNum });
     }
 
-    // 2) 그룹 내부: 원래 숫자 오름차순 정렬 후 001 부터 재부여, old→new 매핑 작성
+    // 2) 그룹 순서대로 전역 카운터로 번호 누적.
+    //    그룹 내부는 원래 숫자 오름차순 유지 (항목 순서 보존).
     const idMap = new Map();    // oldId -> newId
-    for (const [prefix, arr] of groups) {
+    let globalCounter = 0;
+    for (const prefix of groupOrder) {
+      const arr = groups.get(prefix);
       arr.sort((a, b) => a.origNum - b.origNum);
-      arr.forEach((entry, i) => {
-        const newId = `STK_REQ_${prefix}_${String(i + 1).padStart(3, '0')}`;
+      for (const entry of arr) {
+        globalCounter += 1;
+        const newId = `STK_REQ_${prefix}_${String(globalCounter).padStart(3, '0')}`;
         if (newId !== entry.stk.id) idMap.set(entry.stk.id, newId);
-      });
+      }
     }
 
     if (idMap.size === 0) return;  // 바꿀 게 없으면 종료
@@ -581,7 +597,10 @@ function mergePerSheetOutputs(perSheetOutputs, processId, title) {
       if (idMap.has(stk.id)) stk.id = idMap.get(stk.id);
     }
 
-    console.log(`[merge] renumber: ${idMap.size} STK_REQ ID 재부여 (그룹별 001~순차)`);
+    console.log(
+      `[merge] renumber(global): ${idMap.size} STK_REQ ID 재부여 ` +
+      `(그룹 ${groupOrder.length}개, 전역 001~${String(globalCounter).padStart(3, '0')})`
+    );
   })();
 
   merged.operational_context.regulatory_constraints = Array.from(allRegulations);
