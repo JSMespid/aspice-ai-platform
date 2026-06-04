@@ -347,12 +347,38 @@ function estimateCost(inputTokens, outputTokens, cacheCreationTokens = 0, cacheR
   return inputCost + cacheWriteCost + cacheReadCost + outputCost;
 }
 
-// ──────────────────────────────────────────────────
-// 사용자 입력 구조화 (work_products.content 를 Claude 가 읽기 좋게 변환)
-// Phase 2-2c: 라벨 매핑이 일반화됨 (sw_req/hw_req/sow → 사람이 읽는 라벨)
-//             엑셀 시트는 본 함수가 아닌 buildSheetUserPrompt 사용
-// ──────────────────────────────────────────────────
-function buildUserPrompt(processId, content, projectMeta) {
+// Phase 2-2c: 시트별 분할 호출용 사용자 프롬프트
+// Phase 2-2g (옵션 G 핫픽스): 시트별 unique ID prefix 강제로 ID 충돌 방지
+function buildSheetUserPrompt({
+  processId, sheetData, projectMeta, sheetIndex, totalSheets, customerSourceFileName, otherInputsSummary,
+}) {
+  // ── 옵션 G ID 충돌 핫픽스: 시트별 unique prefix 결정 ──
+  // 문제 (NAD_CHUNKED_BATCH_0604-1 검증에서 발견):
+  //   - NAD Software 시트 (group=NAD) + NAD System Interface 시트 (group=NAD)
+  //     → 둘 다 STK_REQ_NAD_001 부터 부여 → DB merge 시 ID 충돌
+  //   - EU HW 시트 안에 NAD 관련 행이 있으면 Claude가 STK_REQ_NAD_001 부여 가능
+  //     → 다른 시트의 NAD prefix와 또 충돌
+  //
+  // 해결: sheet_name 의 도메인 키워드(SW/HW/IF) + group_name 합성으로 시트 unique prefix 생성
+  //   - "EU Variant HW Requirements"        → HWEU       → STK_REQ_HWEU_NNN
+  //   - "China Variant HW Requirements"     → HWCHINA    → STK_REQ_HWCHINA_NNN
+  //   - "NAD Software Requirements"         → SWNAD      → STK_REQ_SWNAD_NNN
+  //   - "NAD System Interface"              → IFNAD      → STK_REQ_IFNAD_NNN
+  //   - 매핑 안 되는 경우                   → group_name 그대로 (fallback)
+  const groupName = String(sheetData.group_name || 'GROUP').toUpperCase();
+  const sheetNameLower = String(sheetData.sheet_name || '').toLowerCase();
+  let sheetPrefix = groupName;
+  if (/\b(software|sw)\b/.test(sheetNameLower)) {
+    sheetPrefix = `SW${groupName}`;
+  } else if (/(system\s*interface|sys\s*if|sysif|\binterface\b)/.test(sheetNameLower)) {
+    sheetPrefix = `IF${groupName}`;
+  } else if (/\b(hardware|hw)\b/.test(sheetNameLower)) {
+    sheetPrefix = `HW${groupName}`;
+  }
+  // 스키마 패턴 보장: 영문/숫자/언더스코어만, 대문자, 첫 글자는 A-Z
+  sheetPrefix = sheetPrefix.replace(/[^A-Z0-9_]/gi, '').toUpperCase();
+  if (!sheetPrefix || !/^[A-Z]/.test(sheetPrefix)) sheetPrefix = 'GROUP';
+
   const lines = [];
   lines.push(`# Project Context`);
   lines.push(`- Project: ${projectMeta.name || '(unnamed)'}`);
@@ -362,29 +388,73 @@ function buildUserPrompt(processId, content, projectMeta) {
   lines.push('');
   lines.push(`# Process: ${processId}`);
   lines.push('');
-  lines.push(`# Input Items (OEM Customer Documents — preserve all specs)`);
-  lines.push('');
-  lines.push(`⚠️ These input documents are CUSTOMER deliverables provided to the supplier.`);
-  lines.push(`Citing them in source_doc is NORMAL — NOT a circular reference.`);
-  lines.push(`The supplier MUST preserve all customer specifications (ratio 1.0-1.3).`);
-  lines.push('');
 
-  for (const [key, value] of Object.entries(content || {})) {
-    if (!value || !value.body) continue;
-    const label = labelOf(processId, key);
-    lines.push(`## ${label}`);
-    if (value.fileName) lines.push(`Source file: ${value.fileName}`);
-    if (value.note)     lines.push(`Note: ${value.note}`);
-    lines.push('');
-    lines.push(value.body);
+  // 다른 시트들 요약 (Claude가 전체 컨텍스트 인식하도록)
+  if (otherInputsSummary) {
+    lines.push(`# Other inputs in this project (for context only — do NOT derive STK_REQs from these in this call)`);
+    lines.push(otherInputsSummary);
     lines.push('');
   }
 
+  lines.push(`# ⚠️ SHEET-BASED GENERATION MODE / 시트 단위 생성 모드`);
+  lines.push('');
+  lines.push(`This call generates STK_REQs from ONE worksheet only.`);
+  lines.push(`Output PER_SHEET_SCHEMA subset (process, group, sheet_source, stakeholder_requirements, coverage_matrix_partial, operational_context_partial, warnings).`);
+  lines.push('');
+
+  // ── ID 충돌 방지 instruction (옵션 G 핫픽스 핵심) ──
+  lines.push(`## ⚠️ CRITICAL: STK_REQ ID Naming Rule (이 시트 전용)`);
+  lines.push('');
+  lines.push(`이 시트("${sheetData.sheet_name}")의 모든 STK_REQ \`id\` 는 반드시 다음 형식이어야 합니다:`);
+  lines.push('');
+  lines.push('```');
+  lines.push(`STK_REQ_${sheetPrefix}_NNN`);
+  lines.push('```');
+  lines.push('');
+  lines.push(`- 고정 prefix: **STK_REQ_${sheetPrefix}_** (이 시트의 모든 STK_REQ에 동일하게 적용)`);
+  lines.push(`- NNN: 이 시트 내 일련번호 (001, 002, 003 ... 순차)`);
+  lines.push('');
+  lines.push(`### Absolute Rules (위반 시 ID 충돌로 가드레일 실패)`);
+  lines.push(`1. 이 시트의 모든 STK_REQ \`id\` 는 반드시 **STK_REQ_${sheetPrefix}_** 로 시작해야 함.`);
+  lines.push(`2. 다른 시트/그룹의 prefix를 이 시트의 STK_REQ id에 절대 사용하지 말 것.`);
+  lines.push(`   - 예: 이 시트 prefix가 HWEU 라면, STK_REQ_NAD_001 또는 STK_REQ_EU_001 절대 금지.`);
+  lines.push(`3. 옵션 G chunked batch로 각 시트가 단독 처리됨 — 다른 시트와 ID 범위가 prefix 로 완전 분리되어야 함.`);
+  lines.push(`4. 시트 데이터 안에 다른 그룹 관련 텍스트가 있더라도 \`id\` prefix는 반드시 **STK_REQ_${sheetPrefix}_** 로 통일.`);
+  lines.push(`5. 출력 객체의 \`group\` 필드는 "${groupName}", \`sheet_source\` 필드는 "${sheetData.sheet_name}" 으로 유지.`);
+  lines.push('');
+
+  lines.push(`<sheet_context>`);
+  lines.push(`  <sheet_name>${sheetData.sheet_name}</sheet_name>`);
+  lines.push(`  <group_name>${sheetData.group_name}</group_name>`);
+  lines.push(`  <sheet_prefix>${sheetPrefix}</sheet_prefix>`);
+  lines.push(`  <sheet_index>${sheetIndex}</sheet_index>`);
+  lines.push(`  <total_sheets>${totalSheets}</total_sheets>`);
+  lines.push(`  <is_meta>${sheetData.is_meta}</is_meta>`);
+  lines.push(`  <columns>${JSON.stringify(sheetData.columns)}</columns>`);
+  lines.push(`  <source_document>${customerSourceFileName || 'Customer Document'}</source_document>`);
+  lines.push(`  <rows>`);
+  for (const row of sheetData.rows) {
+    lines.push(`    ${JSON.stringify(row)}`);
+  }
+  lines.push(`  </rows>`);
+  lines.push(`</sheet_context>`);
+  lines.push('');
+
   lines.push(`# Task`);
-  lines.push(`Generate the ${processId} work product per the loaded Skills (especially aspice-sys1-derivation).`);
-  lines.push(`Apply Spec-Preservation Principle: every customer input item → ≥1 STK_REQ.`);
-  lines.push(`Compute coverage_matrix with status "compliant" if ratio in [1.0, 1.3].`);
-  lines.push(`Output strictly conforming JSON.`);
+  lines.push(`For each row in <sheet_context>.<rows>, derive 1 or more STK_REQs (1:1 for simple, 1:N for composite).`);
+  lines.push(`ID format: **STK_REQ_${sheetPrefix}_NNN** (001, 002, ...) — 위의 Absolute Rules 준수 필수.`);
+  lines.push(`Each STK_REQ MUST have:`);
+  lines.push(`  - id: STK_REQ_${sheetPrefix}_NNN (이 시트 prefix 고정)`);
+  lines.push(`  - group: "${groupName}"`);
+  lines.push(`  - sheet_source: "${sheetData.sheet_name}"`);
+  lines.push(`  - source_row: <the row_num from rows array>`);
+  lines.push(`  - source_item_id: <the customer's ID field if present, else null>`);
+  lines.push(`  - source_doc: "${customerSourceFileName || 'Customer Document'} §${sheetData.sheet_name}, Row N (ID-XYZ)"`);
+  lines.push('');
+  lines.push(`Compute coverage_matrix_partial: input_rows=${sheetData.rows.length}, derived_stk_reqs=<your count>, ratio, unmapped_input_rows.`);
+  lines.push(`In operational_context_partial: include any regulations or interfaces SPECIFICALLY mentioned in this sheet only.`);
+  lines.push(`Use warnings array if you detect any anomalies.`);
+
   return lines.join('\n');
 }
 
