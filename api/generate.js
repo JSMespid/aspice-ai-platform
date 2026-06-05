@@ -300,6 +300,8 @@ const PER_SHEET_SCHEMA = {
 // 5축 가드레일 (Phase 2-2a 활성: 1, 2, 3 / 훅: 4, 5)
 // ──────────────────────────────────────────────────
 import { runGuardrails } from '../src/lib/guardrails-server.js';
+// Phase 2-3 RAG: 표준 인용 검증 (warning-only, VOYAGE_API_KEY 없으면 내부에서 skip)
+import { verifyCitations, persistCitationLogs } from '../src/lib/citation-verifier.js';
 // ──────────────────────────────────────────────────
 // 비용 추정 (Claude Opus 4.7 + Prompt Caching 가격)
 // ──────────────────────────────────────────────────
@@ -1366,6 +1368,29 @@ export default async function handler(req, res) {
       passed,
       failed_axes: guardrailResult.failed_axes || [],
     });
+    // ── Phase 2-3 RAG: 표준 인용 검증 (WARNING only) ──
+    // 환각성 인용(코퍼스에 없는 표준 조항)을 warnings 로 표면화. 차단하지 않음.
+    // VOYAGE_API_KEY 미설정 시 내부에서 skip — 기존 흐름 영향 없음.
+    // RAG 검증 오류는 절대 생성 자체를 실패시키지 않음 (try/catch 로 격리).
+    try {
+      emit('progress', { step: 'rag_citation_check', message: '표준 인용 검증 중 (RAG)' });
+      const cv = await verifyCitations({ sb, parsedOutput, aiGenerationId: aiGenId });
+      if (!cv.skipped) {
+        if (cv.warnings.length) {
+          parsedOutput.warnings = [...(parsedOutput.warnings || []), ...cv.warnings];
+        }
+        await persistCitationLogs(sb, cv.logs);
+        emit('progress', {
+          step: 'rag_citation_done',
+          message: `인용 검증 완료: ${cv.checked}건 (미발견 ${cv.notFound}, 약한일치 ${cv.weak})`,
+          checked: cv.checked,
+          not_found: cv.notFound,
+          weak: cv.weak,
+        });
+      }
+    } catch (e) {
+      console.error('[generate] RAG 인용 검증 오류(무시):', e.message);
+    }
     // Phase 2-2d: Prompt Caching 반영 비용
     const cost = estimateCost(
       totalInputTokens,
