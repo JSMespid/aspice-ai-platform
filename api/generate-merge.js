@@ -36,6 +36,8 @@ import {
 
 // 가드레일은 동일 모듈에서 직접 import (generate.js 가 import 하는 것과 같은 경로)
 import { runGuardrails } from '../src/lib/guardrails-server.js';
+// Phase 2-3 RAG: 표준 인용 검증 (warning-only, VOYAGE_API_KEY 없으면 내부에서 skip)
+import { verifyCitations, persistCitationLogs } from '../src/lib/citation-verifier.js';
 
 // ──────────────────────────────────────────────────
 // UUID 형식 검증
@@ -236,6 +238,32 @@ export default async function handler(req, res) {
     }
 
     const guardrailPassed = guardrailResult.overall_passed;
+
+    // ── 7b. Phase 2-3 RAG: 표준 인용 검증 (WARNING only) ──
+    // 환각성 인용(코퍼스에 없는 표준 조항)을 parsedOutput.warnings 로 표면화. 차단하지 않음.
+    // VOYAGE_API_KEY 미설정 시 내부에서 skip. 검증 오류는 병합 자체를 실패시키지 않음.
+    // 이 블록은 master row 업데이트(아래)보다 앞 → warnings 가 parsed_output 에 실려 docx 까지 전달됨.
+    try {
+      const cv = await verifyCitations({
+        sb,
+        parsedOutput,
+        aiGenerationId: generation_id,
+      });
+      if (!cv.skipped) {
+        if (cv.warnings.length) {
+          parsedOutput.warnings = [...(parsedOutput.warnings || []), ...cv.warnings];
+        }
+        await persistCitationLogs(sb, cv.logs);
+        console.log(
+          `[generate-merge] RAG 인용검증: ${cv.checked}건 검사 ` +
+          `(미발견 ${cv.notFound}, 약한일치 ${cv.weak})`
+        );
+      } else {
+        console.log(`[generate-merge] RAG 인용검증 skip: ${cv.reason}`);
+      }
+    } catch (cvErr) {
+      console.error('[generate-merge] RAG 인용검증 오류(무시):', cvErr.message);
+    }
 
     // ── 8. 누적 토큰 / 비용 계산 ────────────────────────────
     const totalInputTokens = successChildren.reduce((s, c) => s + (c.input_tokens || 0), 0);
