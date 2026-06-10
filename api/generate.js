@@ -464,6 +464,29 @@ function buildSheetUserPrompt({
   lines.push(`Compute coverage_matrix_partial: input_rows=${sheetData.rows.length}, derived_stk_reqs=<your count>, ratio, unmapped_input_rows.`);
   lines.push(`In operational_context_partial: include any regulations or interfaces SPECIFICALLY mentioned in this sheet only.`);
   lines.push(`Use warnings array if you detect any anomalies.`);
+  lines.push('');
+  // ── Phase 2-4 핫픽스: 테이블형 시트(핀/신호/파라미터 정의표) 0개 반환 방지 ──
+  // 배경: "NAD System Interface" 같은 핀 정의표(Pin Ref#, Signal Name, I/O, Voltage...)를
+  //   Claude 가 "요구사항이 아니라 사양표"로 판단해 STK_REQ 0개를 반환하는 사례가
+  //   간헐 발생 (0605-7, 0610 실행에서 Interface 그룹 통째 누락; 0608-1 에선 116개 정상).
+  //   스키마가 minItems:0 이라 0개도 유효 응답으로 통과되어 그룹이 조용히 사라짐.
+  // 해결: 테이블형 데이터도 반드시 요구사항으로 변환하도록 명시 + 0개 반환 금지 선언.
+  lines.push(`## ⚠️ TABLE-TYPE SHEETS ARE STILL REQUIREMENTS / 테이블형 시트도 요구사항임`);
+  lines.push('');
+  lines.push(`This sheet may contain TABULAR specifications instead of prose requirements — e.g.,`);
+  lines.push(`pin definition tables (Pin Ref#, Signal Name, I/O direction, Voltage, Pull Up/Down),`);
+  lines.push(`signal lists, parameter tables, or configuration matrices.`);
+  lines.push('');
+  lines.push(`**These ARE customer requirements.** Each row defines an interface/electrical/configuration`);
+  lines.push(`commitment the supplier must honor. Convert each row into a testable STK_REQ, e.g.:`);
+  lines.push(`  - Pin row "1 | ADC_IN1 | ADC | Input | 0 - 1.875V | ... | Analog to Digital Input (Primary Ant 1 detection)"`);
+  lines.push(`    → "The NAD shall provide analog input pin ADC_IN1 (Pin 1) supporting 0–1.875 V range`);
+  lines.push(`       for primary antenna 1 detection." (category: interface)`);
+  lines.push('');
+  lines.push(`**Returning 0 STK_REQs for a sheet with ${sheetData.rows.length} data rows is a CRITICAL FAILURE**`);
+  lines.push(`(causes spec_loss and the entire group disappears from the deliverable).`);
+  lines.push(`If rows are genuinely non-requirements (e.g., pure legend/pull-down lists), still derive`);
+  lines.push(`what is derivable and record the skipped rows in unmapped_input_rows + warnings with reasons.`);
   return lines.join('\n');
 }
 function labelOf(processId, key) {
