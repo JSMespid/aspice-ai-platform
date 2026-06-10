@@ -99,11 +99,48 @@ export default async function handler(req, res) {
     }
 
     // ── 3. child rows 조회 ──────────────────────────────────
-    const children = await sb(
-      `/ai_generations?parent_generation_id=eq.${generation_id}` +
-      `&order=agent_step.asc` +
-      `&select=*`
-    ) || [];
+    // Phase 2-4: 진행 중(in-flight) child 대기 루프
+    //
+    // 배경 (0610-2 실행에서 발견된 경쟁조건):
+    //   batch 의 SSE 스트림이 일찍 끊기면 frontend 는 "성공 0" 으로 보고
+    //   다음 batch → merge 로 넘어가지만, 서버의 batch 함수는 계속 돌아서
+    //   child row 를 나중에 success 로 저장함. merge 가 그 사이에 실행되면
+    //   해당 batch 결과(예: Interface 116개)가 병합에서 조용히 누락됨.
+    //
+    // 해결: status 가 running/pending 인 child 가 있으면 최대 7분까지
+    //   15초 간격으로 재조회하며 완료를 기다린 뒤 병합.
+    //   (Claude 시트 호출 최대 ~6분 커버. cancelling 상태면 대기 없이 진행.)
+    const fetchChildren = async () =>
+      (await sb(
+        `/ai_generations?parent_generation_id=eq.${generation_id}` +
+        `&order=agent_step.asc` +
+        `&select=*`
+      )) || [];
+
+    const MERGE_WAIT_FOR_CHILDREN_MS = 420_000;  // 최대 7분 대기
+    const MERGE_WAIT_POLL_MS = 15_000;           // 15초 간격 재조회
+    const countInFlight = (cs) =>
+      cs.filter(c => ['running', 'pending'].includes(c.status)).length;
+
+    let children = await fetchChildren();
+    if (master.status !== 'cancelling') {
+      let waitedMs = 0;
+      while (countInFlight(children) > 0 && waitedMs < MERGE_WAIT_FOR_CHILDREN_MS) {
+        console.log(
+          `[generate-merge] 진행 중 child ${countInFlight(children)}개 감지 — ` +
+          `${MERGE_WAIT_POLL_MS / 1000}s 후 재확인 (누적 대기 ${waitedMs / 1000}s)`
+        );
+        await new Promise(r => setTimeout(r, MERGE_WAIT_POLL_MS));
+        waitedMs += MERGE_WAIT_POLL_MS;
+        children = await fetchChildren();
+      }
+      if (waitedMs > 0) {
+        console.log(
+          `[generate-merge] child 대기 종료: ${waitedMs / 1000}s 대기, ` +
+          `잔여 in-flight ${countInFlight(children)}개`
+        );
+      }
+    }
 
     const successChildren = children.filter(c => c.status === 'success');
     const failedChildren = children.filter(c => c.status === 'failed');
