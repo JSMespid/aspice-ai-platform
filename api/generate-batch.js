@@ -340,16 +340,68 @@ export default async function handler(req, res) {
         childId = createdChild?.id || null;
 
         // 시트 callClaude (이미 검증된 generate.js 의 함수, retry 내장)
-        const sheetResult = await callClaude({
+        let sheetResult = await callClaude({
           systemPrompt,
           userPrompt: sheetUserPrompt,
           schema: PER_SHEET_SCHEMA,
         });
 
+        // ── Phase 2-4: 0개 가드 (Interface 그룹 조용한 소실 차단) ──
+        // 배경: "NAD System Interface" 같은 핀 정의표를 Claude 가 간헐적으로
+        //   "요구사항 아님"으로 판단해 STK_REQ 0개를 반환 (0605-7, 0610 재발).
+        //   PER_SHEET_SCHEMA 가 minItems:0 이라 0개도 유효 응답 → 그룹이 조용히 소실.
+        // 처리: 행이 1개 이상인 시트가 0개를 반환하면 → 1회 재시도.
+        //   재시도도 0개면 → 명시적 실패 (catch 로 흘러가 sheet_failed 이벤트 +
+        //   child row 'failed' 기록). 조용한 성공보다 시끄러운 실패가 낫다.
+        let stkCount = sheetResult.parsedOutput.stakeholder_requirements?.length || 0;
+        if (stkCount === 0 && sheet.rows.length > 0) {
+          console.warn(
+            `[generate-batch] 시트 ${sheetIdx} (${sheetName}): ` +
+            `행 ${sheet.rows.length}개인데 STK_REQ 0개 반환 — 재시도 1회`
+          );
+          emit('progress', {
+            step: 'sheet_zero_retry',
+            message: `시트 ${sheetIdx} (${sheetName}) — 행 ${sheet.rows.length}개에 STK_REQ 0개, 재시도 중`,
+            batch_idx,
+            sheet_index: sheetIdx,
+            sheet_name: sheetName,
+            input_rows: sheet.rows.length,
+          });
+          const retryResult = await callClaude({
+            systemPrompt,
+            userPrompt: sheetUserPrompt,
+            schema: PER_SHEET_SCHEMA,
+          });
+          const retryCount = retryResult.parsedOutput.stakeholder_requirements?.length || 0;
+          if (retryCount > 0) {
+            // 재시도 성공 — 토큰/비용/지연은 두 호출 합산해 child row 에 정확히 기록
+            sheetResult = {
+              ...retryResult,
+              inputTokens: (sheetResult.inputTokens || 0) + (retryResult.inputTokens || 0),
+              outputTokens: (sheetResult.outputTokens || 0) + (retryResult.outputTokens || 0),
+              cacheCreationTokens:
+                (sheetResult.cacheCreationTokens || 0) + (retryResult.cacheCreationTokens || 0),
+              cacheReadTokens:
+                (sheetResult.cacheReadTokens || 0) + (retryResult.cacheReadTokens || 0),
+              latencyMs: (sheetResult.latencyMs || 0) + (retryResult.latencyMs || 0),
+            };
+            stkCount = retryCount;
+            console.log(
+              `[generate-batch] 시트 ${sheetIdx} 재시도 성공: ${retryCount}개 STK_REQ`
+            );
+          } else {
+            throw new Error(
+              `시트 "${sheetName}"에 입력 행 ${sheet.rows.length}개가 있으나 ` +
+              `STK_REQ 0개 반환 (재시도 포함 2회). 테이블형 시트 변환 실패 — ` +
+              `그룹 소실(spec_loss) 방지를 위해 실패로 처리합니다. ` +
+              `해당 batch 만 다시 실행하거나 시트 데이터를 점검하세요.`
+            );
+          }
+        }
+
         // 호출 직후 다시 한 번 cancel 체크 (callClaude 가 5분 걸리는 동안 cancel 됐을 수 있음)
         const cancelledNow = await isCancelled(generation_id);
 
-        const stkCount = sheetResult.parsedOutput.stakeholder_requirements?.length || 0;
         const sheetCost = estimateCost(
           sheetResult.inputTokens,
           sheetResult.outputTokens,
