@@ -141,9 +141,15 @@ An independent QA reviewer (ASPICE PAM v4.0 기반) has flagged specific issues 
      검증 불가능한 절대 표현은 기준 시점/기준 DB(예: CVE as of milestone)를
      명시하는 형태로 재구성 (단, 기준 자체를 날조하지 말고 TBD 규칙 적용)
 
-4. **언어 (Language)**
+4. **언어와 문체 (Language & Style)**
    - statement / rationale: 원문 언어 유지 (영문이면 영문)
    - reason (수정 사유): 반드시 한국어 — 심사 증빙 문서에 그대로 들어감
+   - **rationale 에 보충 설명을 추가할 때는 공식 문서의 완결된 서술문으로 통합**한다.
+     괄호로 덧붙이는 개발 메모 스타일 — 예: "(고객 원본에 ID 없음 - 내부 식별자 부여)" —
+     은 평가자가 '내부 개발 코멘트'로 지적하므로 금지.
+     올바른 예: "고객 원본 문서에는 명시적 요구사항 식별자가 부여되어 있지 않으므로,
+     본 요구사항은 내부 식별자 체계에 따라 ID 를 부여하고 source_doc, sheet_source,
+     source_row 의 조합으로 원본 추적성을 확보한다."
 
 5. **출력 (Output)**
    - 입력으로 받은 모든 대상 항목에 대해 fixes 배열에 1건씩 반환
@@ -233,6 +239,73 @@ async function nextRevisionNo(workProductId) {
 }
 
 // ──────────────────────────────────────────────────
+// coverage_matrix 결정론적 보정 (v2 — 0611-1 재QA CRITICAL 대응)
+// ──────────────────────────────────────────────────
+// 평가자 지적: 메타/비요구사항 행이 input_rows 에 포함되어 ratio < 1.0 → spec_loss.
+// 평가자 제안: 해당 행을 input_rows 계산에서 제외하고 제외 사실을 문서화.
+// 이 작업은 순수 산술 + 문서화라 Claude 를 부르지 않고 서버에서 결정론적으로
+// 수행한다 (날조 위험 0, 비용 0). 어떤 행이 비요구사항인지의 '판단'은
+// 사람(또는 평가자 evidence)이 제공 → actor='human' 으로 기록, HITL 승인 동일.
+function recomputeCoverageSummary(cm) {
+  let totalInputRows = 0;
+  let totalStkReqs = 0;
+  for (const g of cm.by_group) {
+    totalInputRows += g.input_rows || 0;
+    totalStkReqs += g.derived_stk_reqs || 0;
+  }
+  cm.summary.total_input_rows = totalInputRows;
+  cm.summary.total_stk_reqs = totalStkReqs;
+  const ratio = totalInputRows > 0 ? totalStkReqs / totalInputRows : 0;
+  cm.summary.overall_ratio = Math.round(ratio * 1000) / 1000;
+  // generate.js mergePerSheetOutputs 와 동일한 status 산식
+  if (totalInputRows === 0) cm.summary.status = 'compliant';
+  else if (ratio < 1.0) cm.summary.status = 'spec_loss';
+  else if (ratio > 1.3) cm.summary.status = 'over_decomposed';
+  else cm.summary.status = 'compliant';
+  return cm;
+}
+
+function buildCoverageFix(baseCoverageMatrix, fix) {
+  const { group, exclude_rows, exclusion_reason } = fix;
+  if (!group || !Array.isArray(exclude_rows) || exclude_rows.length === 0) {
+    throw new Error('coverage_fix 에는 group 과 exclude_rows 배열이 필요합니다');
+  }
+  const before = JSON.parse(JSON.stringify(baseCoverageMatrix));
+  const after = JSON.parse(JSON.stringify(baseCoverageMatrix));
+  const g = after.by_group.find(x => x.group === group);
+  if (!g) {
+    throw new Error(
+      `coverage_matrix.by_group 에 group '${group}' 이 없습니다 ` +
+      `(존재: ${after.by_group.map(x => x.group).join(', ')})`
+    );
+  }
+  // 안전장치: 제외 대상 행은 반드시 현재 unmapped_input_rows 에 있어야 함
+  // (이미 STK_REQ 로 도출된 행을 제외하면 ratio 가 허위로 부풀려짐)
+  const unmapped = new Set(g.unmapped_input_rows || []);
+  const notUnmapped = exclude_rows.filter(r => !unmapped.has(r));
+  if (notUnmapped.length > 0) {
+    throw new Error(
+      `행 ${notUnmapped.join(', ')} 은(는) unmapped_input_rows 에 없습니다 — ` +
+      `이미 도출된 행은 제외할 수 없습니다 (허위 비율 방지)`
+    );
+  }
+  g.input_rows = g.input_rows - exclude_rows.length;
+  g.unmapped_input_rows = (g.unmapped_input_rows || []).filter(r => !exclude_rows.includes(r));
+  g.ratio = g.input_rows > 0
+    ? Math.round(((g.derived_stk_reqs || 0) / g.input_rows) * 1000) / 1000
+    : 0;
+  // 제외 사실 문서화 (평가자 제안 그대로 — 심사 증빙)
+  g.excluded_non_requirement_rows = [
+    ...(g.excluded_non_requirement_rows || []),
+    ...exclude_rows,
+  ];
+  g.exclusion_reason = exclusion_reason ||
+    '비요구사항(메타/N-A) 행으로 확인되어 input_rows 계산에서 제외';
+  recomputeCoverageSummary(after);
+  return { before, after, group: g };
+}
+
+// ──────────────────────────────────────────────────
 // action: propose — 선택 이슈에 대해 AI 수정안 생성
 // ──────────────────────────────────────────────────
 // body: {
@@ -280,6 +353,20 @@ async function handlePropose(req, res, body) {
       `&select=id,parsed_output,agent_role,status` +
       `&order=created_at.desc&limit=1`
     ) || [];
+    // v2 fallback: 프론트가 evaluate 호출 시 child id 를 parent 로 넘기는 경우가
+    // 있어 (0611-1 에서 확인) base 직계에 없으면 같은 work_product 의 최신
+    // success evaluator 를 사용
+    if (!evaluation && base.work_product_id) {
+      [evaluation] = await sb(
+        `/ai_generations?work_product_id=eq.${base.work_product_id}` +
+        `&agent_role=eq.evaluator&status=eq.success` +
+        `&select=id,parsed_output,agent_role,status` +
+        `&order=created_at.desc&limit=1`
+      ) || [];
+      if (evaluation) {
+        console.log(`[remediate] evaluator fallback: work_product 기준 최신 사용 (${evaluation.id})`);
+      }
+    }
   }
   if (!evaluation || evaluation.agent_role !== 'evaluator') {
     return res.status(404).json({
@@ -290,7 +377,9 @@ async function handlePropose(req, res, body) {
   const issues = evaluation.parsed_output?.issues || [];
 
   // 3. selections → targets 전개
+  // v2: coverage_fix 가 있는 selection 은 결정론적 coverage 보정으로 분리 처리
   const targets = [];
+  const coverageFixes = [];
   const skipped = [];
   for (const sel of selections) {
     const issue = issues[sel.issue_index];
@@ -298,7 +387,17 @@ async function handlePropose(req, res, body) {
       skipped.push({ selection: sel, reason: `issue_index ${sel.issue_index} 가 critique 에 없음 (0~${issues.length - 1})` });
       continue;
     }
-    // (a) 범위: 항목 단위 수정만. coverage_matrix 등 비항목 대상은 별도 취급 (CRITICAL spec_loss)
+    // v2: coverage_matrix 보정 (Claude 호출 없음 — 산술 + 문서화)
+    if (sel.coverage_fix) {
+      try {
+        const built = buildCoverageFix(base.parsed_output.coverage_matrix, sel.coverage_fix);
+        coverageFixes.push({ issueIndex: sel.issue_index, issue, built, fix: sel.coverage_fix });
+      } catch (e) {
+        skipped.push({ selection: sel, reason: `coverage_fix 실패: ${e.message}` });
+      }
+      continue;
+    }
+    // (a) 범위: 항목 단위 수정. coverage_matrix 등 비항목 대상은 coverage_fix 로 처리
     const targetIds = Array.isArray(sel.target_ids) && sel.target_ids.length > 0
       ? sel.target_ids
       : [issue.target_id];
@@ -307,7 +406,7 @@ async function handlePropose(req, res, body) {
         skipped.push({
           selection: { issue_index: sel.issue_index, target_id: tid },
           reason: tid === 'coverage_matrix' || !tid
-            ? '항목 단위 대상이 아님 (coverage_matrix/null) — (a) 범위에서 제외, 부분 재생성으로 별도 처리'
+            ? '항목 단위 대상이 아님 — coverage_matrix 이슈는 selection 에 coverage_fix: {group, exclude_rows, exclusion_reason} 를 넣어 요청하세요'
             : `STK_REQ ID '${tid}' 가 parsed_output 에 없음`,
         });
         continue;
@@ -322,75 +421,123 @@ async function handlePropose(req, res, body) {
     }
   }
 
-  if (targets.length === 0) {
+  if (targets.length === 0 && coverageFixes.length === 0) {
     return res.status(400).json({ error: '유효한 수정 대상이 없습니다', skipped });
   }
 
-  // 4. Claude 표적 수정 호출 (1회 배치)
-  const systemPrompt = composeRemediationPrompt(base.process_id);
-  const userPrompt = buildRemediationUserPrompt(base.process_id, targets);
-
-  // LLM 호출 자체도 ai_generations 에 기록 (비용/감사 추적)
-  // agent_role='remediation_proposal' — 리비전 스냅샷(remediator)과 구분
+  // 4. Claude 표적 수정 호출 (1회 배치) — 항목 대상이 있을 때만
+  //    (coverage_fix 만 있으면 Claude 호출 없음: 비용 0)
   let proposalGenId = null;
-  const [created] = await sb('/ai_generations', 'POST', {
-    project_id: base.project_id,
-    process_id: base.process_id,
-    work_product_id: base.work_product_id,
-    agent_role: 'remediation_proposal',
-    agent_step: 3,
-    model: MODEL,
-    provider: PROVIDER,
-    system_prompt: systemPrompt.slice(0, 50000),
-    user_prompt: userPrompt.slice(0, 50000),
-    parent_generation_id: generation_id,
-    status: 'pending',
-  }, 'return=representation') || [];
-  proposalGenId = created?.id;
+  let claudeResult = null;
+  let cost = 0;
+  if (targets.length > 0) {
+    const systemPrompt = composeRemediationPrompt(base.process_id);
+    const userPrompt = buildRemediationUserPrompt(base.process_id, targets);
 
-  let claudeResult;
-  try {
-    claudeResult = await callClaude({
-      systemPrompt,
-      userPrompt,
-      schema: REMEDIATION_OUTPUT_SCHEMA,
-    });
-  } catch (error) {
+    // LLM 호출 자체도 ai_generations 에 기록 (비용/감사 추적)
+    // agent_role='remediation_proposal' — 리비전 스냅샷(remediator)과 구분
+    const [created] = await sb('/ai_generations', 'POST', {
+      project_id: base.project_id,
+      process_id: base.process_id,
+      work_product_id: base.work_product_id,
+      agent_role: 'remediation_proposal',
+      agent_step: 3,
+      model: MODEL,
+      provider: PROVIDER,
+      system_prompt: systemPrompt.slice(0, 50000),
+      user_prompt: userPrompt.slice(0, 50000),
+      parent_generation_id: generation_id,
+      status: 'pending',
+    }, 'return=representation') || [];
+    proposalGenId = created?.id;
+
+    try {
+      claudeResult = await callClaude({
+        systemPrompt,
+        userPrompt,
+        schema: REMEDIATION_OUTPUT_SCHEMA,
+      });
+    } catch (error) {
+      if (proposalGenId) {
+        await sb(`/ai_generations?id=eq.${proposalGenId}`, 'PATCH', {
+          status: 'failed',
+          error_message: error.message?.slice(0, 1000),
+        }).catch(() => {});
+      }
+      throw error;
+    }
+
+    cost = estimateCost(
+      claudeResult.inputTokens,
+      claudeResult.outputTokens,
+      claudeResult.cacheCreationTokens,
+      claudeResult.cacheReadTokens
+    );
     if (proposalGenId) {
       await sb(`/ai_generations?id=eq.${proposalGenId}`, 'PATCH', {
-        status: 'failed',
-        error_message: error.message?.slice(0, 1000),
-      }).catch(() => {});
+        raw_output: claudeResult.rawOutput.slice(0, 100000),
+        parsed_output: claudeResult.parsedOutput,
+        finish_reason: claudeResult.finishReason,
+        input_tokens: claudeResult.inputTokens,
+        output_tokens: claudeResult.outputTokens,
+        cost_usd: cost,
+        latency_ms: claudeResult.latencyMs,
+        status: 'success',
+      }).catch(e => console.warn('[remediate] proposal row update failed:', e.message));
     }
-    throw error;
-  }
-
-  const cost = estimateCost(
-    claudeResult.inputTokens,
-    claudeResult.outputTokens,
-    claudeResult.cacheCreationTokens,
-    claudeResult.cacheReadTokens
-  );
-  if (proposalGenId) {
-    await sb(`/ai_generations?id=eq.${proposalGenId}`, 'PATCH', {
-      raw_output: claudeResult.rawOutput.slice(0, 100000),
-      parsed_output: claudeResult.parsedOutput,
-      finish_reason: claudeResult.finishReason,
-      input_tokens: claudeResult.inputTokens,
-      output_tokens: claudeResult.outputTokens,
-      cost_usd: cost,
-      latency_ms: claudeResult.latencyMs,
-      status: 'success',
-    }).catch(e => console.warn('[remediate] proposal row update failed:', e.message));
   }
 
   // 5. 수정안 → remediation_changes (status='proposed') 저장
   //    보호 필드 강제: revised 의 편집 가능 필드만 원본 위에 덮어씀
   const revisionNo = await nextRevisionNo(base.work_product_id);
-  const fixes = claudeResult.parsedOutput?.fixes || [];
+  const fixes = claudeResult?.parsedOutput?.fixes || [];
   const changes = [];
   const diffs = [];
 
+  // 5-a. coverage 보정 (결정론적, actor='human' — 제외 판단은 사람/평가자 evidence)
+  for (const cf of coverageFixes) {
+    changes.push({
+      project_id: base.project_id,
+      work_product_id: base.work_product_id,
+      base_generation_id: base.id,
+      revision_no: revisionNo,
+      actor: 'human',
+      target_stk_req_id: `coverage_matrix:${cf.fix.group}`,
+      issue_ref: {
+        index: cf.issueIndex,
+        severity: cf.issue.severity,
+        category: cf.issue.category,
+        issue: cf.issue.issue,
+      },
+      before_item: cf.built.before,
+      after_item: cf.built.after,
+      reason:
+        `비요구사항 행 ${cf.fix.exclude_rows.join(', ')} 을(를) input_rows 계산에서 제외 ` +
+        `(${cf.built.group.exclusion_reason}). ` +
+        `그룹 ratio ${cf.built.before.by_group.find(g => g.group === cf.fix.group)?.ratio} → ${cf.built.group.ratio}, ` +
+        `전체 status ${cf.built.before.summary.status} → ${cf.built.after.summary.status}`,
+      status: 'proposed',
+    });
+    diffs.push({
+      target_stk_req_id: `coverage_matrix:${cf.fix.group}`,
+      issue_index: cf.issueIndex,
+      reason: changes[changes.length - 1].reason,
+      changed_fields: ['coverage_matrix'],
+      before: {
+        group_ratio: cf.built.before.by_group.find(g => g.group === cf.fix.group)?.ratio,
+        unmapped: cf.built.before.by_group.find(g => g.group === cf.fix.group)?.unmapped_input_rows,
+        summary: cf.built.before.summary,
+      },
+      after: {
+        group_ratio: cf.built.group.ratio,
+        unmapped: cf.built.group.unmapped_input_rows,
+        excluded_non_requirement_rows: cf.built.group.excluded_non_requirement_rows,
+        summary: cf.built.after.summary,
+      },
+    });
+  }
+
+  // 5-b. Claude 항목 수정안
   for (const fix of fixes) {
     const entry = byId.get(fix.target_id);
     if (!entry) {
@@ -455,11 +602,13 @@ async function handlePropose(req, res, body) {
     skipped,
     diffs,
     meta: {
-      model: MODEL,
-      input_tokens: claudeResult.inputTokens,
-      output_tokens: claudeResult.outputTokens,
+      model: claudeResult ? MODEL : null,
+      claude_called: !!claudeResult,
+      coverage_fixes: coverageFixes.length,
+      input_tokens: claudeResult?.inputTokens || 0,
+      output_tokens: claudeResult?.outputTokens || 0,
       cost_usd: cost,
-      latency_ms: claudeResult.latencyMs,
+      latency_ms: claudeResult?.latencyMs || 0,
     },
   });
 }
@@ -531,6 +680,12 @@ async function handleApply(req, res, body) {
   let appliedCount = 0;
   const notFound = [];
   for (const ch of approved) {
+    // v2: coverage_matrix 변경 — 항목 치환이 아니라 coverage_matrix 전체 교체
+    if (String(ch.target_stk_req_id).startsWith('coverage_matrix')) {
+      revised.coverage_matrix = ch.after_item;
+      appliedCount++;
+      continue;
+    }
     const entry = byId.get(ch.target_stk_req_id);
     if (!entry) {
       notFound.push(ch.target_stk_req_id);
