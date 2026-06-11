@@ -238,6 +238,26 @@ async function nextRevisionNo(workProductId) {
   return rows.length + 1;
 }
 
+// (v4) work_product_id 로 시정조치 기준 generation 해석
+// — 최신 remediator 리비전 우선, 없으면 master generator (parent null).
+// 프론트의 /api/ai-generations 가 agent_role=remediator 필터를 지원하지 않아
+// 잘못된 row 를 기준으로 잡는 문제(0611-2)를 서버에서 확정적으로 해결.
+async function resolveBaseGenerationId(workProductId) {
+  const [rev] = await sb(
+    `/ai_generations?work_product_id=eq.${workProductId}` +
+    `&agent_role=eq.remediator&status=eq.success` +
+    `&select=id&order=created_at.desc&limit=1`
+  ) || [];
+  if (rev?.id) return rev.id;
+  const [master] = await sb(
+    `/ai_generations?work_product_id=eq.${workProductId}` +
+    `&agent_role=eq.generator&parent_generation_id=is.null` +
+    `&status=in.(success,partial)` +
+    `&select=id&order=created_at.desc&limit=1`
+  ) || [];
+  return master?.id || null;
+}
+
 // ──────────────────────────────────────────────────
 // coverage_matrix 결정론적 보정 (v2 — 0611-1 재QA CRITICAL 대응)
 // ──────────────────────────────────────────────────
@@ -318,10 +338,22 @@ function buildCoverageFix(baseCoverageMatrix, fix) {
 //   ]
 // }
 async function handlePropose(req, res, body) {
-  const { generation_id, evaluation_id, selections } = body;
+  let { generation_id } = body;
+  const { evaluation_id, selections, work_product_id } = body;
+
+  // (v4) generation_id 미지정 시 work_product_id 로 서버가 기준 버전 해석
+  if (!generation_id && work_product_id) {
+    generation_id = await resolveBaseGenerationId(work_product_id);
+    if (!generation_id) {
+      return res.status(404).json({
+        error: `work_product ${work_product_id} 에 시정조치 가능한 generation(원본/리비전)이 없습니다`,
+      });
+    }
+    console.log(`[remediate] base 자동 해석: work_product ${work_product_id} → ${generation_id}`);
+  }
 
   if (!generation_id || !Array.isArray(selections) || selections.length === 0) {
-    return res.status(400).json({ error: 'generation_id 와 selections 배열이 필요합니다' });
+    return res.status(400).json({ error: 'generation_id(또는 work_product_id)와 selections 배열이 필요합니다' });
   }
 
   // 1. base generation 조회 (master 또는 이전 리비전)
@@ -651,9 +683,16 @@ async function handleDecide(req, res, body) {
 // ──────────────────────────────────────────────────
 // body: { action: 'apply', generation_id: '<base generation id>' }
 async function handleApply(req, res, body) {
-  const { generation_id } = body;
+  let { generation_id } = body;
+  const { work_product_id } = body;
+  // (v4) generation_id 미지정 시 work_product_id 로 기준 버전 해석
+  // 주의: apply 는 propose 와 같은 base 를 가리켜야 함 — propose 가 리비전을
+  // 만들기 전이므로 resolveBaseGenerationId 결과는 propose 때와 동일.
+  if (!generation_id && work_product_id) {
+    generation_id = await resolveBaseGenerationId(work_product_id);
+  }
   if (!generation_id) {
-    return res.status(400).json({ error: 'generation_id 가 필요합니다' });
+    return res.status(400).json({ error: 'generation_id(또는 work_product_id)가 필요합니다' });
   }
 
   // 1. base generation
@@ -819,11 +858,14 @@ async function handleApply(req, res, body) {
 async function handleList(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const generationId = url.searchParams.get('generation_id');
+  const workProductId = url.searchParams.get('work_product_id'); // (v4)
   const status = url.searchParams.get('status'); // 선택 필터
-  if (!generationId) {
-    return res.status(400).json({ error: 'generation_id 쿼리 파라미터가 필요합니다' });
+  if (!generationId && !workProductId) {
+    return res.status(400).json({ error: 'generation_id 또는 work_product_id 쿼리 파라미터가 필요합니다' });
   }
-  let path = `/remediation_changes?base_generation_id=eq.${generationId}&order=created_at.asc`;
+  let path = generationId
+    ? `/remediation_changes?base_generation_id=eq.${generationId}&order=created_at.asc`
+    : `/remediation_changes?work_product_id=eq.${workProductId}&order=created_at.asc`;
   if (status) path += `&status=eq.${status}`;
   const rows = await sb(path) || [];
   return res.status(200).json({ success: true, count: rows.length, changes: rows });
