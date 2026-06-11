@@ -49,6 +49,47 @@ const SHEETS_PER_BATCH_MAX = 4;  // 안전장치 — Anthropic Tier 1 한도 보
 const CIRCUIT_BREAKER_THRESHOLD = 2;  // 연속 2 batch 실패 시 paused
 
 // ──────────────────────────────────────────────────
+// Phase 2-5: 함수 시간 예산 (좀비 child 방지)
+// ──────────────────────────────────────────────────
+// 배경 (0611-1 batch 4 사건):
+//   시트 1회 호출(최대 ~12분) + 0개 가드 재시도(또 ~12분) 가 겹치면
+//   Vercel maxDuration(800초)을 초과 → 함수가 status 갱신 없이 강제 종료
+//   → child row 가 'running' 좀비로 영구 잔류 → merge 가 7분 헛대기 후
+//   해당 시트 누락(partial) 또는 frontend 오인.
+// 해결:
+//   함수 시작 시 마감시각(deadline)을 정하고,
+//   (1) 마감 임박 시 새 Claude 호출(특히 재시도)을 시작하지 않고 명시적 실패
+//   (2) 진행 중인 호출도 마감 40초 전에 중단(race) → catch 가 child 를
+//       'failed' 로 기록할 시간을 확보한 뒤 정상 종료.
+//   조용한 좀비보다 시끄러운 실패가 낫다 — 실패한 batch 는 단독 재실행 가능.
+const BATCH_TIME_BUDGET_MS = 700_000;   // 11분 40초 (maxDuration 800초 대비 ~100초 여유)
+const DEADLINE_SAFETY_MS = 40_000;      // 마감 40초 전 호출 중단 → DB 기록 시간 확보
+const MIN_TIME_FOR_CALL_MS = 150_000;   // 새 Claude 호출 시작에 필요한 최소 잔여 시간 (2.5분)
+
+// promise 를 deadline 까지로 제한. 초과 시 명시적 에러로 reject
+// (기저 fetch 는 계속될 수 있으나 함수가 곧 종료되므로 무해 —
+//  중요한 건 child status 를 'failed' 로 기록하고 끝낼 시간을 버는 것)
+function raceWithDeadline(promise, deadlineAt, label) {
+  const remaining = deadlineAt - Date.now();
+  if (remaining <= 0) {
+    return Promise.reject(new Error(
+      `${label}: 함수 시간 예산 소진 — 호출을 시작하지 않음. 이 batch 만 다시 실행하세요.`
+    ));
+  }
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(
+        `${label}: Vercel maxDuration 임박으로 중단 ` +
+        `(예산 ${Math.round(BATCH_TIME_BUDGET_MS / 1000)}초 중 잔여 ${Math.round(remaining / 1000)}초 소진). ` +
+        `이 batch 만 다시 실행하세요.`
+      ));
+    }, remaining);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+// ──────────────────────────────────────────────────
 // UUID 형식 검증
 // ──────────────────────────────────────────────────
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -128,6 +169,9 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
+  // Phase 2-5: 함수 시간 예산 시작 (좀비 child 방지 — 상단 상수 참조)
+  const deadlineAt = Date.now() + BATCH_TIME_BUDGET_MS;
 
   // SSE 모드 시작 — frontend 가 Accept: text/event-stream 로 호출 권장
   const streaming = wantsStreaming(req);
@@ -306,6 +350,21 @@ export default async function handler(req, res) {
       });
 
       // child row INSERT (pending → 작업 후 success/failed 로 update)
+      // Phase 2-5: 시작 전 잔여 시간 검사 — 부족하면 child 를 만들지 않고 명시적 실패
+      if (deadlineAt - Date.now() < MIN_TIME_FOR_CALL_MS) {
+        const errMsg =
+          `시트 ${sheetIdx} (${sheetName}): 함수 잔여 시간 부족 ` +
+          `(${Math.round((deadlineAt - Date.now()) / 1000)}초 < 최소 ${MIN_TIME_FOR_CALL_MS / 1000}초) — ` +
+          `호출을 시작하지 않습니다. 이 batch 만 다시 실행하세요.`;
+        console.warn(`[generate-batch] ${errMsg}`);
+        emit('progress', {
+          step: 'sheet_failed',
+          message: errMsg,
+          batch_idx, sheet_index: sheetIdx, sheet_name: sheetName,
+          error: errMsg,
+        });
+        return { success: false, sheet, error: errMsg, childId: null };
+      }
       let childId = null;
       try {
         const sheetUserPrompt = buildSheetUserPrompt({
@@ -340,11 +399,16 @@ export default async function handler(req, res) {
         childId = createdChild?.id || null;
 
         // 시트 callClaude (이미 검증된 generate.js 의 함수, retry 내장)
-        let sheetResult = await callClaude({
-          systemPrompt,
-          userPrompt: sheetUserPrompt,
-          schema: PER_SHEET_SCHEMA,
-        });
+        // Phase 2-5: deadline race — maxDuration 전에 중단하고 failed 기록
+        let sheetResult = await raceWithDeadline(
+          callClaude({
+            systemPrompt,
+            userPrompt: sheetUserPrompt,
+            schema: PER_SHEET_SCHEMA,
+          }),
+          deadlineAt - DEADLINE_SAFETY_MS,
+          `시트 ${sheetIdx} (${sheetName}) Claude 호출`
+        );
 
         // ── Phase 2-4: 0개 가드 (Interface 그룹 조용한 소실 차단) ──
         // 배경: "NAD System Interface" 같은 핀 정의표를 Claude 가 간헐적으로
@@ -367,11 +431,25 @@ export default async function handler(req, res) {
             sheet_name: sheetName,
             input_rows: sheet.rows.length,
           });
-          const retryResult = await callClaude({
-            systemPrompt,
-            userPrompt: sheetUserPrompt,
-            schema: PER_SHEET_SCHEMA,
-          });
+          // Phase 2-5: 재시도가 이번 좀비 사건의 직접 원인 (1차 호출 + 재시도 > 800초)
+          // 잔여 시간이 부족하면 재시도하지 않고 명시적 실패 → batch 단독 재실행 유도
+          if (deadlineAt - Date.now() < MIN_TIME_FOR_CALL_MS) {
+            throw new Error(
+              `시트 "${sheetName}": 행 ${sheet.rows.length}개에 STK_REQ 0개 반환. ` +
+              `재시도가 필요하나 함수 잔여 시간 부족 ` +
+              `(${Math.round((deadlineAt - Date.now()) / 1000)}초) — Vercel maxDuration 초과(좀비) 방지를 위해 ` +
+              `실패로 처리합니다. 이 batch 만 다시 실행하세요 (재실행 시 캐시 HIT 로 빨라짐).`
+            );
+          }
+          const retryResult = await raceWithDeadline(
+            callClaude({
+              systemPrompt,
+              userPrompt: sheetUserPrompt,
+              schema: PER_SHEET_SCHEMA,
+            }),
+            deadlineAt - DEADLINE_SAFETY_MS,
+            `시트 ${sheetIdx} (${sheetName}) 0개 가드 재시도`
+          );
           const retryCount = retryResult.parsedOutput.stakeholder_requirements?.length || 0;
           if (retryCount > 0) {
             // 재시도 성공 — 토큰/비용/지연은 두 호출 합산해 child row 에 정확히 기록
