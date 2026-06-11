@@ -932,6 +932,39 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         />
       )}
 
+      {/* ── Phase 3-2: QA 검토 진행 표시 (화면 상단 중앙 고정) ──
+          패널을 보고 있지 않아도 QA 진행 중임을 항상 인지할 수 있도록.
+          이전 QA 결과가 있으면 '재검토중', 없으면 '검토중' 으로 구분 표기 */}
+      {evaluating && (
+        <div style={{
+          position: "fixed", top: 14, left: "50%", transform: "translateX(-50%)",
+          zIndex: 900,
+          display: "flex", alignItems: "center", gap: 10,
+          background: "var(--c-navy-deep, #1E2761)", color: "#fff",
+          padding: "10px 20px", borderRadius: 24,
+          boxShadow: "0 8px 24px rgba(15, 24, 56, 0.35)",
+          fontSize: 13, fontWeight: 600,
+        }}>
+          <span style={{
+            width: 14, height: 14, borderRadius: "50%", flexShrink: 0,
+            border: "2px solid rgba(255,255,255,0.35)", borderTopColor: "#fff",
+            animation: "qaSpin 0.8s linear infinite",
+          }} />
+          {agentResult?.evaluator ? "QA 재검토중" : "QA 검토중"}
+          {" "}— Gemini 독립 평가 진행 (30~90초)
+          <button
+            onClick={() => setPanelOpen(true)}
+            style={{
+              background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.35)",
+              color: "#fff", borderRadius: 12, padding: "3px 10px",
+              fontSize: 11, fontWeight: 600, cursor: "pointer",
+            }}>
+            진행 상세
+          </button>
+          <style>{`@keyframes qaSpin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
+
       {/* Rationale Panel (우측 슬라이드) */}
       <RationalePanel
         open={panelOpen}
