@@ -33,16 +33,32 @@ function extractStkIds(text) {
   const ids = String(text).match(/STK_REQ_[A-Z0-9_]+_\d{3}/g) || [];
   return [...new Set(ids)];
 }
-// evidence 에서 [93, 94, 95, 96] 형태의 행 목록 추출 (coverage 제외 행 자동 채움)
+// evidence 에서 제외 행 목록 추출 (coverage 제외 행 자동 채움)
+// 지원 형식: "[93, 94, 95, 96]" / "행 93~96" / "93-96" / "rows 93–96"
 function extractRows(text) {
-  if (!text) return "";
-  const m = String(text).match(/\[\s*(\d{1,4}(?:\s*,\s*\d{1,4})+)\s*\]/);
-  return m ? m[1].replace(/\s+/g, "") : "";
+  const t = String(text || "");
+  const bracket = t.match(/\[\s*(\d{1,4}(?:\s*,\s*\d{1,4})+)\s*\]/);
+  if (bracket) return bracket[1].replace(/\s+/g, "");
+  const range = t.match(/(?:행|rows?)?\s*(\d{1,4})\s*[~\-–—]\s*(\d{1,4})/);
+  if (range) {
+    const a = parseInt(range[1], 10), b = parseInt(range[2], 10);
+    if (b > a && b - a <= 50) {
+      return Array.from({ length: b - a + 1 }, (_, k) => a + k).join(",");
+    }
+  }
+  return "";
 }
-// issue 텍스트에서 "XXX 그룹" 패턴으로 그룹명 추출
+// issue/evidence 텍스트에서 그룹명 추정
+// 1) "XXX 그룹" 패턴  2) 알려진 시트명 키워드 → 그룹 매핑 (편집 가능하므로 추정만)
 function extractGroup(text) {
-  const m = String(text || "").match(/([A-Z][A-Z0-9]{1,15})\s*그룹/);
-  return m ? m[1] : "";
+  const t = String(text || "");
+  const m = t.match(/([A-Z][A-Z0-9]{1,15})\s*그룹/);
+  if (m) return m[1];
+  if (/NAD\s*System\s*Interface/i.test(t)) return "NADSYSTEM";
+  if (/NAD\s*Software/i.test(t)) return "NAD";
+  if (/EU\s*Variant/i.test(t)) return "EU";
+  if (/China\s*Variant/i.test(t)) return "CHINA";
+  return "";
 }
 
 const SEV_COLOR = {
@@ -83,29 +99,34 @@ export default function RemediationPanel({
     setLoading(true);
     (async () => {
       try {
-        // 1. 기준 generation: 최신 remediator 리비전이 있으면 그것, 없으면 generator master
+        // 1. 기준 generation (표시용 — 실제 선정은 서버 /api/remediate 가 work_product_id 로 확정)
+        //    /api/ai-generations 가 agent_role 필터를 엄격히 지원하지 않을 수 있으므로
+        //    응답 row 의 agent_role 을 반드시 검증하고, 못 찾으면 표시만 생략.
         let base = null;
         try {
           const r = await api(`/api/ai-generations?work_product_id=${encodeURIComponent(workProductId)}&agent_role=remediator&limit=1`);
-          if (r.success && r.results?.length) base = r.results[0];
+          const row = (r.success && r.results?.length) ? r.results[0] : null;
+          if (row && row.agent_role === "remediator") base = row;
         } catch { /* remediator 없음 — 무시 */ }
         if (!base) {
-          const g = await api(`/api/ai-generations?work_product_id=${encodeURIComponent(workProductId)}&agent_role=generator&limit=1`);
-          if (g.success && g.results?.length) base = g.results[0];
+          try {
+            const g = await api(`/api/ai-generations?work_product_id=${encodeURIComponent(workProductId)}&agent_role=generator&limit=1`);
+            const row = (g.success && g.results?.length) ? g.results[0] : null;
+            if (row && row.agent_role === "generator") base = row;
+          } catch { /* 무시 — 서버가 해석 */ }
         }
-        if (!base) throw new Error("AI 생성 결과가 없습니다. 먼저 [⚡ AI 생성]을 실행하세요.");
 
-        // 2. 최신 evaluator critique
+        // 2. 최신 evaluator critique (agent_role 검증)
         const e = await api(`/api/ai-generations?work_product_id=${encodeURIComponent(workProductId)}&agent_role=evaluator&limit=1`);
-        const evalRow = (e.success && e.results?.length) ? e.results[0] : null;
+        const evalRow = (e.success && e.results?.length && e.results[0].agent_role === "evaluator") ? e.results[0] : null;
         if (!evalRow?.parsed_output?.issues) {
           throw new Error("QA 검토 결과가 없습니다. 먼저 [QA 검토]를 실행하세요.");
         }
 
-        // 3. 변경 이력
+        // 3. 변경 이력 (work_product 전체)
         let hist = [];
         try {
-          const h = await api(`/api/remediate?generation_id=${base.id}`);
+          const h = await api(`/api/remediate?work_product_id=${encodeURIComponent(workProductId)}`);
           hist = h.changes || [];
         } catch { /* 이력 없음 */ }
 
@@ -157,7 +178,8 @@ export default function RemediationPanel({
       if (s.isCoverage) {
         const rows = String(s.covRows || "").split(",").map(x => parseInt(x.trim(), 10)).filter(Number.isInteger);
         if (!s.covGroup || rows.length === 0) {
-          alert(`이슈 #${issue_index + 1}: coverage 보정에는 그룹명과 제외 행 목록이 필요합니다.`);
+          alert(`이슈 #${issue_index + 1}: coverage 보정에는 그룹명과 제외 행 목록이 필요합니다.\n해당 카드로 이동합니다 — 그룹(예: NAD)과 행(예: 93,94,95,96)을 입력하세요.`);
+          document.getElementById(`rem-issue-${issue_index}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
           return;
         }
         selections.push({
@@ -176,7 +198,7 @@ export default function RemediationPanel({
     try {
       const r = await api("/api/remediate", "POST", {
         action: "propose",
-        generation_id: baseGen.id,
+        work_product_id: workProductId,  // 서버가 최신 리비전 우선으로 기준 버전 해석
         evaluation_id: evaluation.id,
         selections,
       });
@@ -204,7 +226,11 @@ export default function RemediationPanel({
         await api("/api/remediate", "POST", { action: "decide", decision: "rejected", change_ids: rejectIds });
       }
       setBusy("apply");
-      const r = await api("/api/remediate", "POST", { action: "apply", generation_id: baseGen.id });
+      const r = await api("/api/remediate", "POST", {
+        action: "apply",
+        // propose 가 확정한 기준 버전을 그대로 사용 (propose-apply 일관성 보장)
+        generation_id: proposal.base_generation_id,
+      });
       setApplied(r);
       if (onApplied) await onApplied(); // wp.content 갱신됨 → 화면 새로고침
     } catch (e) {
@@ -320,19 +346,19 @@ export default function RemediationPanel({
           {/* ── 이슈 선택 탭 ── */}
           {!loading && !loadError && tab === "issues" && (
             <>
-              {baseGen && (
-                <div style={{ fontSize: 11, color: "var(--c-text-muted)", marginBottom: 12 }}>
-                  기준 버전: {baseGen.agent_role === "remediator" ? `시정조치 v${(baseGen.attempt_number || 0) + 1} 리비전` : "AI 원본 (master)"} · {String(baseGen.id).slice(0, 8)}…
-                  — AI 원본은 불변이며, 수정은 새 리비전으로 적층됩니다.
-                </div>
-              )}
+              <div style={{ fontSize: 11, color: "var(--c-text-muted)", marginBottom: 12 }}>
+                기준 버전: {baseGen
+                  ? `${baseGen.agent_role === "remediator" ? `시정조치 v${(baseGen.attempt_number || 0) + 1} 리비전` : "AI 원본 (master)"} · ${String(baseGen.id).slice(0, 8)}…`
+                  : "서버 자동 선택 (최신 리비전 우선, 없으면 AI 원본)"}
+                {" "}— AI 원본은 불변이며, 수정은 새 리비전으로 적층됩니다.
+              </div>
 
               {/* 1단계: 이슈 카드 + 체크박스 */}
               {!proposal && issues.map((iss, i) => {
                 const s = sel[i] || {};
                 const c = sevStyle(iss.severity);
                 return (
-                  <div key={i} style={{
+                  <div key={i} id={`rem-issue-${i}`} style={{
                     border: `1px solid ${s.checked ? "var(--c-navy-deep)" : "var(--c-border)"}`,
                     borderLeft: `4px solid ${c.border}`,
                     borderRadius: 8, padding: "10px 12px", marginBottom: 10,
