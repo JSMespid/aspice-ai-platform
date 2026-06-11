@@ -737,6 +737,24 @@ async function handleApply(req, res, body) {
     { status: 'applied', revision_generation_id: revRow.id }
   );
 
+  // 6-b. (v3) work_products.content.ai_generated 를 리비전으로 갱신
+  //      — 화면(GeneratedArtifactView)과 docx 다운로드가 수정본을 보도록.
+  //      상태(state/status)는 건드리지 않음 (검토중 유지).
+  if (base.work_product_id) {
+    try {
+      const [wpRow] = await sb(
+        `/work_products?id=eq.${base.work_product_id}&select=content`
+      ) || [];
+      if (wpRow) {
+        await sb(`/work_products?id=eq.${base.work_product_id}`, 'PATCH', {
+          content: { ...(wpRow.content || {}), ai_generated: revised },
+        });
+      }
+    } catch (e) {
+      console.warn('[remediate] work_products content 갱신 실패 (비차단):', e.message);
+    }
+  }
+
   // 7. state_transitions (상태는 유지, 시정조치 이벤트만 기록 — 심사 추적용)
   if (base.work_product_id) {
     const [wp] = await sb(
@@ -789,9 +807,9 @@ async function handleApply(req, res, body) {
     applied_count: appliedCount,
     not_found_targets: notFound,
     stk_req_count: revised.stakeholder_requirements?.length || 0,
-    // 재QA 안내: 이 parsed_output 을 /api/evaluate 에
-    // { generated_output, process_id, project_id, work_product_id,
-    //   ai_generation_id: revision_generation_id } 로 전송
+    // (v3) 재QA 용: 이 출력을 /api/evaluate 의 generated_output 으로,
+    // revision_generation_id 를 ai_generation_id 로 전송
+    parsed_output: revised,
   });
 }
 
