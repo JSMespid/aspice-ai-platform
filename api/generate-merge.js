@@ -119,8 +119,17 @@ export default async function handler(req, res) {
 
     const MERGE_WAIT_FOR_CHILDREN_MS = 420_000;  // 최대 7분 대기
     const MERGE_WAIT_POLL_MS = 15_000;           // 15초 간격 재조회
+
+    // Phase 2-5: 좀비 child 판정 (0611-1 batch 4 사건)
+    // Vercel maxDuration(800초) 을 초과하면 batch 함수는 status 갱신 없이 강제 종료됨
+    // → created_at 으로부터 16분이 지났는데 아직 running/pending 이면
+    //   그 함수는 이미 죽은 것 — 기다릴 대상이 아니라 정리할 대상.
+    const STALE_CHILD_MS = 16 * 60_000;
+    const isStaleChild = (c) =>
+      ['running', 'pending'].includes(c.status) &&
+      (Date.now() - new Date(c.created_at).getTime()) > STALE_CHILD_MS;
     const countInFlight = (cs) =>
-      cs.filter(c => ['running', 'pending'].includes(c.status)).length;
+      cs.filter(c => ['running', 'pending'].includes(c.status) && !isStaleChild(c)).length;
 
     let children = await fetchChildren();
     if (master.status !== 'cancelling') {
@@ -142,9 +151,62 @@ export default async function handler(req, res) {
       }
     }
 
-    const successChildren = children.filter(c => c.status === 'success');
-    const failedChildren = children.filter(c => c.status === 'failed');
-    const cancelledChildren = children.filter(c => c.status === 'cancelled');
+    // ── Phase 2-5a: 좀비 child 자동 정리 ────────────────────
+    // 16분 넘게 running/pending 인 child 는 maxDuration 초과로 죽은 함수의 잔재.
+    // 'failed' 로 마킹해 두면 frontend/SQL 어디서 봐도 상태가 진실과 일치하고,
+    // 사용자가 해당 batch 만 다시 실행하면 됨 (수동 SQL 정리 불필요).
+    const staleChildren = children.filter(isStaleChild);
+    for (const c of staleChildren) {
+      const ageMin = Math.round((Date.now() - new Date(c.created_at).getTime()) / 60_000);
+      const staleMsg =
+        `merge 가 좀비로 판정해 자동 실패 처리 — running 상태로 ${ageMin}분 경과 ` +
+        `(Vercel maxDuration 초과로 batch 함수가 강제 종료된 것으로 추정). ` +
+        `이 batch 만 다시 실행하면 됩니다.`;
+      console.warn(`[generate-merge] 좀비 child ${c.id} (batch ${c.agent_step}) → failed: ${staleMsg}`);
+      await sb(`/ai_generations?id=eq.${c.id}`, 'PATCH', {
+        status: 'failed',
+        error_message: staleMsg,
+      }).catch(e => console.warn('[generate-merge] 좀비 정리 PATCH 실패:', e.message));
+      // 로컬 객체도 동기화 (아래 집계에 즉시 반영)
+      c.status = 'failed';
+      c.error_message = staleMsg;
+    }
+
+    // ── Phase 2-5b: 시트 슬롯 단위 dedup ────────────────────
+    // 같은 (agent_step, sheet_indices) 슬롯에 child 가 여러 개면
+    // (예: 좀비 정리 후 같은 batch 를 다시 실행한 경우)
+    // 최신 success 를 채택하고 나머지(과거 실패/좀비)는 집계에서 제외.
+    // → 재실행으로 데이터가 완전해졌는데도 과거 failed 가 남아
+    //   master 가 'partial' 로 오판되던 문제(0611-1) 해결.
+    const slotKeyOf = (c) =>
+      `${c.agent_step}|${Array.isArray(c.sheet_indices) ? c.sheet_indices.join(',') : ''}`;
+    const slotMap = new Map();
+    for (const c of children) {
+      const k = slotKeyOf(c);
+      if (!slotMap.has(k)) slotMap.set(k, []);
+      slotMap.get(k).push(c);
+    }
+    const effectiveChildren = [];
+    for (const [k, group] of slotMap) {
+      if (group.length === 1) {
+        effectiveChildren.push(group[0]);
+        continue;
+      }
+      const byNewest = [...group].sort(
+        (a, b) => new Date(b.created_at) - new Date(a.created_at)
+      );
+      // 성공본이 있으면 최신 성공본 채택, 없으면 최신 child 채택
+      const winner = byNewest.find(c => c.status === 'success') || byNewest[0];
+      effectiveChildren.push(winner);
+      console.log(
+        `[generate-merge] 슬롯 ${k}: child ${group.length}개 중 ` +
+        `${winner.id} (${winner.status}) 채택 — 나머지 ${group.length - 1}개는 집계 제외 (대체됨)`
+      );
+    }
+
+    const successChildren = effectiveChildren.filter(c => c.status === 'success');
+    const failedChildren = effectiveChildren.filter(c => c.status === 'failed');
+    const cancelledChildren = effectiveChildren.filter(c => c.status === 'cancelled');
 
     // ── 4. merge 가능 여부 판단 ─────────────────────────────
     const totalBatches = master.job_state?.total_batches || 0;
