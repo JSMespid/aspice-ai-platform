@@ -334,6 +334,31 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
     setEvaluating(false);
   }
 
+  // ── Phase 3-2: 검토자 의사결정 (3단계 '승인' — HITL ⑤축) ──
+  // /api/approve 가 상태 전이 + state_transitions + audit_logs 기록 (심사 증빙)
+  async function handleReviewerDecision(decision) {
+    const labels = { approve: "승인", reject: "반려", request_changes: "수정요청" };
+    let reason = null;
+    if (decision === "approve") {
+      if (!confirm("이 산출물을 승인하시겠습니까?\n상태가 '승인됨'으로 전환되며 심사 증빙(state_transitions)에 기록됩니다.")) return;
+    } else {
+      reason = prompt(`${labels[decision]} 사유를 입력하세요 (심사 증빙에 기록됩니다):`);
+      if (reason === null) return; // 취소
+    }
+    try {
+      const r = await apiCall("/api/approve", "POST", {
+        work_product_id: wp.id,
+        decision,
+        reason: reason || undefined,
+      });
+      setState(r.to_state);
+      if (onWorkProductChange) await onWorkProductChange();
+      alert(`${labels[decision]} 처리되었습니다. (${r.from_state} → ${r.to_state})`);
+    } catch (e) {
+      alert(`의사결정 처리 실패: ${e.message}`);
+    }
+  }
+
   // ── STK_REQ 카드 편집 핸들러 (Phase 2-2b STEP C-2: 옵션 A) ──
   // 사용자가 [✏ 편집] 클릭 시 모달 열기
   function handleStkReqEditOpen(req) {
@@ -750,11 +775,10 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
 
           {/*
             Phase 2-2d: 진행/결과 보기 버튼
-            - 산출물 영역과 무관하게 언제든 RationalePanel 다시 열기
-            - 생성 중 / 실패 / 결과 있음 / 미시작 어떤 상태든 의미 있음
-            - 미시작 상태에서는 비활성화 (보여줄 게 없음)
+            - 중복 제거 (Phase 3-2): AI 생성 결과 카드가 있으면 카드 안의
+              [Rationale 보기] 버튼을 쓰므로 상단 버튼은 카드가 없을 때만 표시
           */}
-          {(generating || evaluating || agentResult || agentStep !== AgentStep.IDLE) && (
+          {(generating || evaluating || agentResult || agentStep !== AgentStep.IDLE) && !wp?.content?.ai_generated && (
             <button
               onClick={() => setPanelOpen(true)}
               title={
@@ -796,6 +820,49 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               }}>
               🔧 AI 시정조치
             </button>
+          )}
+
+          {/*
+            Phase 3-2: 검토자 의사결정 (3단계 '승인')
+            - 산출물이 있고 진행 중이 아닐 때 표시
+            - 승인 → APPROVED(승인됨), 반려 → REJECTED(반려됨)
+            - /api/approve 가 상태 전이 + 심사 증빙 기록
+          */}
+          {wp?.content?.ai_generated && !generating && !evaluating && state !== "APPROVED" && (
+            <>
+              <button
+                onClick={() => handleReviewerDecision("approve")}
+                title="검토자 승인 — 상태를 '승인됨'으로 전환하고 심사 증빙에 기록"
+                style={{
+                  background: "#10B981", border: "1px solid #10B981",
+                  color: "#fff", borderRadius: 6,
+                  padding: "9px 16px", fontSize: 12, fontWeight: 600,
+                  cursor: "pointer",
+                }}>
+                ✅ 승인
+              </button>
+              <button
+                onClick={() => handleReviewerDecision("reject")}
+                title="검토자 반려 — 사유와 함께 '반려됨'으로 전환"
+                style={{
+                  background: "#fff", border: "1px solid #DC2626",
+                  color: "#DC2626", borderRadius: 6,
+                  padding: "9px 14px", fontSize: 12, fontWeight: 600,
+                  cursor: "pointer",
+                }}>
+                ↩ 반려
+              </button>
+            </>
+          )}
+          {wp?.content?.ai_generated && state === "APPROVED" && (
+            <span style={{
+              display: "inline-flex", alignItems: "center",
+              padding: "9px 14px", borderRadius: 6,
+              background: "#D1FAE5", color: "#065F46",
+              fontSize: 12, fontWeight: 700,
+            }}>
+              ✅ 승인됨
+            </span>
           )}
         </div>
       </div>
