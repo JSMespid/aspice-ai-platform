@@ -17,6 +17,7 @@ import { PROCESSES, getPreviousProcessIds } from "../config/processes.js";
 import WorkProductRegisterModal from "../components/WorkProductRegisterModal.jsx";
 import WorkProductDirectInputModal from "../components/WorkProductDirectInputModal.jsx";
 import RationalePanel from "../components/RationalePanel.jsx";
+import RemediationPanel from "../components/RemediationPanel.jsx";
 import GeneratedArtifactView from "../components/GeneratedArtifactView.jsx";
 import StkReqEditModal from "../components/StkReqEditModal.jsx";
 import {
@@ -70,6 +71,8 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
 
   // Rationale Panel 상태 (Phase 2-2a)
   const [panelOpen, setPanelOpen] = useState(false);
+  // Phase 3-1: QA 시정조치 패널 (SCR-12)
+  const [remediationOpen, setRemediationOpen] = useState(false);
   const [agentStep, setAgentStep] = useState(AgentStep.IDLE);
   const [agentDetail, setAgentDetail] = useState(null);
   const [agentResult, setAgentResult] = useState(null);
@@ -771,6 +774,29 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               📊 {(generating || evaluating) ? "진행 보기" : "Rationale 보기"}
             </button>
           )}
+
+          {/*
+            Phase 3-1 (SCR-12): QA 시정조치 버튼
+            - QA 검토 결과(evaluator critique)가 있을 때 표시
+            - 반려(rejected) 시 강조색, 승인 후에도 추가 개선용으로 열 수 있음
+            - 흐름: 이슈 선택 → AI 수정안(diff) → 사람 승인 → 리비전 반영 → 재QA
+          */}
+          {agentResult?.evaluator?.critique && !generating && !evaluating && (
+            <button
+              onClick={() => setRemediationOpen(true)}
+              title="QA 이슈를 AI가 표적 수정 — 사람 승인 후 리비전으로 반영 (원본 불변)"
+              style={{
+                background: agentResult.evaluator.critique.verdict === "rejected" ? "#B91C1C" : "#fff",
+                border: "1px solid #B91C1C",
+                color: agentResult.evaluator.critique.verdict === "rejected" ? "#fff" : "#B91C1C",
+                borderRadius: 6,
+                padding: "9px 14px",
+                fontSize: 12, fontWeight: 600,
+                cursor: "pointer",
+              }}>
+              🔧 AI 시정조치
+            </button>
+          )}
         </div>
       </div>
 
@@ -850,6 +876,18 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         cancellable={!!chunkedGenerationId && generating}
         onCancel={handleCancelGeneration}
         cancelling={cancelling}
+      />
+
+      {/* Phase 3-1 (SCR-12): QA 시정조치 패널 */}
+      <RemediationPanel
+        open={remediationOpen}
+        onClose={() => setRemediationOpen(false)}
+        project={project}
+        processId={processId}
+        workProductId={wp?.id}
+        // apply 가 work_products.content.ai_generated 를 리비전으로 갱신하므로
+        // 화면(산출물 카드)을 다시 로드해 수정본을 표시
+        onApplied={onWorkProductChange}
       />
     </div>
   );
