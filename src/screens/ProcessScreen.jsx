@@ -10,6 +10,11 @@
 // Phase 2-2b 예정:
 //   - Gemini 교차검증 (4축 활성)
 //   - critique-and-refine cycle
+// 2026-06-12 (Rationale 표시 개선):
+//   - 마지막 결과 복원 시 master generator (parent_null=true) 확정 조회
+//     → guardrail_result ①②③ 실제 결과가 패널에 표시됨 (child 오조회 방지)
+//   - 최신 remediator 리비전 우선 복원 (시정조치 후 화면 내용과 기준 일치)
+//   - /api/ai-generations v2 (remediator/parent_null/status 목록 필터) 필요
 
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
@@ -450,37 +455,81 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         const lastEval = (evalData.results && evalData.results.length > 0) ? evalData.results[0] : null;
         if (cancelled) return;
 
-        // 마지막 generator 결과 조회
-        const genUrl = `/api/ai-generations?work_product_id=${encodeURIComponent(wp.id)}&agent_role=generator&limit=1`;
+        // ── 마지막 generator 결과 조회 (v2 — Rationale 표시 개선) ──
+        // 기존 문제: agent_role=generator&limit=1 은 chunked 구조에서 master 가
+        //   아닌 child batch 를 반환할 수 있음 → child 에는 guardrail_result(①②③)
+        //   가 없어 패널이 "미실행/HOOKED" 으로 표시됨.
+        // 개선 (서버 확정 해석 — remediate.js resolveBaseGenerationId 와 동일 사상):
+        //   (1) 최신 remediator 리비전 우선 (시정조치 후 화면 내용과 기준 일치)
+        //   (2) master generator (parent_null=true, partial 포함) 폴백
+        //   guardrail_result 는 리비전에 있으면 리비전 것(향후 리비전 가드레일
+        //   재실행 과제 완료 시), 없으면 master 것 폴백.
+
+        // (1) 최신 remediator 리비전
+        const revUrl = `/api/ai-generations?work_product_id=${encodeURIComponent(wp.id)}&agent_role=remediator&limit=1`;
+        let lastRev = null;
+        try {
+          const revRes = await fetch(revUrl);
+          if (revRes.ok) {
+            const revData = await revRes.json();
+            const row = (revData.success && revData.results && revData.results.length > 0)
+              ? revData.results[0] : null;
+            // 방어: 구버전 엔드포인트가 remediator 필터를 무시하고 다른 role 을
+            // 반환하는 경우를 차단 (배포 순서 불일치 대비)
+            if (row && row.agent_role === 'remediator') lastRev = row;
+          }
+        } catch (e) {
+          console.warn('[ProcessScreen] remediator 리비전 조회 실패 (비차단):', e);
+        }
+        if (cancelled) return;
+
+        // (2) master generator (parent null 확정, partial 부분병합 포함)
+        const genUrl = `/api/ai-generations?work_product_id=${encodeURIComponent(wp.id)}&agent_role=generator&parent_null=true&status=success,partial&limit=1`;
         const genRes = await fetch(genUrl);
         let lastGen = null;
         if (genRes.ok) {
           const genData = await genRes.json();
           if (genData.success && genData.results && genData.results.length > 0) {
-            lastGen = genData.results[0];
+            const row = genData.results[0];
+            // 방어: parent_generation_id 필드가 응답에 있으면 master 인지 검증
+            // (구버전 엔드포인트면 필드가 없어 undefined — 그대로 사용)
+            if (row.parent_generation_id === null || row.parent_generation_id === undefined) {
+              lastGen = row;
+            }
           }
         }
         if (cancelled) return;
 
         console.log('[ProcessScreen] 마지막 결과 로드:',
-          'generator:', lastGen ? `${lastGen.model} ($${(lastGen.cost_usd||0).toFixed(4)})` : 'none',
+          'master:', lastGen ? `${lastGen.model} ($${(lastGen.cost_usd||0).toFixed(4)})` : 'none',
+          'revision:', lastRev ? `v${(lastRev.attempt_number || 0) + 1} (${lastRev.id})` : 'none',
           'evaluator:', lastEval ? `${lastEval.model} ($${(lastEval.cost_usd||0).toFixed(4)})` : 'none');
 
         // 실제 DB 값으로 mock 덮어쓰기
-        const generatorMock = lastGen ? {
+        // - 기준 id: 리비전 있으면 리비전 (화면 내용 = 리비전이므로 이후 QA 가
+        //   리비전을 parent 로 가리키게 됨 — remediate.js 헤더 규칙과 일치)
+        // - guardrail_result: 리비전 것 우선, 없으면 master 것 (①②③ 실제 결과 표시)
+        // - meta(모델/토큰/비용): 생성 증빙이므로 master 기준
+        //   (리비전 row 는 model='revision-snapshot', 비용 0 인 내부 스냅샷)
+        const baseRow = lastRev || lastGen;
+        const generatorMock = baseRow ? {
           success: true,
-          passed: lastGen.guardrail_passed,
-          ai_generation_id: lastGen.id,
+          passed: (lastRev && lastRev.guardrail_result)
+            ? lastRev.guardrail_passed
+            : (lastGen ? lastGen.guardrail_passed : true),
+          ai_generation_id: baseRow.id,
           output: wp.content.ai_generated,
-          guardrail_result: lastGen.guardrail_result,
-          meta: {
+          guardrail_result: (lastRev && lastRev.guardrail_result)
+            ? lastRev.guardrail_result
+            : (lastGen ? lastGen.guardrail_result : null),
+          meta: lastGen ? {
             model: lastGen.model,
             input_tokens: lastGen.input_tokens || 0,
             output_tokens: lastGen.output_tokens || 0,
             cost_usd: lastGen.cost_usd || 0,
             latency_ms: lastGen.latency_ms || 0,
             skills_used: lastGen.skills_used || [],
-          },
+          } : minimalGeneratorMock.meta,
         } : minimalGeneratorMock;
 
         const evaluatorMock = lastEval ? {
