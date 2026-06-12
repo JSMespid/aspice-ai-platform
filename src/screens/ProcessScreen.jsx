@@ -348,11 +348,20 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
 
   // ── Phase 3-2: 검토자 의사결정 (3단계 '승인' — HITL ⑤축) ──
   // /api/approve 가 상태 전이 + state_transitions + audit_logs 기록 (심사 증빙)
+  // 2026-06-12 (v2): 'revoke' (승인 철회) 추가 — 승인 = 베이스라인 잠금이므로
+  //   재검토/시정조치를 하려면 사유와 함께 명시적으로 철회부터 해야 함 (SUP.8)
   async function handleReviewerDecision(decision) {
-    const labels = { approve: "승인", reject: "반려", request_changes: "수정요청" };
+    const labels = { approve: "승인", reject: "반려", request_changes: "수정요청", revoke: "승인 철회" };
     let reason = null;
     if (decision === "approve") {
-      if (!confirm("이 산출물을 승인하시겠습니까?\n상태가 '승인됨'으로 전환되며 심사 증빙(state_transitions)에 기록됩니다.")) return;
+      if (!confirm("이 산출물을 승인하시겠습니까?\n승인 후에는 베이스라인이 잠겨 [품질 다시 검토]와 [AI 시정조치]가 비활성화되며,\n수정하려면 [↩ 승인 철회]로 잠금을 풀어야 합니다.\n(심사 증빙 state_transitions 에 기록됩니다)")) return;
+    } else if (decision === "revoke") {
+      reason = prompt("승인 철회 사유를 입력하세요 (필수 — 심사 증빙에 기록됩니다):\n예) 재검토 결과 반영 필요, 고객 요구사항 변경 등");
+      if (reason === null) return; // 취소
+      if (!reason.trim()) {
+        alert("승인 철회에는 사유가 필수입니다.");
+        return;
+      }
     } else {
       reason = prompt(`${labels[decision]} 사유를 입력하세요 (심사 증빙에 기록됩니다):`);
       if (reason === null) return; // 취소
@@ -863,21 +872,30 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           {/*
             Phase 3-1 (SCR-12): QA 시정조치 버튼
             - QA 검토 결과(evaluator critique)가 있을 때 표시
-            - 반려(rejected) 시 강조색, 승인 후에도 추가 개선용으로 열 수 있음
+            - 반려(rejected) 시 강조색
+            - 2026-06-12 (베이스라인 잠금): 승인(APPROVED) 상태에서는 비활성 —
+              수정하려면 [↩ 승인 철회]로 잠금을 먼저 풀어야 함 (SUP.8)
             - 흐름: 이슈 선택 → AI 수정안(diff) → 사람 승인 → 리비전 반영 → 재QA
           */}
           {agentResult?.evaluator?.critique && !generating && !evaluating && (
             <button
               onClick={() => setRemediationOpen(true)}
-              title="QA 이슈를 AI가 표적 수정 — 사람 승인 후 리비전으로 반영 (원본 불변)"
+              disabled={state === "APPROVED"}
+              title={state === "APPROVED"
+                ? "승인된 베이스라인입니다 — 수정하려면 먼저 [↩ 승인 철회]를 실행하세요"
+                : "QA 이슈를 AI가 표적 수정 — 사람 승인 후 리비전으로 반영 (원본 불변)"}
               style={{
-                background: agentResult.evaluator.critique.verdict === "rejected" ? "#B91C1C" : "#fff",
-                border: "1px solid #B91C1C",
-                color: agentResult.evaluator.critique.verdict === "rejected" ? "#fff" : "#B91C1C",
+                background: state === "APPROVED"
+                  ? "var(--c-bg-mid)"
+                  : (agentResult.evaluator.critique.verdict === "rejected" ? "#B91C1C" : "#fff"),
+                border: state === "APPROVED" ? "1px solid var(--c-border)" : "1px solid #B91C1C",
+                color: state === "APPROVED"
+                  ? "var(--c-text-muted)"
+                  : (agentResult.evaluator.critique.verdict === "rejected" ? "#fff" : "#B91C1C"),
                 borderRadius: 6,
                 padding: "9px 14px",
                 fontSize: 12, fontWeight: 600,
-                cursor: "pointer",
+                cursor: state === "APPROVED" ? "not-allowed" : "pointer",
               }}>
               🔧 AI 시정조치
             </button>
@@ -916,14 +934,31 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
             </>
           )}
           {wp?.content?.ai_generated && state === "APPROVED" && (
-            <span style={{
-              display: "inline-flex", alignItems: "center",
-              padding: "9px 14px", borderRadius: 6,
-              background: "#D1FAE5", color: "#065F46",
-              fontSize: 12, fontWeight: 700,
-            }}>
-              ✅ 승인됨
-            </span>
+            <>
+              <span style={{
+                display: "inline-flex", alignItems: "center",
+                padding: "9px 14px", borderRadius: 6,
+                background: "#D1FAE5", color: "#065F46",
+                fontSize: 12, fontWeight: 700,
+              }}>
+                ✅ 승인됨
+              </span>
+              {/* 2026-06-12 (베이스라인 잠금): 명시적 승인 철회 —
+                  사유 필수, state_transitions 증빙 기록, 철회 후 재검토/시정조치 재개 */}
+              {!generating && !evaluating && (
+                <button
+                  onClick={() => handleReviewerDecision("revoke")}
+                  title="승인 철회 — 베이스라인 잠금을 풀고 '승인대기'로 복귀합니다 (사유 필수, 심사 증빙 기록)"
+                  style={{
+                    background: "#fff", border: "1px solid #B45309",
+                    color: "#B45309", borderRadius: 6,
+                    padding: "9px 14px", fontSize: 12, fontWeight: 600,
+                    cursor: "pointer",
+                  }}>
+                  ↩ 승인 철회
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>
