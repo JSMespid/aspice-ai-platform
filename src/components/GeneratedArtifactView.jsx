@@ -326,25 +326,11 @@ function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor
         <CoverageMatrixView matrix={coverageMatrix} processColor={processColor} />
       )}
 
-      {/* Phase 2-2c: Warnings */}
+      {/* Phase 2-2c: Warnings — 2026-06-12: 기본 접힘 (보고용 단순화)
+          32건씩 전부 펼쳐져 핵심(스펙 보존/승인 결과)을 가리는 문제 해결.
+          내용은 그대로 보존, 필요할 때 [펼쳐 보기]로 확인. */}
       {warnings && warnings.length > 0 && (
-        <Section title="⚠ 주의사항" count={warnings.length}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {warnings.map((w, i) => (
-              <div key={i} style={{
-                padding: "8px 12px",
-                background: "rgba(245, 158, 11, 0.08)",
-                border: "1px solid rgba(245, 158, 11, 0.30)",
-                borderRadius: 6,
-                fontSize: 12,
-                color: "#92400E",
-                lineHeight: 1.6,
-              }}>
-                {w}
-              </div>
-            ))}
-          </div>
-        </Section>
+        <WarningsSection warnings={warnings} />
       )}
 
       {/* Phase 2-2c: 그룹별 또는 평면 STK_REQ 표시 */}
@@ -799,6 +785,74 @@ function TraceabilityRow({ label, items, color }) {
         ))}
       </div>
     </div>
+  );
+}
+
+// ──────────────────────────────────────────────────
+// 주의사항 접이식 섹션 (2026-06-12 — 보고용 단순화)
+// ──────────────────────────────────────────────────
+// 기본은 한 줄 요약으로 접어두고, 실무 검토 시에만 펼쳐 본다.
+// 주의사항은 AI가 생성 과정에서 남긴 '고객 확인 권장' 메모 성격이라
+// 결과(스펙 보존/승인)보다 화면 우선순위가 낮다.
+function WarningsSection({ warnings }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const toggleBtnStyle = {
+    background: "transparent",
+    border: "1px solid rgba(245, 158, 11, 0.45)",
+    color: "#92400E",
+    borderRadius: 6,
+    padding: "4px 12px",
+    fontSize: 11, fontWeight: 600,
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    flexShrink: 0,
+  };
+
+  if (!expanded) {
+    return (
+      <div style={{
+        padding: "10px 14px",
+        background: "rgba(245, 158, 11, 0.06)",
+        border: "1px solid rgba(245, 158, 11, 0.25)",
+        borderRadius: 8,
+        display: "flex", alignItems: "center", gap: 10,
+      }}>
+        <span style={{ fontSize: 14 }}>⚠</span>
+        <span style={{ flex: 1, fontSize: 12, color: "#92400E", lineHeight: 1.5 }}>
+          <strong>주의사항 {warnings.length}건</strong>
+          {" "}— AI가 생성 과정에서 기록한 고객 확인 권장 메모입니다 (요구사항 본문에는 모두 보존됨).
+        </span>
+        <button onClick={() => setExpanded(true)} style={toggleBtnStyle}>
+          펼쳐 보기 ▾
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <Section title="⚠ 주의사항" count={warnings.length}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {warnings.map((w, i) => (
+          <div key={i} style={{
+            padding: "8px 12px",
+            background: "rgba(245, 158, 11, 0.08)",
+            border: "1px solid rgba(245, 158, 11, 0.30)",
+            borderRadius: 6,
+            fontSize: 12,
+            color: "#92400E",
+            lineHeight: 1.6,
+          }}>
+            {w}
+          </div>
+        ))}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 2 }}>
+          <button onClick={() => setExpanded(false)} style={toggleBtnStyle}>
+            접기 ▴
+          </button>
+        </div>
+      </div>
+    </Section>
   );
 }
 
