@@ -6,6 +6,12 @@
 //   - streaming 단계(GEN_SHEET_*, GEN_MERGING, GEN_SAVING)는 '생성' / '구조 검증' 행으로 매핑
 // Phase 2-2g (옵션 G):
 //   - cancellable / onCancel / cancelling props 추가 — chunked 모드에서 헤더의 취소 버튼 활성
+// 2026-06-12 (⑤ HITL 축 실연동):
+//   - reviewState prop 추가 (work_product 의 9-state 머신 상태)
+//   - ⑤ HITL 축이 'Phase 2-3 활성/HOOKED' 자리표시자 대신 실제 검토자
+//     의사결정 결과를 표시: APPROVED→PASS / REJECTED→FAIL /
+//     CHANGES_REQUESTED→REVIEW / 그 외→PENDING(승인 대기)
+//   - 의사결정 백엔드는 api/approve.js (state_transitions + audit_logs 증빙)
 
 import { useEffect, useRef, useState } from 'react';
 import { AgentStep } from '../lib/agent-harness.js';
@@ -16,6 +22,8 @@ export default function RationalePanel({
   cancellable = false,
   onCancel = null,
   cancelling = false,
+  // 2026-06-12: ⑤ HITL 축 실연동 — work_product 상태 (APPROVED/REJECTED/...)
+  reviewState = null,
 }) {
   // Phase 2-2d: streaming 진행 정보 누적
   //   - sheets: { [idx]: { name, group, status, stk_count, cache_hit, latency_ms } }
@@ -320,6 +328,7 @@ export default function RationalePanel({
               generatorGuardrail={generator?.guardrail_result}
               critique={critique}
               hasEvaluator={!!evaluator}
+              reviewState={reviewState}
             />
           )}
 
@@ -584,18 +593,33 @@ function MetaSection({ meta, skillsUsed, evaluatorMeta }) {
   );
 }
 
-function GuardrailSection({ generatorGuardrail, critique, hasEvaluator }) {
+function GuardrailSection({ generatorGuardrail, critique, hasEvaluator, reviewState }) {
   const axes = [
     { key: 'structure',    label: '① 구조',     desc: 'JSON Schema',         source: 'generator' },
     { key: 'traceability', label: '② 추적성',   desc: 'ID 매핑·V-Model',     source: 'generator' },
     { key: 'domain',       label: '③ 도메인',   desc: '자동차 SW 규칙',      source: 'generator' },
     { key: 'cross_verify', label: '④ 교차검증', desc: 'Gemini 평가',        source: 'evaluator' },
-    { key: 'hitl',         label: '⑤ HITL',     desc: 'Reviewer 승인',      source: 'phase_3' },
+    { key: 'hitl',         label: '⑤ HITL',     desc: 'Reviewer 승인',      source: 'reviewer' },
   ];
 
   function getAxisStatus(axis) {
-    if (axis.source === 'phase_3') {
-      return { active: false, status: 'HOOKED', note: 'Phase 2-3 활성' };
+    if (axis.source === 'reviewer') {
+      // 2026-06-12: ⑤ HITL 실연동 — api/approve.js 의 검토자 의사결정 결과
+      // (work_products.state, 전이는 state_transitions 에 심사 증빙으로 기록됨)
+      if (reviewState === 'APPROVED') {
+        return { active: true, status: 'PASS', passed: true,
+                 note: '검토자 승인 — state_transitions 기록됨' };
+      }
+      if (reviewState === 'REJECTED') {
+        return { active: true, status: 'FAIL', passed: false,
+                 note: '검토자 반려 — 사유는 심사 증빙에 기록됨' };
+      }
+      if (reviewState === 'CHANGES_REQUESTED') {
+        return { active: true, status: 'REVIEW',
+                 note: '수정 요청됨 — 시정조치 후 재승인 필요' };
+      }
+      return { active: false, status: 'PENDING',
+               note: '승인 대기 — 산출물 화면 [✅ 승인] 버튼으로 결정' };
     }
     if (axis.source === 'evaluator') {
       if (!hasEvaluator || !critique) {
@@ -664,6 +688,9 @@ function GuardrailSection({ generatorGuardrail, critique, hasEvaluator }) {
               <div style={{ fontSize: 11, color: 'var(--c-text-soft)' }}>
                 {!s.active ? (
                   <span style={{ fontStyle: 'italic' }}>{s.note}</span>
+                ) : s.note ? (
+                  /* 2026-06-12: ⑤ HITL 등 설명형 축은 note 그대로 표시 */
+                  <span>{s.note}</span>
                 ) : axis.source === 'evaluator' ? (
                   <span>
                     점수 <strong>{(s.score * 100).toFixed(0)}%</strong>
