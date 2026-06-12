@@ -243,27 +243,34 @@ export default function GeneratedArtifactView({
           </div>
 
           {/* QA 검토 시작 (Phase 2-2b STEP C-2 핵심) */}
-          {onQAReview && (
+          {onQAReview && (() => {
+            // 2026-06-12 (베이스라인 잠금): 승인(APPROVED) 상태에서는 재검토 불가 —
+            // 재검토하려면 [↩ 승인 철회]로 잠금을 먼저 풀어야 함 (SUP.8)
+            const approvedLock = reviewState === "APPROVED";
+            const enabled = canQAReview && !evaluating && !approvedLock;
+            return (
             <button
               onClick={onQAReview}
-              disabled={!canQAReview || evaluating}
+              disabled={!enabled}
               title={
-                !canQAReview
-                  ? "먼저 AI 생성을 실행하세요"
-                  : evaluating
-                    ? "품질 검토 진행 중..."
-                    : hasEvaluator
-                      ? "품질 검토를 다시 실행합니다 (Gemini 재평가)"
-                      : "Gemini가 Claude의 결과를 독립 평가합니다 (편향 분리). 10~30초 소요."
+                approvedLock
+                  ? "승인된 베이스라인입니다 — 재검토하려면 먼저 [↩ 승인 철회]를 실행하세요"
+                  : !canQAReview
+                    ? "먼저 AI 생성을 실행하세요"
+                    : evaluating
+                      ? "품질 검토 진행 중..."
+                      : hasEvaluator
+                        ? "품질 검토를 다시 실행합니다 (Gemini 재평가)"
+                        : "Gemini가 Claude의 결과를 독립 평가합니다 (편향 분리). 10~30초 소요."
               }
               style={{
-                background: (canQAReview && !evaluating) ? processColor : "var(--c-bg-mid)",
+                background: enabled ? processColor : "var(--c-bg-mid)",
                 border: "none",
-                color: (canQAReview && !evaluating) ? "#fff" : "var(--c-text-muted)",
+                color: enabled ? "#fff" : "var(--c-text-muted)",
                 borderRadius: 6,
                 padding: "7px 13px",
                 fontSize: 11, fontWeight: 600,
-                cursor: (canQAReview && !evaluating) ? "pointer" : "not-allowed",
+                cursor: enabled ? "pointer" : "not-allowed",
                 opacity: evaluating ? 0.6 : 1,
               }}>
               {evaluating
@@ -272,7 +279,8 @@ export default function GeneratedArtifactView({
                   ? "🔍 품질 다시 검토"
                   : "🔍 품질 검토 시작"}
             </button>
-          )}
+            );
+          })()}
         </div>
       </div>
 
@@ -464,7 +472,7 @@ function ResultSummaryBanner({ reqCount, critique, hasEvaluator, reviewState }) 
       <>요구사항 <strong>{reqCount}건</strong> 도출
         {qaPart && <> → <strong>{qaPart}</strong></>} → <strong>검토자 승인 완료</strong></>
     );
-    hint = "상세 검증 내역은 [📊 검증 리포트]에서 확인할 수 있습니다.";
+    hint = "베이스라인이 잠겼습니다 — 수정/재검토가 필요하면 [↩ 승인 철회] 후 진행하세요. 상세는 [📊 검증 리포트].";
   } else if (reviewState === "REJECTED") {
     tone = "red"; icon = "↩";
     main = (
