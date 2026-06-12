@@ -241,7 +241,7 @@ export default function RationalePanel({
               color: 'var(--c-text-muted)',
               letterSpacing: '0.04em', marginBottom: 4,
             }}>
-              SCR-11 · RATIONALE REPORT
+              SCR-11 · 검증 리포트
             </div>
             <h2 style={{ fontSize: 17, fontWeight: 700, margin: 0 }}>
               AI 생성 + 5축 가드레일
@@ -343,7 +343,7 @@ export default function RationalePanel({
               borderRadius: 8,
               fontSize: 12, color: '#92400E', lineHeight: 1.6,
             }}>
-              💡 <strong>QA 검토 미실행</strong> — 산출물 화면 우측 상단 <strong>[🔍 QA 검토 시작]</strong> 버튼을 누르면 Gemini가 독립 평가합니다 (5축 가드레일 ④).
+              💡 <strong>품질 검토 미실행</strong> — 산출물 화면 우측 상단 <strong>[🔍 품질 검토 시작]</strong> 버튼을 누르면 Gemini가 독립 평가합니다 (5축 가드레일 ④).
             </div>
           )}
         </div>
@@ -402,9 +402,9 @@ function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
   ];
 
   const evalSteps = [
-    { id: AgentStep.EVAL_PREPARING,  label: 'QA 준비',  desc: 'Gemini API 준비' },
-    { id: AgentStep.EVAL_EVALUATING, label: 'QA 검토',  desc: 'Gemini 독립 평가 (④ 교차검증)' },
-    { id: AgentStep.EVAL_COMPLETED,  label: 'QA 완료',  desc: '결과 저장' },
+    { id: AgentStep.EVAL_PREPARING,  label: '검토 준비',  desc: 'Gemini API 준비' },
+    { id: AgentStep.EVAL_EVALUATING, label: '품질 검토',  desc: 'Gemini 독립 평가 (④ 교차검증)' },
+    { id: AgentStep.EVAL_COMPLETED,  label: '검토 완료',  desc: '결과 저장' },
   ];
 
   function getStepState(stepId, group) {
@@ -461,7 +461,7 @@ function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
         letterSpacing: '0.05em',
         marginBottom: 8,
       }}>
-        [2] QA 검토 (Evaluator)
+        [2] 품질 검토 (Evaluator)
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {evalSteps.map(s => (
@@ -623,7 +623,7 @@ function GuardrailSection({ generatorGuardrail, critique, hasEvaluator, reviewSt
     }
     if (axis.source === 'evaluator') {
       if (!hasEvaluator || !critique) {
-        return { active: false, status: 'PENDING', note: 'QA 검토 미실행' };
+        return { active: false, status: 'PENDING', note: '품질 검토 미실행' };
       }
       const passed = critique.verdict === 'passed';
       const issues = critique.issues || [];
@@ -729,7 +729,7 @@ function CritiqueSection({ critique }) {
   const strengths = critique.strengths || [];
 
   return (
-    <Section title="Gemini QA 검토 결과">
+    <Section title="Gemini 품질 검토 결과">
       <div style={{
         padding: '12px 14px',
         background: vc.bg,
