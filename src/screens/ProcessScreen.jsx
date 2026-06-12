@@ -508,18 +508,23 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         // 실제 DB 값으로 mock 덮어쓰기
         // - 기준 id: 리비전 있으면 리비전 (화면 내용 = 리비전이므로 이후 QA 가
         //   리비전을 parent 로 가리키게 됨 — remediate.js 헤더 규칙과 일치)
-        // - guardrail_result: 리비전 것 우선, 없으면 master 것 (①②③ 실제 결과 표시)
+        // - guardrail_result: 리비전 것이 '실제 axes 를 가질 때만' 우선,
+        //   아니면 master 것 (①②③ 실제 결과 표시).
+        //   주의: 리비전 row 의 guardrail_result 가 null 이 아닌 빈 객체 {} 로
+        //   저장될 수 있음 (컬럼 default) — truthy 검사만으로는 빈 객체가
+        //   채택되어 ①②③ 이 '미실행' 으로 표시되는 버그가 있었음 (0612 수정)
         // - meta(모델/토큰/비용): 생성 증빙이므로 master 기준
         //   (리비전 row 는 model='revision-snapshot', 비용 0 인 내부 스냅샷)
         const baseRow = lastRev || lastGen;
+        const revHasGuardrail = !!(lastRev && lastRev.guardrail_result && lastRev.guardrail_result.axes);
         const generatorMock = baseRow ? {
           success: true,
-          passed: (lastRev && lastRev.guardrail_result)
+          passed: revHasGuardrail
             ? lastRev.guardrail_passed
             : (lastGen ? lastGen.guardrail_passed : true),
           ai_generation_id: baseRow.id,
           output: wp.content.ai_generated,
-          guardrail_result: (lastRev && lastRev.guardrail_result)
+          guardrail_result: revHasGuardrail
             ? lastRev.guardrail_result
             : (lastGen ? lastGen.guardrail_result : null),
           meta: lastGen ? {
