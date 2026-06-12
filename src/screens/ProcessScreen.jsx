@@ -838,7 +838,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               title={
                 generating || evaluating
                   ? "현재 진행 상황 보기"
-                  : "마지막 AI 생성 결과 / 가드레일 / Rationale 보기"
+                  : "마지막 AI 생성 결과 / 가드레일 / 검증 리포트"
               }
               style={{
                 background: "#fff",
@@ -849,7 +849,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
                 fontSize: 12, fontWeight: 600,
                 cursor: "pointer",
               }}>
-              📊 {(generating || evaluating) ? "진행 보기" : "Rationale 보기"}
+              📊 {(generating || evaluating) ? "진행 보기" : "검증 리포트"}
             </button>
           )}
 
@@ -938,6 +938,8 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           generatorModel={agentResult?.generator?.meta?.model}
           evaluatorModel={agentResult?.evaluator?.meta?.model}
           critique={agentResult?.evaluator?.critique}
+          // 2026-06-12 (A): 결과 요약 배너의 승인/반려 표시용
+          reviewState={state}
         />
       )}
 
@@ -1004,7 +1006,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
             border: "2px solid rgba(255,255,255,0.35)", borderTopColor: "#fff",
             animation: "qaSpin 0.8s linear infinite",
           }} />
-          {agentResult?.evaluator ? "QA 재검토중" : "QA 검토중"}
+          {agentResult?.evaluator ? "품질 재검토중" : "품질 검토중"}
           {" "}— Gemini 독립 평가 진행 (30~90초)
           <button
             onClick={() => setPanelOpen(true)}
