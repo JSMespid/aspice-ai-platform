@@ -14,6 +14,12 @@
 // 2026-06-12 (화면 단순화 1단계):
 //   - [📋 JSON 원본] 토글 버튼 + JsonView 제거 (사용자 요청)
 //     → JSON 이 필요하면 [📥 다운로드 ▼ → JSON] 으로 받음 (메뉴는 유지)
+// 2026-06-12 (화면 단순화 2단계 — 보고용 A+B):
+//   A. 결과 요약 배너: 기존 안내 배너 2종을 결과 중심 한 줄로 교체
+//      "요구사항 N건 도출 → AI 품질검토 X점 통과 → 검토자 승인 완료"
+//      (reviewState prop 신규 — work_product 상태로 승인/반려 표시)
+//   B. 용어 한국어화: AI GENERATED→AI 생성 산출물, Rationale 보기→검증 리포트,
+//      QA 검토→품질 검토, STK_REQ 통계 라벨→요구사항, Coverage Matrix→스펙 보존 검증
 
 import { useState, useRef, useEffect } from "react";
 import { exportJSON, exportCSV, exportMarkdown, exportDOCX } from "../lib/exporters.js";
@@ -33,6 +39,8 @@ export default function GeneratedArtifactView({
   generatorModel,
   evaluatorModel,
   critique,        // 최근 critique (다운로드 포함용)
+  // 2026-06-12 (A): work_product 상태 — 결과 요약 배너의 승인/반려 표시용
+  reviewState,
 }) {
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const downloadMenuRef = useRef(null);
@@ -130,7 +138,7 @@ export default function GeneratedArtifactView({
             letterSpacing: "0.04em",
             marginBottom: 4,
           }}>
-            ⚡ AI GENERATED · CLAUDE OPUS 4.7
+            ⚡ AI 생성 산출물 · Claude Opus 4.7
           </div>
           <h2 style={{
             fontSize: 16, fontWeight: 700, margin: 0,
@@ -141,11 +149,11 @@ export default function GeneratedArtifactView({
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {/* Rationale 보기 (이전 결과 확인) */}
+          {/* 검증 리포트 (구 Rationale 보기 — 이전 결과 확인) */}
           {onReopenPanel && (
             <button
               onClick={onReopenPanel}
-              title="AI 생성 / QA 검토 결과 자세히 보기"
+              title="AI 생성 · 품질검토 · 5축 가드레일 결과 리포트"
               style={{
                 background: "#fff",
                 border: "1px solid var(--c-navy-deep)",
@@ -155,7 +163,7 @@ export default function GeneratedArtifactView({
                 fontSize: 11, fontWeight: 600,
                 cursor: "pointer",
               }}>
-              📊 Rationale 보기
+              📊 검증 리포트
             </button>
           )}
 
@@ -243,9 +251,9 @@ export default function GeneratedArtifactView({
                 !canQAReview
                   ? "먼저 AI 생성을 실행하세요"
                   : evaluating
-                    ? "QA 검토 진행 중..."
+                    ? "품질 검토 진행 중..."
                     : hasEvaluator
-                      ? "다시 QA 검토를 실행합니다 (Gemini 재평가)"
+                      ? "품질 검토를 다시 실행합니다 (Gemini 재평가)"
                       : "Gemini가 Claude의 결과를 독립 평가합니다 (편향 분리). 10~30초 소요."
               }
               style={{
@@ -261,48 +269,23 @@ export default function GeneratedArtifactView({
               {evaluating
                 ? "🔍 검토 중..."
                 : hasEvaluator
-                  ? "🔍 QA 다시 검토"
-                  : "🔍 QA 검토 시작"}
+                  ? "🔍 품질 다시 검토"
+                  : "🔍 품질 검토 시작"}
             </button>
           )}
         </div>
       </div>
 
-      {/* QA 상태 안내 배너 */}
-      {hasEvaluator && (
-        <div style={{
-          marginBottom: 18,
-          padding: "10px 14px",
-          background: "rgba(35, 131, 226, 0.08)",
-          border: "1px solid rgba(35, 131, 226, 0.25)",
-          borderRadius: 6,
-          fontSize: 11, color: "var(--c-navy-deep)",
-          display: "flex", alignItems: "center", gap: 8,
-        }}>
-          <span style={{ fontSize: 14 }}>✓</span>
-          <span>
-            <strong>QA 검토 완료</strong> — Gemini 독립 평가가 실행되었습니다.
-            우측 상단 <strong>[📊 Rationale 보기]</strong>를 눌러 critique 상세를 확인하세요.
-          </span>
-        </div>
-      )}
-      {!hasEvaluator && canQAReview && (
-        <div style={{
-          marginBottom: 18,
-          padding: "10px 14px",
-          background: "rgba(245, 158, 11, 0.08)",
-          border: "1px solid rgba(245, 158, 11, 0.30)",
-          borderRadius: 6,
-          fontSize: 11, color: "#92400E",
-          display: "flex", alignItems: "center", gap: 8,
-        }}>
-          <span style={{ fontSize: 14 }}>💡</span>
-          <span>
-            <strong>다음 단계</strong> — 산출물을 검토하신 후 우측 상단
-            <strong> [🔍 QA 검토 시작]</strong>을 누르면 Gemini가 독립 평가합니다.
-          </span>
-        </div>
-      )}
+      {/* ── 결과 요약 배너 (2026-06-12 A — 보고용 단순화) ──
+          기존 기술 설명형 배너 2종(QA 검토 완료 안내 / 다음 단계 안내)을
+          "무엇이 만들어졌고 → 어떻게 검증됐고 → 승인됐는가" 한 줄로 교체.
+          대표/경영진이 클릭 없이 3초 안에 파이프라인 결과를 파악하도록. */}
+      <ResultSummaryBanner
+        reqCount={stkReqs.length}
+        critique={critique}
+        hasEvaluator={hasEvaluator}
+        reviewState={reviewState}
+      />
 
       {/* 본문 — 구조화 보기 (JSON 원본 토글은 2026-06-12 제거, 다운로드 메뉴로 대체) */}
       <StructuredView
@@ -331,10 +314,10 @@ function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <SummaryBar
         stats={[
-          { label: "STK_REQ", count: stkReqs.length, color: processColor },
+          { label: "요구사항", count: stkReqs.length, color: processColor },
           ...(hasGroups ? [{ label: "그룹", count: grouped.size, color: "#6940A5" }] : []),
           { label: "법규/표준", count: opContext.regulatory_constraints?.length || 0, color: "#F59E0B" },
-          { label: "외부 IF", count: opContext.external_interfaces?.length || 0, color: "#10B981" },
+          { label: "외부 인터페이스", count: opContext.external_interfaces?.length || 0, color: "#10B981" },
         ]}
       />
 
@@ -457,6 +440,96 @@ function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor
           </div>
         </Section>
       )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────
+// 결과 요약 배너 (2026-06-12 A — 보고용 단순화)
+// ──────────────────────────────────────────────────
+// 파이프라인 진행 단계별 결과를 한 줄로:
+//   승인 완료  : 요구사항 N건 도출 → AI 품질검토 X점 통과 → 검토자 승인 완료
+//   승인 대기  : ... → AI 품질검토 X점 통과 — 검토자 승인 대기
+//   품질 반려  : ... → AI 품질검토 X점 반려 — AI 시정조치로 보완
+//   검토 전    : 요구사항 N건 도출 완료 — 다음 단계: 품질 검토
+function ResultSummaryBanner({ reqCount, critique, hasEvaluator, reviewState }) {
+  const score = (critique && critique.overall_score != null)
+    ? Math.round(critique.overall_score * 100)
+    : null;
+  const verdictLabel = critique
+    ? ({ passed: "통과", needs_refinement: "개선 권장", rejected: "반려" }[critique.verdict] || critique.verdict)
+    : null;
+  const qaPart = (score != null)
+    ? `AI 품질검토 ${score}점 ${verdictLabel}`
+    : null;
+
+  const tones = {
+    green: { bg: "rgba(16, 185, 129, 0.08)",  border: "rgba(16, 185, 129, 0.35)",  color: "#065F46" },
+    blue:  { bg: "rgba(35, 131, 226, 0.08)",  border: "rgba(35, 131, 226, 0.25)",  color: "var(--c-navy-deep)" },
+    amber: { bg: "rgba(245, 158, 11, 0.08)",  border: "rgba(245, 158, 11, 0.30)",  color: "#92400E" },
+    red:   { bg: "rgba(220, 38, 38, 0.06)",   border: "rgba(220, 38, 38, 0.30)",   color: "#991B1B" },
+  };
+
+  let tone, icon, main, hint;
+
+  if (reviewState === "APPROVED") {
+    tone = "green"; icon = "✅";
+    main = (
+      <>요구사항 <strong>{reqCount}건</strong> 도출
+        {qaPart && <> → <strong>{qaPart}</strong></>} → <strong>검토자 승인 완료</strong></>
+    );
+    hint = "상세 검증 내역은 [📊 검증 리포트]에서 확인할 수 있습니다.";
+  } else if (reviewState === "REJECTED") {
+    tone = "red"; icon = "↩";
+    main = (
+      <>요구사항 <strong>{reqCount}건</strong> 도출
+        {qaPart && <> → {qaPart}</>} → <strong>검토자 반려</strong></>
+    );
+    hint = "[🛠 AI 시정조치]로 보완 후 다시 검토를 진행하세요.";
+  } else if (reviewState === "CHANGES_REQUESTED") {
+    tone = "amber"; icon = "✏";
+    main = (
+      <>요구사항 <strong>{reqCount}건</strong> 도출 → <strong>검토자 수정 요청</strong></>
+    );
+    hint = "[🛠 AI 시정조치]로 보완 후 재검토·재승인을 진행하세요.";
+  } else if (hasEvaluator && critique) {
+    if (critique.verdict === "rejected") {
+      tone = "red"; icon = "⚠";
+      main = (
+        <>요구사항 <strong>{reqCount}건</strong> 도출 → <strong>{qaPart}</strong></>
+      );
+      hint = "[🛠 AI 시정조치]로 지적 사항을 보완한 뒤 다시 검토하세요.";
+    } else {
+      tone = "blue"; icon = "✓";
+      main = (
+        <>요구사항 <strong>{reqCount}건</strong> 도출 → <strong>{qaPart}</strong> — 검토자 승인 대기</>
+      );
+      hint = "내용 확인 후 [✅ 승인] 버튼으로 결정하세요. 상세는 [📊 검증 리포트].";
+    }
+  } else {
+    tone = "amber"; icon = "💡";
+    main = (
+      <>요구사항 <strong>{reqCount}건</strong> 도출 완료</>
+    );
+    hint = "다음 단계: [🔍 품질 검토]를 실행하면 Gemini가 독립 평가합니다.";
+  }
+
+  const t = tones[tone];
+  return (
+    <div style={{
+      marginBottom: 18,
+      padding: "12px 16px",
+      background: t.bg,
+      border: `1px solid ${t.border}`,
+      borderRadius: 8,
+      color: t.color,
+      display: "flex", alignItems: "flex-start", gap: 10,
+    }}>
+      <span style={{ fontSize: 16, lineHeight: "20px" }}>{icon}</span>
+      <div>
+        <div style={{ fontSize: 13, lineHeight: 1.5 }}>{main}</div>
+        <div style={{ fontSize: 11, marginTop: 3, opacity: 0.85 }}>{hint}</div>
+      </div>
     </div>
   );
 }
@@ -935,7 +1008,7 @@ function CoverageMatrixView({ matrix, processColor }) {
   const sc = statusConfig[summary.status] || statusConfig.compliant;
 
   return (
-    <Section title="📊 Coverage Matrix (스펙 보존 검증)" count={by_group.length}>
+    <Section title="📊 스펙 보존 검증 (Coverage Matrix)" count={by_group.length}>
       <div style={{
         padding: "10px 12px",
         background: sc.bg,
