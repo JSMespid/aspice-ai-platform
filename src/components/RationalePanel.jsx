@@ -24,6 +24,8 @@ export default function RationalePanel({
   cancelling = false,
   // 2026-06-12: ⑤ HITL 축 실연동 — work_product 상태 (APPROVED/REJECTED/...)
   reviewState = null,
+  // 2026-06-12: 이번 품질 검토가 재검토인지 (배지·단계 라벨·결과 제목 표기)
+  reReview = false,
 }) {
   // Phase 2-2d: streaming 진행 정보 누적
   //   - sheets: { [idx]: { name, group, status, stk_count, cache_hit, latency_ms } }
@@ -284,7 +286,7 @@ export default function RationalePanel({
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: '20px 22px' }}>
-          <ProgressSection step={step} detail={detail} hasGenerator={!!generator} hasEvaluator={!!evaluator} />
+          <ProgressSection step={step} detail={detail} hasGenerator={!!generator} hasEvaluator={!!evaluator} reReview={reReview} />
 
           {/*
             Phase 2-2e: 배치 처리 진행 카드
@@ -332,7 +334,7 @@ export default function RationalePanel({
             />
           )}
 
-          {critique && <CritiqueSection critique={critique} />}
+          {critique && <CritiqueSection critique={critique} reReview={reReview} />}
 
           {generator && !evaluator && (
             <div style={{
@@ -390,7 +392,7 @@ function mapStreamingStepToBase(step) {
   }
 }
 
-function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
+function ProgressSection({ step, detail, hasGenerator, hasEvaluator, reReview }) {
   // Phase 2-2d: streaming 단계는 4개 step row 중 적절한 것에 매핑
   const baseStep = mapStreamingStepToBase(step);
 
@@ -401,10 +403,11 @@ function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
     { id: AgentStep.GEN_COMPLETED,  label: 'AI 생성 완료', desc: '사용자 검토 단계' },
   ];
 
+  // 2026-06-12: 재검토 시 단계 라벨에 '재검토' 를 명시해 최초 검토와 확실히 구분
   const evalSteps = [
-    { id: AgentStep.EVAL_PREPARING,  label: '검토 준비',  desc: 'Gemini API 준비' },
-    { id: AgentStep.EVAL_EVALUATING, label: '품질 검토',  desc: 'Gemini 독립 평가 (④ 교차검증)' },
-    { id: AgentStep.EVAL_COMPLETED,  label: '검토 완료',  desc: '결과 저장' },
+    { id: AgentStep.EVAL_PREPARING,  label: reReview ? '재검토 준비' : '검토 준비',  desc: 'Gemini API 준비' },
+    { id: AgentStep.EVAL_EVALUATING, label: reReview ? '품질 재검토' : '품질 검토',  desc: 'Gemini 독립 평가 (④ 교차검증)' },
+    { id: AgentStep.EVAL_COMPLETED,  label: reReview ? '재검토 완료' : '검토 완료',  desc: reReview ? '이전 결과 대체 저장' : '결과 저장' },
   ];
 
   function getStepState(stepId, group) {
@@ -461,7 +464,18 @@ function ProgressSection({ step, detail, hasGenerator, hasEvaluator }) {
         letterSpacing: '0.05em',
         marginBottom: 8,
       }}>
-        [2] 품질 검토 (Evaluator)
+        [2] {reReview ? '품질 재검토' : '품질 검토'} (Evaluator)
+        {reReview && (
+          <span style={{
+            marginLeft: 8,
+            fontSize: 10, fontWeight: 700,
+            color: '#fff', background: '#B45309',
+            padding: '2px 8px', borderRadius: 10,
+            textTransform: 'none', letterSpacing: 'normal',
+          }}>
+            🔁 재검토 — 이전 결과 대체
+          </span>
+        )}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {evalSteps.map(s => (
@@ -715,7 +729,7 @@ function GuardrailSection({ generatorGuardrail, critique, hasEvaluator, reviewSt
   );
 }
 
-function CritiqueSection({ critique }) {
+function CritiqueSection({ critique, reReview }) {
   if (!critique) return null;
 
   const verdictColors = {
@@ -729,7 +743,7 @@ function CritiqueSection({ critique }) {
   const strengths = critique.strengths || [];
 
   return (
-    <Section title="Gemini 품질 검토 결과">
+    <Section title={reReview ? "Gemini 품질 재검토 결과 (최신)" : "Gemini 품질 검토 결과"}>
       <div style={{
         padding: '12px 14px',
         background: vc.bg,
