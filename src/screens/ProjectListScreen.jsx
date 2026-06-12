@@ -1,8 +1,51 @@
 // SCR-02 — 프로젝트 목록
 // 화면설계서 v2.4 슬라이드 10: 단일 검색창 + 필터 칩 — 프로젝트명/제품명/조직/생성일
+// 2026-06-12 (진행률 버그 수정):
+//   - 기존: progress 가 없으면 Math.random()*80+10 자리표시자 → 빈 프로젝트가
+//     87% 등 무작위 진행률로 표시되는 버그 (새로고침마다 변함)
+//   - 수정: work_products 의 실제 state 기반 가중 평균으로 계산
+//     분모 = 전체 프로세스 수 (config/processes.js, SYS 5 + SWE 6 = 11)
+//     가중치 = APPROVED 1.0 / VERIFIED·PENDING_APPROVAL 0.75 /
+//              GENERATED·VERIFYING·CHANGES_REQUESTED·REJECTED 0.5 /
+//              GENERATING 0.25 / INITIAL 0.1
+//     work_products 가 없는 프로젝트 = 0%
 import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.jsx";
+import { PROCESSES } from "../config/processes.js";
+
+// 상태별 진행 가중치 (9-state 머신 기준, ProcessScreen 의 상태 정의와 동일)
+const STATE_WEIGHTS = {
+  INITIAL: 0.1,            // 착수 (입력 등록 단계)
+  GENERATING: 0.25,        // AI 생성 진행 중
+  GENERATED: 0.5,          // AI 생성 완료
+  VERIFYING: 0.5,          // 품질 검토 진행 중
+  CHANGES_REQUESTED: 0.5,  // 수정 요청 — 재작업 필요
+  REJECTED: 0.5,           // 반려 — 재작업 필요
+  VERIFIED: 0.75,          // 품질 검토 완료
+  PENDING_APPROVAL: 0.75,  // 승인 대기
+  APPROVED: 1.0,           // 승인 — 베이스라인 확정
+};
+const TOTAL_PROCESSES = Object.keys(PROCESSES).length || 11;
+
+// 프로젝트별 진행률 계산 — 프로세스당 최고 상태 가중치의 합 / 전체 프로세스 수
+function computeProgressMap(workProducts) {
+  const byProject = new Map(); // project_id → Map(process_id → weight)
+  for (const wp of workProducts || []) {
+    if (!wp?.project_id || !wp?.process_id) continue;
+    const w = STATE_WEIGHTS[wp.state] ?? 0.1;
+    if (!byProject.has(wp.project_id)) byProject.set(wp.project_id, new Map());
+    const procs = byProject.get(wp.project_id);
+    procs.set(wp.process_id, Math.max(procs.get(wp.process_id) || 0, w));
+  }
+  const map = {};
+  for (const [pid, procs] of byProject) {
+    let sum = 0;
+    for (const w of procs.values()) sum += w;
+    map[pid] = Math.min(100, Math.round((sum / TOTAL_PROCESSES) * 100));
+  }
+  return map;
+}
 
 const ORGS = ["전체", "새시팀", "샤시팀", "QA팀", "전장팀", "구동팀"];
 const SORT_OPTIONS = [
@@ -51,9 +94,16 @@ export default function ProjectListScreen() {
     setLoading(true);
     setError("");
     try {
-      const data = await apiCall("/api/projects?resource=projects");
+      // 2026-06-12: 진행률 계산용 work_products 를 병행 로드
+      const [data, wps] = await Promise.all([
+        apiCall("/api/projects?resource=projects"),
+        apiCall("/api/projects?resource=work_products").catch(() => []),
+      ]);
       if (Array.isArray(data)) {
-        setProjects(data);
+        const progressMap = computeProgressMap(Array.isArray(wps) ? wps : []);
+        // 각 프로젝트에 실측 progress 부착 (work_products 없으면 0%)
+        // — '진행률순' 정렬도 이 값을 사용
+        setProjects(data.map(p => ({ ...p, progress: progressMap[p.id] ?? 0 })));
       } else if (data?.error) {
         setError(typeof data.error === "string" ? data.error : "프로젝트 로드 실패");
       } else {
@@ -351,7 +401,8 @@ function FilterChip({ label, onClear }) {
 
 function ProjectCard({ project, onClick }) {
   const created = project.created_at ? new Date(project.created_at).toISOString().split("T")[0] : "—";
-  const progress = project.progress != null ? project.progress : (Math.random() * 80 + 10);
+  // 2026-06-12: 실측 진행률 (work_products state 기반) — 자리표시자 난수 제거
+  const progress = project.progress != null ? project.progress : 0;
 
   return (
     <div
