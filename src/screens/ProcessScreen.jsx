@@ -83,6 +83,9 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   const [agentResult, setAgentResult] = useState(null);
   const [generating, setGenerating] = useState(false);
   const [evaluating, setEvaluating] = useState(false);
+  // 2026-06-12: 이번 품질 검토가 '재검토' 인지 — 검토 시작 시점에 확정해 보관.
+  // (이전 evaluator 결과 존재 여부로 판단. 배지/패널 표기에 사용)
+  const [reQA, setReQA] = useState(false);
 
   // Phase 2-2g (옵션 G): chunked generation state
   // - chunkedGenerationId: 진행 중 chunked 작업의 generation_id (cancel 버튼 활성화 + resume 표시용)
@@ -312,8 +315,12 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
     }
 
     setPanelOpen(true);
+    // 2026-06-12: 검토 시작 '시점'의 이전 결과 유무로 재검토 여부 확정
+    // (진행 중 agentResult 가 바뀌어도 표기가 흔들리지 않도록 상태로 고정)
+    const isReReview = !!agentResult?.evaluator;
+    setReQA(isReReview);
     setAgentStep(AgentStep.EVAL_PREPARING);
-    setAgentDetail({ message: 'QA 검토 준비 중...' });
+    setAgentDetail({ message: isReReview ? '품질 재검토 준비 중...' : '품질 검토 준비 중...' });
     setEvaluating(true);
 
     try {
@@ -988,15 +995,17 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         />
       )}
 
-      {/* ── Phase 3-2: QA 검토 진행 표시 (화면 상단 중앙 고정) ──
-          패널을 보고 있지 않아도 QA 진행 중임을 항상 인지할 수 있도록.
-          이전 QA 결과가 있으면 '재검토중', 없으면 '검토중' 으로 구분 표기 */}
+      {/* ── Phase 3-2: 품질 검토 진행 표시 (화면 상단 중앙 고정) ──
+          패널을 보고 있지 않아도 진행 중임을 항상 인지할 수 있도록.
+          2026-06-12: 최초 검토(남색 🔍)와 재검토(주황 🔁)를 색상·아이콘·문구로
+          확실히 구분 — 검토 시작 시점에 고정된 reQA 상태 사용 */}
       {evaluating && (
         <div style={{
           position: "fixed", top: 14, left: "50%", transform: "translateX(-50%)",
           zIndex: 900,
           display: "flex", alignItems: "center", gap: 10,
-          background: "var(--c-navy-deep, #1E2761)", color: "#fff",
+          background: reQA ? "#B45309" : "var(--c-navy-deep, #1E2761)",
+          color: "#fff",
           padding: "10px 20px", borderRadius: 24,
           boxShadow: "0 8px 24px rgba(15, 24, 56, 0.35)",
           fontSize: 13, fontWeight: 600,
@@ -1006,8 +1015,9 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
             border: "2px solid rgba(255,255,255,0.35)", borderTopColor: "#fff",
             animation: "qaSpin 0.8s linear infinite",
           }} />
-          {agentResult?.evaluator ? "품질 재검토중" : "품질 검토중"}
-          {" "}— Gemini 독립 평가 진행 (30~90초)
+          {reQA
+            ? <>🔁 <strong>품질 재검토중</strong> — 이전 검토 결과를 새 결과로 대체합니다 (30~90초)</>
+            : <>🔍 <strong>품질 검토중</strong> — Gemini 독립 평가 진행 (30~90초)</>}
           <button
             onClick={() => setPanelOpen(true)}
             style={{
@@ -1031,6 +1041,8 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         // 2026-06-12: ⑤ HITL 축 실연동 — work_product 상태 전달
         // (승인/반려/수정요청은 api/approve.js 가 처리, 패널은 결과만 표시)
         reviewState={state}
+        // 2026-06-12: 최초 검토/재검토 구분 표기
+        reReview={reQA}
         // Phase 2-2g 옵션 G: chunked generation 진행 중일 때만 cancel 버튼 표시
         cancellable={!!chunkedGenerationId && generating}
         onCancel={handleCancelGeneration}
