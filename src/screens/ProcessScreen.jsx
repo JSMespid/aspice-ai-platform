@@ -1026,6 +1026,9 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
         step={agentStep}
         detail={agentDetail}
         result={agentResult}
+        // 2026-06-12: ⑤ HITL 축 실연동 — work_product 상태 전달
+        // (승인/반려/수정요청은 api/approve.js 가 처리, 패널은 결과만 표시)
+        reviewState={state}
         // Phase 2-2g 옵션 G: chunked generation 진행 중일 때만 cancel 버튼 표시
         cancellable={!!chunkedGenerationId && generating}
         onCancel={handleCancelGeneration}
