@@ -752,7 +752,12 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               key={item.key}
               item={item}
               value={getItemValue(item.key)}
-              disabled={missingDeps.length > 0}
+              // 2026-06-12 (베이스라인 잠금): 승인 후에는 입력(등록/교체/직접입력/삭제)도
+              // 변경 불가 — 승인된 산출물의 근거(입력)가 사후 변경되면 증빙 계보가 깨짐
+              disabled={missingDeps.length > 0 || state === "APPROVED"}
+              disabledTitle={state === "APPROVED"
+                ? "승인된 베이스라인입니다 — 입력을 변경하려면 먼저 [↩ 승인 철회]를 실행하세요"
+                : undefined}
               onRegister={() => setRegisterModal({ open: true, item })}
               onDirect={() => setDirectModal({ open: true, item })}
               // Phase 2-2d: 삭제 — 확인 후 content[item.key] 제거
@@ -821,24 +826,28 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
               </>
             )}
           </div>
+          {/* 2026-06-12 (베이스라인 잠금): 승인 후 재생성은 승인된 산출물을
+              덮어쓰므로 차단 — [↩ 승인 철회] 후에만 가능 */}
           <button
             onClick={handleAIGenerate}
-            disabled={!allRequiredFilled || generating || evaluating || !AI_GENERATE_SUPPORTED.has(processId)}
+            disabled={!allRequiredFilled || generating || evaluating || !AI_GENERATE_SUPPORTED.has(processId) || state === "APPROVED"}
             title={
-              !AI_GENERATE_SUPPORTED.has(processId)
-                ? `Phase 2-2a는 SYS.1만 지원합니다 (${processId} 미지원)`
-                : !allRequiredFilled
-                  ? "필수 항목을 모두 채우세요"
-                  : "AI 생성을 시작합니다"
+              state === "APPROVED"
+                ? "승인된 베이스라인입니다 — 재생성하려면 먼저 [↩ 승인 철회]를 실행하세요"
+                : !AI_GENERATE_SUPPORTED.has(processId)
+                  ? `Phase 2-2a는 SYS.1만 지원합니다 (${processId} 미지원)`
+                  : !allRequiredFilled
+                    ? "필수 항목을 모두 채우세요"
+                    : "AI 생성을 시작합니다"
             }
             style={{
-              background: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId)) ? cfg.color : "var(--c-bg-mid)",
-              color: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId)) ? "#fff" : "var(--c-text-muted)",
+              background: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId) && state !== "APPROVED") ? cfg.color : "var(--c-bg-mid)",
+              color: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId) && state !== "APPROVED") ? "#fff" : "var(--c-text-muted)",
               border: "none",
               borderRadius: 6, padding: "9px 18px",
               fontSize: 12, fontWeight: 600,
               opacity: (generating || evaluating) ? 0.6 : 1,
-              cursor: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId) && !generating && !evaluating) ? "pointer" : "not-allowed",
+              cursor: (allRequiredFilled && AI_GENERATE_SUPPORTED.has(processId) && !generating && !evaluating && state !== "APPROVED") ? "pointer" : "not-allowed",
             }}>
             {generating ? "⚡ 생성 중..." : "⚡ AI 생성"}
           </button>
@@ -973,7 +982,8 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
           canQAReview={!!agentResult?.generator && !generating && !evaluating}
           hasEvaluator={!!agentResult?.evaluator}
           evaluating={evaluating}
-          onEditStkReq={handleStkReqEditOpen}
+          // 2026-06-12 (베이스라인 잠금): 승인 후 요구사항 카드 인라인 편집 차단
+          onEditStkReq={state === "APPROVED" ? null : handleStkReqEditOpen}
           // 다운로드 메타데이터 (Phase 2-2b STEP C-3a)
           projectName={project?.name}
           processId={processId}
@@ -1099,7 +1109,7 @@ export default function ProcessScreen({ project, workProducts, onWorkProductChan
   );
 }
 
-function ItemRow({ item, value, disabled, onRegister, onDirect, onDelete }) {
+function ItemRow({ item, value, disabled, disabledTitle, onRegister, onDirect, onDelete }) {
   const hasValue = value && value.body && value.body.trim().length > 0;
   const preview = hasValue
     ? truncate(value.body, 80)
@@ -1253,11 +1263,13 @@ function ItemRow({ item, value, disabled, onRegister, onDirect, onDelete }) {
         disabled={disabled || !canRegister}
         onClick={onRegister}
         title={
-          !canRegister
-            ? "이 항목은 직접 입력만 가능합니다"
-            : hasRegistered
-              ? "기존 등록을 새 파일/시트로 교체"
-              : "파일 업로드 또는 시트 선택"
+          disabled && disabledTitle
+            ? disabledTitle
+            : !canRegister
+              ? "이 항목은 직접 입력만 가능합니다"
+              : hasRegistered
+                ? "기존 등록을 새 파일/시트로 교체"
+                : "파일 업로드 또는 시트 선택"
         }
         style={{
           background: disabled || !canRegister ? "var(--c-bg-mid)" : "var(--c-navy-deep)",
@@ -1274,7 +1286,11 @@ function ItemRow({ item, value, disabled, onRegister, onDirect, onDelete }) {
       <button
         disabled={disabled}
         onClick={onDirect}
-        title={hasDirect ? "직접 입력 내용 수정" : "직접 텍스트 입력"}
+        title={
+          disabled && disabledTitle
+            ? disabledTitle
+            : hasDirect ? "직접 입력 내용 수정" : "직접 텍스트 입력"
+        }
         style={{
           background: "#fff",
           color: disabled ? "var(--c-text-muted)" : "var(--c-navy-deep)",
