@@ -11,6 +11,9 @@
 //   - 상단 액션 영역 — [📊 Rationale 보기] [🔍 QA 검토 시작]
 //   - canQAReview, hasEvaluator, evaluating props 지원
 //   - 카드별 [✏ 편집] 버튼
+// 2026-06-12 (화면 단순화 1단계):
+//   - [📋 JSON 원본] 토글 버튼 + JsonView 제거 (사용자 요청)
+//     → JSON 이 필요하면 [📥 다운로드 ▼ → JSON] 으로 받음 (메뉴는 유지)
 
 import { useState, useRef, useEffect } from "react";
 import { exportJSON, exportCSV, exportMarkdown, exportDOCX } from "../lib/exporters.js";
@@ -31,7 +34,6 @@ export default function GeneratedArtifactView({
   evaluatorModel,
   critique,        // 최근 critique (다운로드 포함용)
 }) {
-  const [view, setView] = useState("structured"); // 'structured' | 'json'
   const [downloadMenuOpen, setDownloadMenuOpen] = useState(false);
   const downloadMenuRef = useRef(null);
 
@@ -139,21 +141,6 @@ export default function GeneratedArtifactView({
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-          {/* JSON 원본 보기 토글 */}
-          <button
-            onClick={() => setView(view === "structured" ? "json" : "structured")}
-            style={{
-              background: "#fff",
-              border: "1px solid var(--c-border-strong)",
-              borderRadius: 6,
-              padding: "7px 13px",
-              fontSize: 11, fontWeight: 600,
-              cursor: "pointer",
-              color: "var(--c-text)",
-            }}>
-            {view === "structured" ? "📋 JSON 원본" : "📑 구조화 보기"}
-          </button>
-
           {/* Rationale 보기 (이전 결과 확인) */}
           {onReopenPanel && (
             <button
@@ -317,21 +304,17 @@ export default function GeneratedArtifactView({
         </div>
       )}
 
-      {/* 본문 */}
-      {view === "structured" ? (
-        <StructuredView
-          stkReqs={stkReqs}
-          useCases={useCases}
-          opContext={opContext}
-          traceSeeds={traceSeeds}
-          processColor={processColor}
-          onEditStkReq={onEditStkReq}
-          coverageMatrix={coverageMatrix}
-          warnings={warnings}
-        />
-      ) : (
-        <JsonView aiGenerated={aiGenerated} />
-      )}
+      {/* 본문 — 구조화 보기 (JSON 원본 토글은 2026-06-12 제거, 다운로드 메뉴로 대체) */}
+      <StructuredView
+        stkReqs={stkReqs}
+        useCases={useCases}
+        opContext={opContext}
+        traceSeeds={traceSeeds}
+        processColor={processColor}
+        onEditStkReq={onEditStkReq}
+        coverageMatrix={coverageMatrix}
+        warnings={warnings}
+      />
     </div>
   );
 }
@@ -475,27 +458,6 @@ function StructuredView({ stkReqs, useCases, opContext, traceSeeds, processColor
         </Section>
       )}
     </div>
-  );
-}
-
-function JsonView({ aiGenerated }) {
-  return (
-    <pre style={{
-      margin: 0,
-      padding: 16,
-      background: "var(--c-bg-soft)",
-      borderRadius: 8,
-      border: "1px solid var(--c-border)",
-      fontSize: 11,
-      fontFamily: "monospace",
-      lineHeight: 1.6,
-      maxHeight: 600,
-      overflow: "auto",
-      whiteSpace: "pre-wrap",
-      wordBreak: "break-word",
-    }}>
-      {JSON.stringify(aiGenerated, null, 2)}
-    </pre>
   );
 }
 
