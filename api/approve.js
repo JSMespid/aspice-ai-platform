@@ -5,8 +5,8 @@
 // POST /api/approve
 //   - 입력: {
 //       work_product_id,                       (필수)
-//       decision: 'approve' | 'reject' | 'request_changes',  (필수)
-//       reason,                                (선택 — 반려/수정요청 시 권장)
+//       decision: 'approve' | 'reject' | 'request_changes' | 'revoke',  (필수)
+//       reason,                                (반려/수정요청 시 권장, revoke 는 필수)
 //       decided_by,                            (선택 — 검토자 표기, 예: 'reviewer@aspice.com')
 //     }
 //   - 동작:
@@ -14,11 +14,18 @@
 //          approve         → APPROVED  (승인됨)
 //          reject          → REJECTED  (반려됨)
 //          request_changes → CHANGES_REQUESTED (수정요청)
+//          revoke          → PENDING_APPROVAL (승인대기) — APPROVED 에서만 허용
 //       2. state_transitions 기록 (trigger='reviewer_decision') — 심사 증빙
 //       3. audit_logs 기록
 //   - 출력: { success, work_product_id, from_state, to_state, decision }
 //
 // Phase 3-2 (SCR-12 후속) — 검토자 의사결정 버튼용
+// 2026-06-12 (v2 — 승인 베이스라인 잠금):
+//   - 'revoke' (승인 철회) 결정 추가. SUP.8 형상관리 원칙:
+//     승인 = 베이스라인 확정·잠금이며, 개정(재검토/시정조치)은 명시적 철회로
+//     잠금을 풀고 새 검증 사이클을 시작해야 한다. 철회는 APPROVED 상태에서만
+//     허용되고 사유가 필수이며, 모든 전이가 state_transitions 에 증빙으로 남는다.
+//     (프론트는 APPROVED 상태에서 [품질 다시 검토]/[AI 시정조치] 를 잠근다)
 
 import { sb, syncStateAndStatus } from './generate.js';
 
@@ -26,6 +33,9 @@ const DECISION_TO_STATE = {
   approve: 'APPROVED',
   reject: 'REJECTED',
   request_changes: 'CHANGES_REQUESTED',
+  // v2: 승인 철회 — 베이스라인 잠금 해제, '승인대기' 로 복귀
+  //     (QA 결과는 보존되며 재검토/시정조치/재승인이 다시 가능해짐)
+  revoke: 'PENDING_APPROVAL',
 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -46,7 +56,13 @@ export default async function handler(req, res) {
     const toState = DECISION_TO_STATE[decision];
     if (!toState) {
       return res.status(400).json({
-        error: `decision 은 'approve' | 'reject' | 'request_changes' 중 하나여야 합니다 (받음: '${decision}')`,
+        error: `decision 은 'approve' | 'reject' | 'request_changes' | 'revoke' 중 하나여야 합니다 (받음: '${decision}')`,
+      });
+    }
+    // v2: revoke 는 사유 필수 — "왜 베이스라인을 풀었는가" 가 심사 증빙의 핵심
+    if (decision === 'revoke' && !(reason && String(reason).trim())) {
+      return res.status(400).json({
+        error: '승인 철회(revoke)에는 사유(reason)가 필수입니다',
       });
     }
 
@@ -66,6 +82,14 @@ export default async function handler(req, res) {
         current_state: fromState,
       });
     }
+    // v2: revoke 는 APPROVED 베이스라인에서만 허용
+    if (decision === 'revoke' && fromState !== 'APPROVED') {
+      return res.status(409).json({
+        error: `승인 철회는 APPROVED 상태에서만 가능합니다 (현재: ${fromState})`,
+        current_state: fromState,
+      });
+    }
+
     // 멱등: 이미 같은 상태면 그대로 성공 응답
     if (fromState === toState) {
       return res.status(200).json({
