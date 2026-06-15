@@ -2274,25 +2274,44 @@ function GuideModal({ onClose }) {
   );
 }
 
+// ── 조직 목록 동적 추출 (단일 소스 진입점) ──────────────────────────────────
+// 현재는 기존 프로젝트들의 organization 값을 distinct로 추출.
+// 향후 조직 마스터 테이블 도입 시 이 함수 내부만 교체하면 됨.
+function getOrganizations(projects) {
+  return [...new Set(
+    (projects || [])
+      .map(p => (p.organization || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, "ko"));
+}
+
 // ── 프로젝트 목록 페이지 ─────────────────────────────────────────────────────
 function ProjectListPage({ projects, loading, onSelect, onRefresh }) {
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ name: "", domain: "자동차 부품", description: "" });
+  const [form, setForm] = useState({ name: "", organization: "", domain: "자동차 부품", description: "" });
+  const [orgMode, setOrgMode] = useState("select"); // "select" | "custom"
+  const orgOptions = getOrganizations(projects);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  async function handleCreate() {
+async function handleCreate() {
     if (!form.name.trim()) { setError("프로젝트명을 입력하세요."); return; }
+    if (!form.organization.trim()) { setError("담당 조직을 선택하거나 입력하세요."); return; }
     setSaving(true); setError("");
     try {
-      await apiCall("/api/projects?resource=projects", "POST", { ...form, status: "active" });
+      await apiCall("/api/projects?resource=projects", "POST", {
+        ...form,
+        organization: form.organization.trim(),
+        status: "active",
+      });
       await onRefresh();
       setCreating(false);
-      setForm({ name: "", domain: "자동차 부품", description: "" });
+      setForm({ name: "", organization: "", domain: "자동차 부품", description: "" });
+      setOrgMode("select");
     } catch (e) { setError("생성 실패: " + e.message); }
     setSaving(false);
   }
-
+  
   async function handleDelete(id, e) {
     e.stopPropagation();
     if (!confirm("프로젝트와 모든 산출물을 삭제합니다. 계속할까요?")) return;
@@ -2314,8 +2333,51 @@ function ProjectListPage({ projects, loading, onSelect, onRefresh }) {
         <Card style={{ padding: 24, marginBottom: 24, border: `1px solid ${T.accent}` }}>
           <h2 style={{ fontSize: 15, fontWeight: 600, marginBottom: 16, color: T.accent }}>새 프로젝트 생성</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
             <Input label="프로젝트명" value={form.name} onChange={v => setForm(f => ({ ...f, name: v }))} placeholder="예: 헤드램프 제어 시스템 개발" required />
+
+            {/* 담당 조직 — 동적 목록 + 직접 입력 */}
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: T.textSecondary, marginBottom: 6 }}>
+                담당 조직 <span style={{ color: T.red }}>*</span>
+              </div>
+              {orgMode === "select" && orgOptions.length > 0 ? (
+                <select
+                  value={form.organization}
+                  onChange={e => {
+                    if (e.target.value === "__custom__") {
+                      setOrgMode("custom");
+                      setForm(f => ({ ...f, organization: "" }));
+                    } else {
+                      setForm(f => ({ ...f, organization: e.target.value }));
+                    }
+                  }}
+                  style={{ width: "100%", padding: "9px 12px", background: T.surface2, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: "inherit" }}
+                >
+                  <option value="" style={{ background: T.surface }}>조직 선택…</option>
+                  {orgOptions.map(org => (
+                    <option key={org} value={org} style={{ background: T.surface }}>{org}</option>
+                  ))}
+                  <option value="__custom__" style={{ background: T.surface }}>+ 새 조직 직접 입력</option>
+                </select>
+              ) : (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Input
+                    value={form.organization}
+                    onChange={v => setForm(f => ({ ...f, organization: v }))}
+                    placeholder="예: DX본부, 새시팀, QA팀"
+                  />
+                  {orgOptions.length > 0 && (
+                    <Btn variant="ghost" onClick={() => { setOrgMode("select"); setForm(f => ({ ...f, organization: "" })); }}>
+                      목록에서 선택
+                    </Btn>
+                  )}
+                </div>
+              )}
+            </div>
+
             <Select label="도메인" value={form.domain} onChange={v => setForm(f => ({ ...f, domain: v }))} options={DOMAIN_OPTIONS} />
+            
             <Textarea label="프로젝트 설명 (선택)" value={form.description} onChange={v => setForm(f => ({ ...f, description: v }))} placeholder="프로젝트의 목적과 범위를 설명하세요." rows={3} />
             {error && <div style={{ color: T.red, fontSize: 12, padding: "8px 12px", background: T.redDim, borderRadius: 8 }}>{error}</div>}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
@@ -2362,10 +2424,17 @@ function ProjectCard({ project, onClick, onDelete }) {
         <div style={{ fontSize: 15, fontWeight: 600, color: T.text, marginBottom: 4, letterSpacing: "-0.01em" }}>{project.name}</div>
         <div style={{ fontSize: 13, color: T.textSecondary, lineHeight: 1.5 }}>{project.description}</div>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12 }}>
-        <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", background: T.accentDim, color: T.accent, borderRadius: 5, border: `1px solid ${T.accent}20` }}>{project.domain}</span>
-        <span style={{ fontSize: 11, color: T.muted }}>{project.created_at ? new Date(project.created_at).toLocaleDateString("ko-KR") : ""}</span>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 12, gap: 8 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", minWidth: 0 }}>
+          <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", background: T.accentDim, color: T.accent, borderRadius: 5, border: `1px solid ${T.accent}20` }}>{project.domain}</span>
+          <span style={{ fontSize: 11, fontWeight: 600, padding: "3px 8px", background: T.surface2, color: T.textSecondary, borderRadius: 5, border: `1px solid ${T.border}` }}>
+            조직: {project.organization || "미지정"}
+          </span>
+        </div>
+        <span style={{ fontSize: 11, color: T.muted, flexShrink: 0 }}>{project.created_at ? new Date(project.created_at).toLocaleDateString("ko-KR") : ""}</span>
       </div>
+            
       <div style={{ marginTop: 10, paddingTop: 10, borderTop: `1px solid ${T.border}` }}>
         <span style={{ fontSize: 12, color: hov ? T.accent : T.muted, fontWeight: 500, transition: "color 0.15s" }}>파이프라인 열기 →</span>
       </div>
