@@ -47,7 +47,18 @@ function computeProgressMap(workProducts) {
   return map;
 }
 
-const ORGS = ["전체", "새시팀", "샤시팀", "QA팀", "전장팀", "구동팀"];
+// 조직 목록 동적 추출 (단일 소스 진입점)
+// 현재는 기존 프로젝트들의 organization 값을 distinct로 추출.
+// 향후 조직 마스터 테이블 도입 시 이 함수 내부만 교체하면 됨.
+function getOrgOptions(projects) {
+  const orgs = [...new Set(
+    (projects || [])
+      .map(p => (p.organization || p.org || "").trim())
+      .filter(Boolean)
+  )].sort((a, b) => a.localeCompare(b, "ko"));
+  return ["전체", ...orgs];
+}
+
 const SORT_OPTIONS = [
   { value: "newest", label: "최신순" },
   { value: "oldest", label: "오래된순" },
@@ -115,8 +126,12 @@ export default function ProjectListScreen() {
     setLoading(false);
   }
 
+  // 조직 필터 옵션 — 실제 프로젝트 데이터에서 동적 생성
+  const orgOptions = useMemo(() => getOrgOptions(projects), [projects]);
+
   // 적용된 필터를 계산
-  const filtered = useMemo(() => {
+  const filtered = useMemo(() => {    
+    
     let list = [...projects];
 
     // 프로젝트명 검색
@@ -255,7 +270,7 @@ export default function ProjectListScreen() {
             paddingTop: 12, borderTop: "1px solid #F3F4F6",
           }}>
             <span style={{ fontSize: 12, fontWeight: 600, color: "#1A1A2E" }}>필터:</span>
-            <FilterSelect label="조직" value={filterOrg} onChange={setFilterOrg} options={ORGS} />
+            <FilterSelect label="조직" value={filterOrg} onChange={setFilterOrg} options={orgOptions} />
             <FilterSelect label="생성일" value={filterDate} onChange={setFilterDate} options={DATE_FILTERS.map(d => d.label)} 
                           rawOptions={DATE_FILTERS} />
             <FilterSelect label="정렬" value={sortBy} onChange={setSortBy} options={SORT_OPTIONS.map(s => s.label)}
