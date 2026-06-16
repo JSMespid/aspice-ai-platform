@@ -1534,11 +1534,7 @@ export default async function handler(req, res) {
         sheet_count: useSheetSplit ? sheetBasedInputs.length : 0,
       },
     };        
-        
-        
-        
-      },
-    };
+
     if (streaming) {
       // SSE: complete 이벤트로 전체 결과 전송 후 종료
       sseSend(res, 'complete', finalPayload);
