@@ -368,9 +368,16 @@ export default async function handler(req, res) {
     const totalInputTokens = successChildren.reduce((s, c) => s + (c.input_tokens || 0), 0);
     const totalOutputTokens = successChildren.reduce((s, c) => s + (c.output_tokens || 0), 0);
     const totalCostUsd = successChildren.reduce((s, c) => s + (parseFloat(c.cost_usd) || 0), 0);
-    // latency 는 batch 별 wall-clock (실제 사용자 체감 시간은 frontend 가 측정)
-    const maxChildLatencyMs = Math.max(0, ...successChildren.map(c => c.latency_ms || 0));
 
+    // 전체 소요 시간 (벽시계) = init 의 started_at ~ merge 완료 시점.
+    // 배치 순차 실행 + 재시도 + child 대기 루프 + 가드레일 + merge 까지 모두 포함하여
+    // 사용자 체감 시간과 일치. (기존 maxChildLatency 는 가장 긴 배치 1개만 재서 과소평가했음)
+    const startedAtMs = master.job_state?.started_at
+      ? new Date(master.job_state.started_at).getTime()
+      : null;
+    const totalElapsedMs = (startedAtMs && Number.isFinite(startedAtMs))
+      ? Math.max(0, Date.now() - startedAtMs)
+      : Math.max(0, ...successChildren.map(c => c.latency_ms || 0));  // fallback: 옛 방식
     // raw_output 누적 (감사용)
     const rawOutputLog = successChildren
       .map(c => `=== Batch ${c.agent_step} (sheets: ${(c.sheet_indices || []).join(',')}) ===\n${c.raw_output || ''}`)
@@ -396,7 +403,7 @@ export default async function handler(req, res) {
       input_tokens: totalInputTokens,
       output_tokens: totalOutputTokens,
       cost_usd: totalCostUsd,
-      latency_ms: maxChildLatencyMs,
+      latency_ms: totalElapsedMs,
       guardrail_result: guardrailResult,
       guardrail_passed: guardrailPassed,
       status: finalStatus,
