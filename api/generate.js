@@ -922,12 +922,17 @@ function createEmitter({ streaming, res }) {
 // ──────────────────────────────────────────────────
 // Main Handler
 // ──────────────────────────────────────────────────
+
 export default async function handler(req, res) {
+  // 전체 소요 시간 측정 시작 — 배치/재시도/가드레일/저장 등 모든 단계 포함한 벽시계 시간
+  const overallStartMs = Date.now();
+
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+
   // Phase 2-2d: Streaming 모드 판정 + 즉시 SSE 헤더 전송 (Vercel proxy 25초 룰 만족)
   const streaming = wantsStreaming(req);
   if (streaming) {
@@ -1414,6 +1419,7 @@ export default async function handler(req, res) {
     } catch (e) {
       console.error('[generate] RAG 인용 검증 오류(무시):', e.message);
     }
+
     // Phase 2-2d: Prompt Caching 반영 비용
     const cost = estimateCost(
       totalInputTokens,
@@ -1421,6 +1427,11 @@ export default async function handler(req, res) {
       totalCacheCreationTokens,
       totalCacheReadTokens
     );
+
+    // 전체 소요 시간 (벽시계) — 배치 순차 실행 + 재시도 + 가드레일 + RAG + 저장 모두 포함.
+    // 기존 totalLatencyMs(가장 긴 시트 1개)는 실제 체감 시간을 크게 과소평가했음.
+    const totalElapsedMs = Date.now() - overallStartMs;
+    
     // Phase 2-2d: 캐시 효과 로깅
     if (totalCacheReadTokens > 0 || totalCacheCreationTokens > 0) {
       const cachedTokens = totalCacheReadTokens + totalCacheCreationTokens;
@@ -1458,8 +1469,8 @@ export default async function handler(req, res) {
         input_tokens: totalInputTokens,
         output_tokens: totalOutputTokens,
         cost_usd: cost,
-        latency_ms: totalLatencyMs,
-        guardrail_result: guardrailResult,
+        latency_ms: totalElapsedMs,
+        guardrail_result: guardrailResult,        
         guardrail_passed: passed,
         status: passed ? 'success' : 'blocked_by_guardrail',
       });
@@ -1494,7 +1505,7 @@ export default async function handler(req, res) {
         ai_generation_id: aiGenId,
         passed,
         cost_usd: cost,
-        latency_ms: totalLatencyMs,
+        latency_ms: totalElapsedMs,
         sheet_split_mode: useSheetSplit,
         sheet_count: useSheetSplit ? sheetBasedInputs.length : 0,
       },
@@ -1518,9 +1529,14 @@ export default async function handler(req, res) {
         cache_creation_tokens: totalCacheCreationTokens,
         cache_read_tokens: totalCacheReadTokens,
         cost_usd: cost,
-        latency_ms: totalLatencyMs,
+        latency_ms: totalElapsedMs,
         sheet_split_mode: useSheetSplit,
         sheet_count: useSheetSplit ? sheetBasedInputs.length : 0,
+      },
+    };        
+        
+        
+        
       },
     };
     if (streaming) {
