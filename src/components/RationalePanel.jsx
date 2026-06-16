@@ -592,14 +592,13 @@ function MetaSection({ meta, skillsUsed, evaluatorMeta }) {
             (Gen ${generatorCost.toFixed(4)} + QA ${evaluatorCost.toFixed(4)})
           </span>}
         </span>
-
-        <span style={{ color: 'var(--c-text-muted)' }}>지연 (Gen)</span>
-        <span style={{ fontFamily: 'monospace' }}>{(meta.latency_ms || 0).toLocaleString()}ms</span>
+        <span style={{ color: 'var(--c-text-muted)' }}>소요 시간 (생성)</span>
+        <span style={{ fontFamily: 'monospace' }}>{formatDurationKo(meta.latency_ms)}</span>
 
         {evaluatorMeta && (
           <>
-            <span style={{ color: 'var(--c-text-muted)' }}>지연 (QA)</span>
-            <span style={{ fontFamily: 'monospace' }}>{(evaluatorMeta.latency_ms || 0).toLocaleString()}ms</span>
+            <span style={{ color: 'var(--c-text-muted)' }}>소요 시간 (검토)</span>
+            <span style={{ fontFamily: 'monospace' }}>{formatDurationKo(evaluatorMeta.latency_ms)}</span>
           </>
         )}
       </div>
@@ -1209,8 +1208,21 @@ function formatElapsed(seconds) {
   return `${m}m ${s}s`;
 }
 
+// 밀리초 → "10분 30초" (한국어). 1분 미만은 "45초", 0/비정상은 "—"
+function formatDurationKo(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return '—';
+  const totalSec = Math.round(ms / 1000);
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m === 0) return `${s}초`;
+  if (s === 0) return `${m}분`;
+  return `${m}분 ${s}초`;
+}
+
 function formatLatency(ms) {
   if (!Number.isFinite(ms) || ms <= 0) return '—';
+
+  
   if (ms < 1000) return `${ms}ms`;
   const sec = Math.round(ms / 100) / 10;
   if (sec < 60) return `${sec}s`;
